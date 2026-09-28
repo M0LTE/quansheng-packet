@@ -30,6 +30,7 @@ Flash for the firmware is 61440 bytes (60 KiB). All sizes are gcc 10.3.1 (Docker
 | Bench deviation defaults, register override table (`b2e8a25`) | 22972 | 38468 |
 | 1 ms PTT sampling, timing settings, key-up before redraw | 23356 | 38084 |
 | Review fixes: REG_30 off at key-down, release debounce | 23520 | 37920 |
+| Bench defaults: deviation 0x956/0x856, PA delays 1/2 ms | 23520 | 37920 |
 
 ## What was removed
 
@@ -71,8 +72,8 @@ Stored in a 16-byte block at EEPROM `0x1D00` (the old DTMF contacts area). The b
 | 0x1D01 | squelch | 0 (open) to 9 | 1 |
 | 0x1D02 | TX timeout | 0 to 6 = 5, 10, 15, 20, 30, 60, 120 s | 4 (30 s) |
 | 0x1D03 | mic gain, REG_7D<4:0> | 0 to 31 | 31 |
-| 0x1D04 | wide deviation, REG_40<11:0>, u16 LE | 0 to 0xA7F | 0x862 (3.13 kHz at -6 dBFS) |
-| 0x1D06 | narrow deviation, REG_40<11:0>, u16 LE | 0 to 0xA7F | 0x762 (half the wide deviation) |
+| 0x1D04 | wide deviation, REG_40<11:0>, u16 LE | 0 to 0xA7F | 0x956 (3 kHz at -6 dBFS with the bench AIOC EQ) |
+| 0x1D06 | narrow deviation, REG_40<11:0>, u16 LE | 0 to 0xA7F | 0x856 (half the wide deviation) |
 | 0x1D08 | RX AF gain 2, REG_48<9:4>, 0.5 dB steps | 0 to 63 | factory calibration (0x1F8E) |
 | 0x1D09 | RX DAC gain, REG_48<3:0>, about 2 dB steps | 0 to 15 | 15 |
 | 0x1D0A | backlight | 0 (off) to 7 (on) | 3 (20 s) |
@@ -80,6 +81,8 @@ Stored in a 16-byte block at EEPROM `0x1D00` (the old DTMF contacts area). The b
 | 0x1D0C | key lock | 0, 1 | 0 |
 
 **Deviation is logarithmic.** Measured on the bench K5 (2026-09-28): +0x100 in REG_40<11:0> doubles the deviation, about 0.0235 dB per step. 0x862 gives 3.13 kHz for a 999 Hz tone at -6 dBFS from the AIOC at mic level, linear up to 0 dBFS; 0x800 gives 3.67 kHz at -1.94 dBFS. From 0xB00 up the chip wraps to near zero deviation, so both settings (and any REG_40 override) are clamped to 0xA7F. Narrow is 0x100 below wide, which halves the deviation. A value above 0xA7F in EEPROM means "use the default".
+
+The defaults (0x956 wide, 0x856 narrow) are matched to the bench AIOC, which carries a stored TX EQ that cuts 5.74 dB at 1 kHz. **With a stock AIOC, 0x862 wide (0x762 narrow) gives 3 kHz at -6 dBFS.** Deviation is a setting (menu DevW and DevN, or EEPROM 0x1D04 and 0x1D06): set it to suit the interface.
 
 ### Register override table
 
@@ -111,17 +114,19 @@ Timing settings, 8 bytes at `0x1D50` (one UART write; not in the menu; used only
 |---|---|---|---|
 | 0x1D50 | PTT press debounce, ms | 1 to 40 | 5 |
 | 0x1D51 | PTT release debounce, ms | 2 to 40 | 5 |
-| 0x1D52 | delay after PA enable, before the PA bias, ms | 1 to 20 | 5 (upstream) |
-| 0x1D53 | delay after the PA bias, ms | 0 to 20 | 10 (upstream) |
+| 0x1D52 | delay after PA enable, before the PA bias, ms | 1 to 20 | 1 (upstream 5) |
+| 0x1D53 | delay after the PA bias, ms | 0 to 20 | 2 (upstream 10) |
 | 0x1D54 | reserved, 0xFF | | |
 
 **Why a 5 ms press debounce is still safe with UART on the same contact.** While not keyed, a tick only counts towards a press if the line reads low continuously for 280 us (`PTT_WINDOW_US`), read in a tight loop well under 1 us per read. At 38400 baud one character is 260 us and always ends in a high stop bit of 26 us, and the line idles high between characters, so any UART traffic, even an unbroken run of 0x00 bytes (low for 9 of every 10 bits), shows a high level inside every 280 us window and never counts. A real press (the AIOC holding the line low) passes. The busy read runs only while the radio is not keyed and the line reads low, so it costs at most 0.28 ms per ms, and only during a candidate press or during serial traffic. On top of that the payload of obfuscated frames is XORed with a 16-byte key (so zero runs become mixed bytes), frames start with `AB CD`, and the post-frame PTT lock (1 to 1.5 s after every valid frame) still holds PTT off and forces release. The host tests run the real `PTT_Tick` against a simulated line and SysTick and sweep a 2000-byte stream of zero bytes and of random bytes over every start phase: nothing keys even with a 1 ms debounce; shortening the window to 200 us makes them fail. Limit: this relies on the host sending at 38400 baud. A host at a much lower baud rate (a character longer than 280 us) is only covered by the post-frame lock.
 
-**Key-up path**, with the defaults: 5 ms debounce plus up to 1.3 ms of tick phase and window, then the main loop picks the change up (usually well under 1 ms, longer if it is in the middle of a screen redraw or a UART command), then about 30 register operations (roughly 3 ms of bit-banged SPI: filters, frequency, TX set-up, TX enable), PA enable, 5 ms, PA bias (RF appears here), 10 ms (ready for modulation). The screen is no longer redrawn before key-up; the 10 ms slice redraws it afterwards. Expected: RF about 14 ms and ready for modulation about 24 ms after PTT goes low; with the PA delays at 1 (the minimum for the first) and 2 ms, about 10 and 12 ms. Upstream measured 61 to 66 ms to RF.
+**Key-up path**, with the defaults: 5 ms debounce plus up to 1.3 ms of tick phase and window, then the main loop picks the change up (usually well under 1 ms, longer if it is in the middle of a screen redraw or a UART command), then about 30 register operations (roughly 3 ms of bit-banged SPI: filters, frequency, TX set-up, TX enable), PA enable, 5 ms, PA bias (RF appears here), 10 ms (ready for modulation). The screen is no longer redrawn before key-up; the 10 ms slice redraws it afterwards. Expected: RF about 10 ms and ready for modulation about 12 ms after PTT goes low with the default PA delays of 1 and 2 ms (about 14 and 24 ms with the upstream 5 and 10 ms). Upstream measured 61 to 66 ms to RF.
 
 **Release debounce.** While keyed, a tick counts towards release when the line reads high and stays high for 20 us, or when a check finds the line is no longer low for a whole 280 us window (the host has started sending right after the release). A high spike followed by a whole low window is a held press and restarts the count, so a single-sample spike cannot drop TX. The window check runs on every 4th tick while keyed (about 7% CPU during transmit) and on every tick once a release has started; host tests show UART traffic, even zero bytes, starting right at the release does not delay the unkey. The trade-off in the release time: shorter releases faster but a longer real glitch on the PTT line (a bouncing contact, a loose cable) ends the transmission sooner. The default is 5 ms and the floor 2 ms.
 
 **Key-down path**: 5 ms release debounce plus up to 1 ms, main loop latency, then the PA bias goes to zero, the PA enable and red LED go off, and REG_30 is cleared, which takes the BK4819 out of TX at once (it used to stay in TX until the receive set-up reached the receiver turn-on, several ms later). Then the full receive set-up. Expected: RF gone about 6 to 7 ms after PTT is released, about 3 to 4 ms with the release debounce at 2 (upstream measured 33 to 37 ms). PTT is not acted on at all in the critical-battery reduced-service state, as upstream. The PA bias still steps straight to zero, as upstream; if the RSP1 shows a click, the PA delay settings do not help there and a ramp would be a firmware change.
+
+**Measured on the bench K5 with `a97accc`** (AIOC HID PTT, RSP1; times include an SDR delay of up to 14 ms): PTT to RF about 33 ms, unkey to RF gone about 14 ms (upstream: 61 to 66 ms and 33 to 37 ms). afsk1200 and qpsk3600 decoded 100% down to 0 ms TXDELAY. Adjacent-channel power at key-up was -35 to -40 dB re the channel with PA delays of 1 and 2 ms, no worse than with 5 and 10 ms (measurement floor about -43 dB), so 1 and 2 ms are now the defaults.
 
 **Also moved out of the key-down path:** the LCD re-initialisation after transmit (`ST7565_FixInterfGlitch`) now runs just before the next redraw in the 10 ms slice.
 
@@ -154,7 +159,7 @@ Timing settings, 8 bytes at `0x1D50` (one UART write; not in the menu; used only
 ## Fixes
 
 - **AGC.** Upstream DIG sets REG_7E bit 15 (AGC fix) at every key-up and never cleared it, so after the first transmission receive ran at a fixed AGC index (the maximum). It is now cleared on every return to receive. Receive levels measured on upstream DIG after any transmission were taken with the AGC frozen, so expect them to change.
-- **Deviation.** Upstream DIG wrote REG_40 = 0x383 wide and 0x4D6 narrow, so wide was 2.8 dB below narrow. Both are now settings, clamped below the wrap at 0xB00, with bench-measured defaults: 0x862 wide (3.13 kHz at -6 dBFS) and 0x762 narrow (half), and mic gain 31. The top 3 bits are read from the chip after its reset, not before.
+- **Deviation.** Upstream DIG wrote REG_40 = 0x383 wide and 0x4D6 narrow, so wide was 2.8 dB below narrow. Both are now settings, clamped below the wrap at 0xB00, with bench-measured defaults: 0x956 wide and 0x856 narrow (half) for the bench AIOC with its TX EQ, 0x862 and 0x762 for a stock AIOC, and mic gain 31. The top 3 bits are read from the chip after its reset, not before.
 - **Calibration.** Upstream wrote a build-options byte to 0x1FF0 on every boot and could save battery calibration from the menu. This firmware never writes 0x1E00 and up (checked in the EEPROM driver and in the UART handler).
 - **TX timeout** returns to receive at once, and the next transmission needs PTT released first. It has 0.5 s resolution.
 - **Nothing is saved during a transmission.** Saves postponed while UP/DOWN was held, menu changes and the receiver set-up that follows them wait until TX ends; EXIT held does not turn the monitor off mid-transmission.
@@ -170,4 +175,4 @@ Timing settings, 8 bytes at `0x1D50` (one UART write; not in the menu; used only
 
 ## Left for measurement to decide
 
-Whether narrow at 0x762 really gives half the wide deviation with the chip in its 12.5 kHz mode, the TX low-frequency lift (+6.7 dB at 50 to 63 Hz, +2 dB at 315 Hz, -1.1 dB at 3.15 kHz, -5.5 dB at 6 kHz re 1 kHz, measured), the RX gain defaults (target: 3 kHz deviation near -10 dBFS at the AIOC), whether keeping REG_7E bit 15 during TX matters at all, REG_43 receive bandwidths, REG_47 output select (FM against BASEBAND1), and the rest of the turnaround path listed under "Key-up and key-down".
+Whether narrow (0x100 below wide) really gives half the wide deviation with the chip in its 12.5 kHz mode, the TX low-frequency lift (+6.7 dB at 50 to 63 Hz, +2 dB at 315 Hz, -1.1 dB at 3.15 kHz, -5.5 dB at 6 kHz re 1 kHz, measured), the RX gain defaults (target: 3 kHz deviation near -10 dBFS at the AIOC), whether keeping REG_7E bit 15 during TX matters at all, REG_43 receive bandwidths, REG_47 output select (FM against BASEBAND1), and the rest of the turnaround path listed under "Key-up and key-down".

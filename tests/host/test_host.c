@@ -148,8 +148,8 @@ static void test_settings_defaults_and_roundtrip(void)
 	CHECK(gEeprom.SQUELCH_LEVEL == 1);
 	CHECK(gTxTimeoutSeconds[gEeprom.TX_TIMEOUT] == 30);
 	CHECK(gEeprom.MIC_GAIN == PKT_MIC_GAIN_DEFAULT);
-	CHECK(gEeprom.DEVIATION_WIDE == 0x862);
-	CHECK(gEeprom.DEVIATION_NARROW == 0x762);
+	CHECK(gEeprom.DEVIATION_WIDE == 0x956);
+	CHECK(gEeprom.DEVIATION_NARROW == 0x856);
 	CHECK(gEeprom.MIC_GAIN == 31);
 	CHECK(gEeprom.RX_GAIN == 50);
 	CHECK(gEeprom.RX_DAC_GAIN == PKT_RX_DAC_GAIN_DEFAULT);
@@ -199,7 +199,7 @@ static void test_timing_block(void)
 	memset(eeprom, 0xFF, sizeof(eeprom));
 	SETTINGS_InitEEPROM();
 	CHECK(gEeprom.PTT_PRESS_MS == 5 && gEeprom.PTT_RELEASE_MS == 5);
-	CHECK(gEeprom.PA_ENABLE_DELAY_MS == 5 && gEeprom.PA_BIAS_DELAY_MS == 10);
+	CHECK(gEeprom.PA_ENABLE_DELAY_MS == 1 && gEeprom.PA_BIAS_DELAY_MS == 2);
 
 	// values without a valid settings block are ignored
 	const uint8_t t[8] = {2, 3, 1, 0, 0xFF, 0xFF, 0xFF, 0xFF};
@@ -217,7 +217,7 @@ static void test_timing_block(void)
 	memcpy(&eeprom[SETTINGS_TIMING], bad, 8);
 	SETTINGS_InitEEPROM();
 	CHECK(gEeprom.PTT_PRESS_MS == 5 && gEeprom.PTT_RELEASE_MS == 5);
-	CHECK(gEeprom.PA_ENABLE_DELAY_MS == 5 && gEeprom.PA_BIAS_DELAY_MS == 10);
+	CHECK(gEeprom.PA_ENABLE_DELAY_MS == 1 && gEeprom.PA_BIAS_DELAY_MS == 2);
 	const uint8_t hi[8] = {40, 40, 20, 20, 0xFF, 0xFF, 0xFF, 0xFF};
 	memcpy(&eeprom[SETTINGS_TIMING], hi, 8);
 	SETTINGS_InitEEPROM();
