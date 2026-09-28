@@ -62,16 +62,18 @@
 // deviation, so the settings are clamped to PKT_DEVIATION_MAX.
 // Narrow is half the wide deviation: 0x100 below wide.
 //
-// Defaults: 0x956 wide, 0x856 narrow, matched to the bench AIOC, which
-// carries a stored TX EQ that cuts 5.74 dB at 1 kHz (0x956 = 0x862 plus
-// 5.74 dB at 0.0235 dB per step). With a stock AIOC 0x862 gives 3 kHz at
-// -6 dBFS; the deviation is a setting, so change it to suit the interface.
-// (Upstream DIG used 0x383 wide and 0x4D6 narrow.)
+// Defaults: 0x856 wide, 0x756 narrow, for the TNC driving the AIOC near
+// full scale (0 dBFS). The K5 adds analogue hiss to its FM (about 900 Hz rms
+// residual deviation in 3 to 8 kHz at 0x956) that scales with REG_40, so
+// run the audio hot and REG_40 low, not the other way round. On the bench
+// AIOC, which carries a stored TX EQ cutting 5.74 dB at 1 kHz, 0x856 gives
+// about 3 kHz at 0 dBFS. With a stock AIOC the equivalents are 0x762 wide
+// and 0x662 narrow. The deviation is a setting: change it to suit.
 #define PKT_REG_40_ENABLE        0x1000u
 #define PKT_REG_40_DEV_MASK      0x0FFFu
 #define PKT_DEVIATION_MAX        0x0A7Fu
-#define PKT_DEVIATION_WIDE_DEFAULT    0x0956u
-#define PKT_DEVIATION_NARROW_DEFAULT  0x0856u
+#define PKT_DEVIATION_WIDE_DEFAULT    0x0856u
+#define PKT_DEVIATION_NARROW_DEFAULT  0x0756u
 
 // REG_48: RX audio. <15:12> = 11 (upstream, undocumented), <11:10> AF RX
 // gain 1 = 0 dB, <9:4> AF RX gain 2 (0 to 63, 0.5 dB steps), <3:0> AF DAC

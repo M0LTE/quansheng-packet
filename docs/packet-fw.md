@@ -31,6 +31,7 @@ Flash for the firmware is 61440 bytes (60 KiB). All sizes are gcc 10.3.1 (Docker
 | 1 ms PTT sampling, timing settings, key-up before redraw | 23356 | 38084 |
 | Review fixes: REG_30 off at key-down, release debounce | 23520 | 37920 |
 | Bench defaults: deviation 0x956/0x856, PA delays 1/2 ms | 23520 | 37920 |
+| Deviation defaults 0x856/0x756 (TNC at 0 dBFS) | 23520 | 37920 |
 
 ## What was removed
 
@@ -72,8 +73,8 @@ Stored in a 16-byte block at EEPROM `0x1D00` (the old DTMF contacts area). The b
 | 0x1D01 | squelch | 0 (open) to 9 | 1 |
 | 0x1D02 | TX timeout | 0 to 6 = 5, 10, 15, 20, 30, 60, 120 s | 4 (30 s) |
 | 0x1D03 | mic gain, REG_7D<4:0> | 0 to 31 | 31 |
-| 0x1D04 | wide deviation, REG_40<11:0>, u16 LE | 0 to 0xA7F | 0x956 (3 kHz at -6 dBFS with the bench AIOC EQ) |
-| 0x1D06 | narrow deviation, REG_40<11:0>, u16 LE | 0 to 0xA7F | 0x856 (half the wide deviation) |
+| 0x1D04 | wide deviation, REG_40<11:0>, u16 LE | 0 to 0xA7F | 0x856 (about 3 kHz at 0 dBFS with the bench AIOC EQ) |
+| 0x1D06 | narrow deviation, REG_40<11:0>, u16 LE | 0 to 0xA7F | 0x756 (half the wide deviation) |
 | 0x1D08 | RX AF gain 2, REG_48<9:4>, 0.5 dB steps | 0 to 63 | factory calibration (0x1F8E) |
 | 0x1D09 | RX DAC gain, REG_48<3:0>, about 2 dB steps | 0 to 15 | 15 |
 | 0x1D0A | backlight | 0 (off) to 7 (on) | 3 (20 s) |
@@ -82,7 +83,9 @@ Stored in a 16-byte block at EEPROM `0x1D00` (the old DTMF contacts area). The b
 
 **Deviation is logarithmic.** Measured on the bench K5 (2026-09-28): +0x100 in REG_40<11:0> doubles the deviation, about 0.0235 dB per step. 0x862 gives 3.13 kHz for a 999 Hz tone at -6 dBFS from the AIOC at mic level, linear up to 0 dBFS; 0x800 gives 3.67 kHz at -1.94 dBFS. From 0xB00 up the chip wraps to near zero deviation, so both settings (and any REG_40 override) are clamped to 0xA7F. Narrow is 0x100 below wide, which halves the deviation. A value above 0xA7F in EEPROM means "use the default".
 
-The defaults (0x956 wide, 0x856 narrow) are matched to the bench AIOC, which carries a stored TX EQ that cuts 5.74 dB at 1 kHz. **With a stock AIOC, 0x862 wide (0x762 narrow) gives 3 kHz at -6 dBFS.** Deviation is a setting (menu DevW and DevN, or EEPROM 0x1D04 and 0x1D06): set it to suit the interface.
+**Operating rule: drive the audio near full scale and keep REG_40 low.** The K5 adds analogue hiss to its transmitted FM: about 900 Hz rms residual deviation in 3 to 8 kHz at 0x956, and it scales exactly with REG_40 (it is added before the deviation gain). So set the TNC to drive the AIOC near 0 dBFS and choose the deviation to give about 3 kHz there, rather than a quiet TNC and a high REG_40.
+
+The defaults (0x856 wide, 0x756 narrow) do that for the bench AIOC, which carries a stored TX EQ that cuts 5.74 dB at 1 kHz: 0x856 gives about 3 kHz at 0 dBFS. On the bench, fsk9600 decoded 15 of 15 at 0 dBFS with 0x856 (it failed at -6 dBFS with 0x956), and afsk1200 and qpsk3600 decoded 100% at 0 and -3 dBFS. **With a stock AIOC (no EQ) the equivalents are 0x762 wide and 0x662 narrow.** Deviation is a setting (menu DevW and DevN, or EEPROM 0x1D04 and 0x1D06): set it to suit the interface.
 
 ### Register override table
 
@@ -159,7 +162,7 @@ Timing settings, 8 bytes at `0x1D50` (one UART write; not in the menu; used only
 ## Fixes
 
 - **AGC.** Upstream DIG sets REG_7E bit 15 (AGC fix) at every key-up and never cleared it, so after the first transmission receive ran at a fixed AGC index (the maximum). It is now cleared on every return to receive. Receive levels measured on upstream DIG after any transmission were taken with the AGC frozen, so expect them to change.
-- **Deviation.** Upstream DIG wrote REG_40 = 0x383 wide and 0x4D6 narrow, so wide was 2.8 dB below narrow. Both are now settings, clamped below the wrap at 0xB00, with bench-measured defaults: 0x956 wide and 0x856 narrow (half) for the bench AIOC with its TX EQ, 0x862 and 0x762 for a stock AIOC, and mic gain 31. The top 3 bits are read from the chip after its reset, not before.
+- **Deviation.** Upstream DIG wrote REG_40 = 0x383 wide and 0x4D6 narrow, so wide was 2.8 dB below narrow. Both are now settings, clamped below the wrap at 0xB00, with bench-measured defaults for a TNC at 0 dBFS: 0x856 wide and 0x756 narrow (half) for the bench AIOC with its TX EQ, 0x762 and 0x662 for a stock AIOC, and mic gain 31. The top 3 bits are read from the chip after its reset, not before.
 - **Calibration.** Upstream wrote a build-options byte to 0x1FF0 on every boot and could save battery calibration from the menu. This firmware never writes 0x1E00 and up (checked in the EEPROM driver and in the UART handler).
 - **TX timeout** returns to receive at once, and the next transmission needs PTT released first. It has 0.5 s resolution.
 - **Nothing is saved during a transmission.** Saves postponed while UP/DOWN was held, menu changes and the receiver set-up that follows them wait until TX ends; EXIT held does not turn the monitor off mid-transmission.
