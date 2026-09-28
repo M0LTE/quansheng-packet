@@ -13,9 +13,11 @@
  *     limitations under the License.
  */
 
-// Host tests of the PTT debouncer (ptt.c, built with PTT_HOST_TEST): press
-// and release timing, glitch rejection, the serial lock, and that UART
-// traffic at 38400 baud, even all zero bytes, never looks like a press.
+// Host tests of ptt.c, built with PTT_HOST_TEST: the real PTT_Tick runs
+// against a simulated PTT/UART line and a simulated 48 MHz SysTick.
+// Covers press and release timing, glitch and spike rejection, the serial
+// lock, UART streams (zero and random bytes, every start phase) never
+// keying, and UART traffic right after a release.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,144 +32,172 @@ static int failures;
 
 #define BIT_US (1e6 / 38400.0)
 
-static double   t_us;          // simulated time
-static double   window_start;
-static int      mode;          // 0 = held low, 1 = high, 2 = UART stream
+static double   t_us;           // simulated time
+static int      mode;           // 0 = held low, 1 = high, 2 = UART stream, 3 = low with a high spike at each tick
+static double   spike_start;
 static uint8_t  stream[4096];
 static unsigned stream_len;
 static double   stream_start;
+static bool     lock;
+static uint8_t  press_ms = PTT_PRESS_DEFAULT_MS, release_ms = PTT_RELEASE_DEFAULT_MS;
 
 static bool level_low_at(double t)
 {
-	if (mode == 0) return true;
-	if (mode == 1) return false;
+	switch (mode) {
+		case 0: return true;
+		case 1: return false;
+		case 3: return !(t >= spike_start && t < spike_start + 5.0);   // 5 us high spike
+		default: break;
+	}
 	const double rel = t - stream_start;
 	if (rel < 0) return false;
 	const unsigned idx = (unsigned)(rel / (10 * BIT_US));
-	if (idx >= stream_len) return false;                  // idle high after the frame
+	if (idx >= stream_len) return false;                  // idle high after the stream
 	const unsigned bit = (unsigned)((rel - idx * 10 * BIT_US) / BIT_US);
 	if (bit == 0) return true;                             // start bit
 	if (bit == 9) return false;                            // stop bit
 	return ((stream[idx] >> (bit - 1)) & 1) == 0;          // data, LSB first
 }
 
-// each read of the pin takes a little time, as on the MCU
-static bool lineLow(void) { const bool l = level_low_at(t_us); t_us += 0.25; return l; }
-static uint32_t elapsedUs(void) { return (uint32_t)(t_us - window_start); }
+// hardware hooks for ptt.c: each pin read takes 0.25 us
+bool     PTT_HwLineLow(void)    { const bool l = level_low_at(t_us); t_us += 0.25; return l; }
+uint32_t PTT_HwTicks(void)      { return 47999u - (uint32_t)((uint64_t)(t_us * 48.0) % 48000u); }
+uint32_t PTT_HwPeriod(void)     { return 48000u; }
+bool     PTT_HwSerialLock(void) { return lock; }
+uint8_t  PTT_HwPressMs(void)    { return press_ms; }
+uint8_t  PTT_HwReleaseMs(void)  { return release_ms; }
 
-// one 1 ms SysTick tick, as PTT_Tick does it
-static bool tick(PttDebounce_t *d, bool lock, uint8_t pressMs, uint8_t releaseMs)
+// one SysTick interrupt; ticks are 1 ms apart
+static bool tick(void)
 {
-	const double tick_start = t_us;
-	const bool low = lineLow();
-	bool whole = false;
-	if (low && !d->pressed && !lock) {
-		window_start = t_us;
-		whole = PTT_LowForWindow(lineLow, elapsedUs);
-	}
-	const bool p = PTT_Debounce(d, whole, low, lock, pressMs, releaseMs);
-	t_us = tick_start + 1000.0;
-	return p;
+	const double start = t_us;
+	spike_start = start;
+	PTT_Tick();
+	t_us = start + 1000.0;
+	return PTT_IsPressed();
 }
+
+static void reset(void) { PTT_HostReset(); t_us = 0; lock = false; }
 
 // ------------------------------------------------------------------ tests
 
 static void test_press_release_timing(void)
 {
-	PttDebounce_t d = {0};
-	t_us = 0; mode = 1;
-	for (int i = 0; i < 10; i++) CHECK(!tick(&d, false, 5, 3));
+	reset(); mode = 1;
+	for (int i = 0; i < 10; i++) CHECK(!tick());
 
 	mode = 0;
-	for (int i = 1; i <= 4; i++) CHECK(!tick(&d, false, 5, 3));
-	CHECK(tick(&d, false, 5, 3));                           // 5th tick low: pressed
+	for (unsigned i = 1; i < PTT_PRESS_DEFAULT_MS; i++) CHECK(!tick());
+	CHECK(tick());                                          // 5th tick low: pressed
 
 	mode = 1;
-	CHECK(tick(&d, false, 5, 3));
-	CHECK(tick(&d, false, 5, 3));
-	CHECK(!tick(&d, false, 5, 3));                          // 3rd tick high: released
+	for (unsigned i = 1; i < PTT_RELEASE_DEFAULT_MS; i++) CHECK(tick());
+	CHECK(!tick());                                         // 5th tick high: released
+
+	press_ms = 1; release_ms = 2;
+	mode = 0; CHECK(tick());
+	mode = 1; CHECK(tick()); CHECK(!tick());
+	press_ms = PTT_PRESS_DEFAULT_MS; release_ms = PTT_RELEASE_DEFAULT_MS;
 }
 
-static void test_glitches(void)
+static void test_glitches_and_spikes(void)
 {
-	PttDebounce_t d = {0};
-	t_us = 0;
+	reset();
 	// low 4, high 1, low 4: never 5 in a row
 	for (int r = 0; r < 20; r++) {
-		mode = 0; for (int i = 0; i < 4; i++) CHECK(!tick(&d, false, 5, 3));
-		mode = 1; CHECK(!tick(&d, false, 5, 3));
+		mode = 0; for (int i = 0; i < 4; i++) CHECK(!tick());
+		mode = 1; CHECK(!tick());
 	}
-	// pressed, then short high glitches of 2 ticks do not release
-	mode = 0; for (int i = 0; i < 5; i++) tick(&d, false, 5, 3);
-	CHECK(d.pressed);
+	// keyed: a 5 us high spike at every tick never releases
+	mode = 0; for (unsigned i = 0; i < PTT_PRESS_DEFAULT_MS; i++) tick();
+	CHECK(PTT_IsPressed());
+	mode = 3;
+	for (int i = 0; i < 200; i++) CHECK(tick());
+	// keyed: short real highs (4 ticks) do not release either
 	for (int r = 0; r < 20; r++) {
-		mode = 1; CHECK(tick(&d, false, 5, 3)); CHECK(tick(&d, false, 5, 3));
-		mode = 0; CHECK(tick(&d, false, 5, 3));
+		mode = 1; for (int i = 0; i < 4; i++) CHECK(tick());
+		mode = 0; CHECK(tick());
 	}
 }
 
 static void test_serial_lock(void)
 {
-	PttDebounce_t d = {0};
-	t_us = 0; mode = 0;
-	for (int i = 0; i < 5; i++) tick(&d, false, 5, 3);
-	CHECK(d.pressed);
-	CHECK(!tick(&d, true, 5, 3));                           // lock releases at once
-	for (int i = 0; i < 50; i++) CHECK(!tick(&d, true, 5, 3)); // and blocks pressing
-	for (int i = 1; i <= 4; i++) CHECK(!tick(&d, false, 5, 3));
-	CHECK(tick(&d, false, 5, 3));                           // held after the lock: a press
+	reset(); mode = 0;
+	for (unsigned i = 0; i < PTT_PRESS_DEFAULT_MS; i++) tick();
+	CHECK(PTT_IsPressed());
+	lock = true;
+	CHECK(!tick());                                         // the lock releases at once
+	for (int i = 0; i < 50; i++) CHECK(!tick());            // and blocks pressing
+	lock = false;
+	for (unsigned i = 1; i < PTT_PRESS_DEFAULT_MS; i++) CHECK(!tick());
+	CHECK(tick());                                          // held after the lock: a press
 }
 
-static void run_stream(const char *name, int pressMs)
+static int run_stream(uint8_t pms)
 {
-	// sweep the stream start over a whole character at 1 us steps
-	int presses = 0, window_passes = 0;
+	int presses = 0;
+	press_ms = pms;
 	for (int phase = 0; phase < 261; phase++) {
-		PttDebounce_t d = {0};
-		mode = 2; stream_start = phase; t_us = 0;
+		reset(); mode = 2; stream_start = phase;
 		const double end = stream_len * 10 * BIT_US + 2000;
-		while (t_us < end) {
-			const double s = t_us;
-			if (level_low_at(s)) {
-				window_start = s; t_us = s;
-				if (PTT_LowForWindow(lineLow, elapsedUs)) window_passes++;
-				t_us = s;
-			}
-			if (tick(&d, false, pressMs, 3)) presses++;
-		}
+		while (t_us < end)
+			if (tick()) presses++;
 	}
-	printf("  %s: %u bytes, press %d ms: %d presses, %d full low windows\n",
-		name, stream_len, pressMs, presses, window_passes);
-	CHECK(presses == 0);
-	CHECK(window_passes == 0);
+	press_ms = PTT_PRESS_DEFAULT_MS;
+	return presses;
 }
 
 static void test_uart_never_keys(void)
 {
-	// the worst case: a long run of 0x00 (low for 9 of every 10 bits)
-	stream_len = 2000; memset(stream, 0x00, stream_len);
-	run_stream("zero bytes", 1);
-	run_stream("zero bytes", 5);
+	stream_len = 2000; memset(stream, 0x00, stream_len);   // worst case: low 9 bits of 10
+	CHECK(run_stream(1) == 0);
+	CHECK(run_stream(5) == 0);
 
-	// a frame header and random payload
 	srand(1);
-	stream_len = 2000;
 	for (unsigned i = 0; i < stream_len; i++) stream[i] = rand() & 0xFF;
 	stream[0] = 0xAB; stream[1] = 0xCD;
-	run_stream("random bytes", 1);
+	CHECK(run_stream(1) == 0);
 
-	// a real press (break, held low) passes the window
-	mode = 0; t_us = 0; window_start = 0;
-	CHECK(PTT_LowForWindow(lineLow, elapsedUs));
 	CHECK(PTT_WINDOW_US > 10 * BIT_US);
+}
+
+static void test_uart_after_release(void)
+{
+	// keyed, released, and the host starts sending right away
+	srand(2);
+	stream_len = 400;
+	for (unsigned i = 0; i < stream_len; i++) stream[i] = rand() & 0xFF;
+	int worst = 0;
+	for (int phase = 0; phase < 261; phase += 7) {
+		reset(); mode = 0;
+		for (unsigned i = 0; i < PTT_PRESS_DEFAULT_MS; i++) tick();
+		CHECK(PTT_IsPressed());
+		mode = 2; stream_start = t_us + phase;
+		int n = 0;
+		while (tick() && n < 1000) n++;
+		if (n + 1 > worst) worst = n + 1;
+	}
+	printf("  UART right after release: released within %d ms (release debounce %u ms)\n", worst, PTT_RELEASE_DEFAULT_MS);
+	CHECK(worst <= (int)PTT_RELEASE_DEFAULT_MS + 5);
+
+	// zero bytes after release: low most of the time, but never a whole window
+	stream_len = 400; memset(stream, 0x00, stream_len);
+	reset(); mode = 0;
+	for (unsigned i = 0; i < PTT_PRESS_DEFAULT_MS; i++) tick();
+	mode = 2; stream_start = t_us;
+	int n = 0;
+	while (tick() && n < 1000) n++;
+	printf("  zero bytes right after release: released within %d ms\n", n + 1);
+	CHECK(n + 1 <= (int)PTT_RELEASE_DEFAULT_MS + 5);
 }
 
 int main(void)
 {
 	test_press_release_timing();
-	test_glitches();
+	test_glitches_and_spikes();
 	test_serial_lock();
 	test_uart_never_keys();
+	test_uart_after_release();
 	if (failures) {
 		printf("%d check(s) failed\n", failures);
 		return 1;

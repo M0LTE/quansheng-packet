@@ -92,12 +92,13 @@ enum {
 // write changes all of it; the menu does not show it.
 //
 //   0x1D50  PTT press debounce, ms, 1 to 40 (default 5)
-//   0x1D51  PTT release debounce, ms, 1 to 40 (default 3)
-//   0x1D52  delay after PA enable, before the PA bias, ms, 0 to 20 (default 5)
+//   0x1D51  PTT release debounce, ms, 2 to 40 (default 5)
+//   0x1D52  delay after PA enable, before the PA bias, ms, 1 to 20 (default 5)
 //   0x1D53  delay after the PA bias, ms, 0 to 20 (default 10)
 //   0x1D54  reserved (0xFF)
 #define SETTINGS_TIMING           0x1D50u
 #define PA_DELAY_MAX_MS           20u
+#define PA_ENABLE_DELAY_MIN_MS    1u
 #define PA_ENABLE_DELAY_DEFAULT   5u
 #define PA_BIAS_DELAY_DEFAULT     10u
 #define REG_OVERRIDE_MAX          8u

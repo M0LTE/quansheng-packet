@@ -341,8 +341,7 @@ void RADIO_SetTxParameters(void)
 	BK4819_ToggleGpioOut(BK4819_GPIO1_PIN29_PA_ENABLE, true);
 
 	// PA ramp: upstream waited 5 ms then 10 ms; both are settings now
-	if (gEeprom.PA_ENABLE_DELAY_MS)
-		SYSTEM_DelayMs(gEeprom.PA_ENABLE_DELAY_MS);
+	SYSTEM_DelayMs(gEeprom.PA_ENABLE_DELAY_MS);   // at least 1 ms
 
 	BK4819_SetupPowerAmplifier(gVfo->TXP_CalculatedSetting, gVfo->Frequency);
 
@@ -398,6 +397,9 @@ void RADIO_SendEndOfTransmission(void)
 	BK4819_SetupPowerAmplifier(0, 0);
 	BK4819_ToggleGpioOut(BK4819_GPIO1_PIN29_PA_ENABLE, false);
 	BK4819_ToggleGpioOut(BK4819_GPIO5_PIN1_RED, false);
+	// and take the chip out of TX at once (REG_30 still held the TX enables
+	// until RADIO_SetupRegisters reached the receiver turn-on)
+	BK4819_WriteRegister(BK4819_REG_30, 0);
 
 	RADIO_SetupRegisters(false);
 }

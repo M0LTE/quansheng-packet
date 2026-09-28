@@ -137,7 +137,8 @@ void Main(void)
 	}
 
 	while (true) {
-		APP_CheckPtt();
+		if (!gReducedService)   // as upstream: no PTT at critical battery
+			APP_CheckPtt();
 		APP_Update();
 
 		if (gNextTimeslice) {

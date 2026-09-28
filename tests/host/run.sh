@@ -15,3 +15,6 @@ gcc $CFLAGS -I tests/host -I external/CMSIS_5/Device/ARM/ARMCM0/Include -include
 
 gcc $CFLAGS -DPTT_HOST_TEST -o "$out-ptt" tests/host/test_ptt.c ptt.c
 "$out-ptt"
+
+gcc $CFLAGS -o "$out-sched" tests/host/test_sched.c scheduler.c misc.c
+"$out-sched"

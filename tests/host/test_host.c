@@ -194,6 +194,45 @@ static void test_settings_defaults_and_roundtrip(void)
 	CHECK(gEeprom.DEVIATION_NARROW == PKT_DEVIATION_NARROW_DEFAULT);
 }
 
+static void test_timing_block(void)
+{
+	memset(eeprom, 0xFF, sizeof(eeprom));
+	SETTINGS_InitEEPROM();
+	CHECK(gEeprom.PTT_PRESS_MS == 5 && gEeprom.PTT_RELEASE_MS == 5);
+	CHECK(gEeprom.PA_ENABLE_DELAY_MS == 5 && gEeprom.PA_BIAS_DELAY_MS == 10);
+
+	// values without a valid settings block are ignored
+	const uint8_t t[8] = {2, 3, 1, 0, 0xFF, 0xFF, 0xFF, 0xFF};
+	memcpy(&eeprom[SETTINGS_TIMING], t, 8);
+	SETTINGS_InitEEPROM();
+	CHECK(gEeprom.PTT_PRESS_MS == 5);
+
+	eeprom[SETTINGS_PKT_BLOCK] = SETTINGS_PKT_VERSION;
+	SETTINGS_InitEEPROM();
+	CHECK(gEeprom.PTT_PRESS_MS == 2 && gEeprom.PTT_RELEASE_MS == 3);
+	CHECK(gEeprom.PA_ENABLE_DELAY_MS == 1 && gEeprom.PA_BIAS_DELAY_MS == 0);
+
+	// out of range: press 0, release 1, PA enable 0, bias 21 all default
+	const uint8_t bad[8] = {0, 1, 0, 21, 0xFF, 0xFF, 0xFF, 0xFF};
+	memcpy(&eeprom[SETTINGS_TIMING], bad, 8);
+	SETTINGS_InitEEPROM();
+	CHECK(gEeprom.PTT_PRESS_MS == 5 && gEeprom.PTT_RELEASE_MS == 5);
+	CHECK(gEeprom.PA_ENABLE_DELAY_MS == 5 && gEeprom.PA_BIAS_DELAY_MS == 10);
+	const uint8_t hi[8] = {40, 40, 20, 20, 0xFF, 0xFF, 0xFF, 0xFF};
+	memcpy(&eeprom[SETTINGS_TIMING], hi, 8);
+	SETTINGS_InitEEPROM();
+	CHECK(gEeprom.PTT_PRESS_MS == 40 && gEeprom.PTT_RELEASE_MS == 40);
+	CHECK(gEeprom.PA_ENABLE_DELAY_MS == 20 && gEeprom.PA_BIAS_DELAY_MS == 20);
+	eeprom[SETTINGS_TIMING] = 41;
+	SETTINGS_InitEEPROM();
+	CHECK(gEeprom.PTT_PRESS_MS == 5);
+
+	// the first menu save over foreign data blanks the timing block
+	eeprom[SETTINGS_PKT_BLOCK] = 0x41;
+	SETTINGS_SaveSettings();
+	CHECK(eeprom[SETTINGS_TIMING] == 0xFF && eeprom[SETTINGS_TIMING + 3] == 0xFF);
+}
+
 static void test_channel_load_save(void)
 {
 	memset(eeprom, 0xFF, sizeof(eeprom));
@@ -311,6 +350,11 @@ static void test_tx_rx_registers(void)
 	gVfo->CHANNEL_BANDWIDTH = BANDWIDTH_NARROW;
 	RADIO_SetTxParameters();
 	CHECK(tx_dev == 0x300);
+
+	// key-down takes the chip out of TX straight away
+	regs[0x30] = 0xC1FE;
+	RADIO_SendEndOfTransmission();
+	CHECK(regs[0x30] == 0);
 }
 
 static void put_override(unsigned i, uint8_t phase, uint8_t reg, uint16_t andMask, uint16_t orValue)
@@ -371,6 +415,7 @@ int main(void)
 {
 	test_reg_overrides();
 	test_eeprom_guard();
+	test_timing_block();
 	test_settings_defaults_and_roundtrip();
 	test_channel_load_save();
 	test_frequency();

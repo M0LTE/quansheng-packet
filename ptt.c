@@ -15,7 +15,7 @@
 
 #include "ptt.h"
 
-bool PTT_Debounce(PttDebounce_t *d, bool lowWholeWindow, bool lineLow, bool serialLock,
+bool PTT_Debounce(volatile PttDebounce_t *d, bool lowWholeWindow, bool releaseTick, bool serialLock,
                   uint8_t pressMs, uint8_t releaseMs)
 {
 	if (serialLock) {
@@ -34,27 +34,31 @@ bool PTT_Debounce(PttDebounce_t *d, bool lowWholeWindow, bool lineLow, bool seri
 		}
 	}
 	else {
-		if (lineLow) {
-			d->count = 0;
+		if (releaseTick) {
+			if (++d->count >= releaseMs) {
+				d->pressed = false;
+				d->count   = 0;
+			}
 		}
-		else if (++d->count >= releaseMs) {
-			d->pressed = false;
-			d->count   = 0;
+		else if (lowWholeWindow) {
+			d->count = 0;          // still held
 		}
 	}
 
 	return d->pressed;
 }
 
-bool PTT_LowForWindow(bool (*lineLow)(void), uint32_t (*elapsedUs)(void))
+bool PTT_LevelFor(bool (*lineLow)(void), uint32_t (*elapsedUs)(void), bool wantLow, uint32_t us)
 {
 	do {
-		if (!lineLow())
+		if (lineLow() != wantLow)
 			return false;
-	} while (elapsedUs() < PTT_WINDOW_US);
+	} while (elapsedUs() < us);
 
 	return true;
 }
+
+// ------------------------------------------------------------- hardware --
 
 #ifndef PTT_HOST_TEST
 
@@ -64,44 +68,82 @@ bool PTT_LowForWindow(bool (*lineLow)(void), uint32_t (*elapsedUs)(void))
 #include "misc.h"
 #include "settings.h"
 
-static PttDebounce_t gPtt;
-static uint32_t      gWindowStart;
+static inline bool     PTT_HwLineLow(void)    { return !GPIO_CheckBit(&GPIOC->DATA, GPIOC_PIN_PTT); }
+static inline uint32_t PTT_HwTicks(void)      { return SysTick->VAL; }
+static inline uint32_t PTT_HwPeriod(void)     { return SysTick->LOAD + 1; }
+static inline bool     PTT_HwSerialLock(void) { return SerialConfigInProgress(); }
+// the settings are loaded after SysTick starts: defaults until then
+static inline uint8_t  PTT_HwPressMs(void)    { return gEeprom.PTT_PRESS_MS   ? gEeprom.PTT_PRESS_MS   : PTT_PRESS_DEFAULT_MS; }
+static inline uint8_t  PTT_HwReleaseMs(void)  { return gEeprom.PTT_RELEASE_MS ? gEeprom.PTT_RELEASE_MS : PTT_RELEASE_DEFAULT_MS; }
+
+#endif
+
+// shared between the SysTick interrupt (writer) and the main loop (reader)
+static volatile PttDebounce_t gPtt;
+static uint32_t               gWindowStart;
+
+#ifdef PTT_HOST_TEST
+void PTT_HostReset(void) { gPtt.pressed = false; gPtt.count = 0; }
+#endif
 
 static bool LineLow(void)
 {
-	return !GPIO_CheckBit(&GPIOC->DATA, GPIOC_PIN_PTT);
+	return PTT_HwLineLow();
 }
 
 // SysTick counts down from LOAD at 48 MHz
 static uint32_t ElapsedUs(void)
 {
-	const uint32_t now    = SysTick->VAL;
-	const uint32_t period = SysTick->LOAD + 1;
-	const uint32_t ticks  = (gWindowStart >= now) ? gWindowStart - now : gWindowStart + period - now;
+	const uint32_t now    = PTT_HwTicks();
+	const uint32_t ticks  = (gWindowStart >= now) ? gWindowStart - now : gWindowStart + PTT_HwPeriod() - now;
 	return ticks / 48;
 }
 
 void PTT_Tick(void)
 {
-	const bool low = LineLow();
+	static uint8_t n;
+	const bool low  = LineLow();
+	const bool lock = PTT_HwSerialLock();
 	bool lowWholeWindow = false;
+	bool releaseTick    = false;
 
-	// only a candidate press costs the 280 us busy read
-	if (low && !gPtt.pressed && !SerialConfigInProgress()) {
-		gWindowStart   = SysTick->VAL;
-		lowWholeWindow = PTT_LowForWindow(LineLow, ElapsedUs);
+	n++;
+
+	if (!lock) {
+		if (!gPtt.pressed) {
+			// only a candidate press costs the 280 us busy read
+			if (low) {
+				gWindowStart   = PTT_HwTicks();
+				lowWholeWindow = PTT_LevelFor(LineLow, ElapsedUs, true, PTT_WINDOW_US);
+			}
+		}
+		else if (!low) {
+			// high: released, unless it was only a spike in a held press
+			gWindowStart = PTT_HwTicks();
+			if (PTT_LevelFor(LineLow, ElapsedUs, false, PTT_HIGH_HOLD_US)) {
+				releaseTick = true;
+			}
+			else {
+				gWindowStart   = PTT_HwTicks();
+				lowWholeWindow = PTT_LevelFor(LineLow, ElapsedUs, true, PTT_WINDOW_US);
+				releaseTick    = !lowWholeWindow;     // UART traffic, not a press
+			}
+		}
+		else if (gPtt.count > 0 || (n & 3) == 0) {
+			// low: check it is still a real press (while releasing, and on
+			// every 4th tick otherwise, so UART traffic that starts right
+			// after a release cannot hold the radio keyed; about 7% CPU
+			// while transmitting)
+			gWindowStart   = PTT_HwTicks();
+			lowWholeWindow = PTT_LevelFor(LineLow, ElapsedUs, true, PTT_WINDOW_US);
+			releaseTick    = !lowWholeWindow;
+		}
 	}
 
-	// the settings are loaded after SysTick starts: use the defaults until then
-	const uint8_t pressMs   = gEeprom.PTT_PRESS_MS   ? gEeprom.PTT_PRESS_MS   : PTT_PRESS_DEFAULT_MS;
-	const uint8_t releaseMs = gEeprom.PTT_RELEASE_MS ? gEeprom.PTT_RELEASE_MS : PTT_RELEASE_DEFAULT_MS;
-
-	PTT_Debounce(&gPtt, lowWholeWindow, low, SerialConfigInProgress(), pressMs, releaseMs);
+	PTT_Debounce(&gPtt, lowWholeWindow, releaseTick, lock, PTT_HwPressMs(), PTT_HwReleaseMs());
 }
 
 bool PTT_IsPressed(void)
 {
 	return gPtt.pressed;
 }
-
-#endif

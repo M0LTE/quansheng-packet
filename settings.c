@@ -88,9 +88,9 @@ void SETTINGS_InitEEPROM(void)
 	EEPROM_ReadBuffer(SETTINGS_TIMING, T, 8);
 	if (!blockValid)
 		memset(T, 0xFF, 8);
-	gEeprom.PTT_PRESS_MS       = (T[0] >= PTT_DEBOUNCE_MIN_MS && T[0] <= PTT_DEBOUNCE_MAX_MS) ? T[0] : PTT_PRESS_DEFAULT_MS;
-	gEeprom.PTT_RELEASE_MS     = (T[1] >= PTT_DEBOUNCE_MIN_MS && T[1] <= PTT_DEBOUNCE_MAX_MS) ? T[1] : PTT_RELEASE_DEFAULT_MS;
-	gEeprom.PA_ENABLE_DELAY_MS = ByteOr(T[2], PA_DELAY_MAX_MS, PA_ENABLE_DELAY_DEFAULT);
+	gEeprom.PTT_PRESS_MS       = (T[0] >= PTT_PRESS_MIN_MS   && T[0] <= PTT_DEBOUNCE_MAX_MS) ? T[0] : PTT_PRESS_DEFAULT_MS;
+	gEeprom.PTT_RELEASE_MS     = (T[1] >= PTT_RELEASE_MIN_MS && T[1] <= PTT_DEBOUNCE_MAX_MS) ? T[1] : PTT_RELEASE_DEFAULT_MS;
+	gEeprom.PA_ENABLE_DELAY_MS = (T[2] >= PA_ENABLE_DELAY_MIN_MS && T[2] <= PA_DELAY_MAX_MS) ? T[2] : PA_ENABLE_DELAY_DEFAULT;
 	gEeprom.PA_BIAS_DELAY_MS   = ByteOr(T[3], PA_DELAY_MAX_MS, PA_BIAS_DELAY_DEFAULT);
 	const uint16_t devWide   = Data[4] | (Data[5] << 8);
 	const uint16_t devNarrow = Data[6] | (Data[7] << 8);
