@@ -25,14 +25,6 @@
 #include "radio.h"
 #include <driver/backlight.h>
 
-enum POWER_OnDisplayMode_t {
-	POWER_ON_DISPLAY_MODE_FULL_SCREEN = 0,
-	POWER_ON_DISPLAY_MODE_MESSAGE,
-	POWER_ON_DISPLAY_MODE_VOLTAGE,
-	POWER_ON_DISPLAY_MODE_NONE
-};
-typedef enum POWER_OnDisplayMode_t POWER_OnDisplayMode_t;
-
 enum TxLockModes_t {
 	F_LOCK_DEF, //all default frequencies + configurable
 	F_LOCK_FCC,
@@ -46,177 +38,69 @@ enum TxLockModes_t {
 };
 
 enum {
-	SCAN_RESUME_TO = 0,
-	SCAN_RESUME_CO,
-	SCAN_RESUME_SE
-};
-
-enum {
-	CROSS_BAND_OFF = 0,
-	CROSS_BAND_CHAN_A,
-	CROSS_BAND_CHAN_B
-};
-
-enum {
-	DUAL_WATCH_OFF = 0,
-	DUAL_WATCH_CHAN_A,
-	DUAL_WATCH_CHAN_B
-};
-
-enum {
-	TX_OFFSET_FREQUENCY_DIRECTION_OFF = 0,
-	TX_OFFSET_FREQUENCY_DIRECTION_ADD,
-	TX_OFFSET_FREQUENCY_DIRECTION_SUB
-};
-
-enum {
 	OUTPUT_POWER_LOW = 0,
 	OUTPUT_POWER_MID,
 	OUTPUT_POWER_HIGH
 };
 
-enum ACTION_OPT_t {
-	ACTION_OPT_NONE = 0,
-	ACTION_OPT_FLASHLIGHT,
-	ACTION_OPT_POWER,
-	ACTION_OPT_MONITOR,
-	ACTION_OPT_SCAN,
-	ACTION_OPT_VOX,
-	ACTION_OPT_ALARM,
-	ACTION_OPT_FM,
-	ACTION_OPT_1750,
-	ACTION_OPT_KEYLOCK,
-	ACTION_OPT_A_B,
-	ACTION_OPT_VFO_MR,
-	ACTION_OPT_SWITCH_DEMODUL,
-	ACTION_OPT_BLMIN_TMP_OFF, //BackLight Minimum Temporay OFF
-	ACTION_OPT_SPECTRUM,
-	ACTION_OPT_LEN
-};
+// Packet firmware settings block in EEPROM, in the old DTMF contacts area
+// (unused here). All 16 bytes are this firmware's own; a byte that is out of
+// range (0xFF when blank) means "use the default".
+//
+//   0x1D00  layout version (1)
+//   0x1D01  squelch level, 0 (open) to 9
+//   0x1D02  TX timeout, index into gTxTimeoutSeconds
+//   0x1D03  mic gain, REG_7D<4:0>, 0 to 31
+//   0x1D04  wide deviation, REG_40<11:0>, u16 little-endian
+//   0x1D06  narrow deviation, REG_40<11:0>, u16 little-endian
+//   0x1D08  RX AF gain 2, REG_48<9:4>, 0 to 63
+//   0x1D09  RX AF DAC gain, REG_48<3:0>, 0 to 15
+//   0x1D0A  backlight time, 0 (off) to 7 (always on)
+//   0x1D0B  battery type, 0 = 1600 mAh, 1 = 2200 mAh
+//   0x1D0C  keypad lock, 0 or 1
+//   0x1D0D  reserved (0xFF)
+//
+// The radio reads this block at power-on. Tools that change it over UART
+// should reboot the radio afterwards (command 0x05DD).
+#define SETTINGS_PKT_BLOCK        0x1D00u
+#define SETTINGS_PKT_VERSION      1u
 
-
-enum ALARM_Mode_t {
-	ALARM_MODE_SITE = 0,
-	ALARM_MODE_TONE
-};
-typedef enum ALARM_Mode_t ALARM_Mode_t;
-
-enum ROGER_Mode_t {
-	ROGER_MODE_OFF = 0,
-	ROGER_MODE_ROGER,
-	ROGER_MODE_MDC
-};
-typedef enum ROGER_Mode_t ROGER_Mode_t;
-
-enum CHANNEL_DisplayMode_t {
-	MDF_FREQUENCY = 0,
-	MDF_CHANNEL,
-	MDF_NAME,
-	MDF_NAME_FREQ
-};
-typedef enum CHANNEL_DisplayMode_t CHANNEL_DisplayMode_t;
+extern const uint8_t gTxTimeoutSeconds[7];
+#define TX_TIMEOUT_DEFAULT_INDEX  4u     // 30 s
 
 typedef struct {
-	uint8_t               ScreenChannel[2]; // current channels set in the radio (memory or frequency channels)
-	uint8_t               FreqChannel[2]; // last frequency channels used
-	uint8_t               MrChannel[2]; // last memory channels used
-
-	// The actual VFO index (0-upper/1-lower) that is now used for RX, 
-	// It is being alternated by dual watch, and flipped by crossband
-	uint8_t               RX_VFO;
-
-	// The main VFO index (0-upper/1-lower) selected by the user
-	// 
-	uint8_t               TX_VFO;
-
-	uint8_t               field7_0xa;
-	uint8_t               field8_0xb;
-
+	uint8_t               ScreenChannel;  // channel in use (memory or band slot)
+	uint8_t               FreqChannel;    // last band slot used
+	uint8_t               MrChannel;      // last memory channel used
 
 	uint8_t               SQUELCH_LEVEL;
-	uint8_t               TX_TIMEOUT_TIMER;
+	uint8_t               TX_TIMEOUT;
+	uint8_t               MIC_GAIN;
+	uint16_t              DEVIATION_WIDE;
+	uint16_t              DEVIATION_NARROW;
+	uint8_t               RX_GAIN;
+	uint8_t               RX_DAC_GAIN;
+
 	bool                  KEY_LOCK;
-	bool                  VOX_SWITCH;
-	uint8_t               VOX_LEVEL;
-	bool                  BEEP_CONTROL;
-	uint8_t               CHANNEL_DISPLAY_MODE;
-	bool                  TAIL_TONE_ELIMINATION;
-	bool                  VFO_OPEN;
-	uint8_t               DUAL_WATCH;
-	uint8_t               CROSS_BAND_RX_TX;
-	uint8_t               BATTERY_SAVE;
 	uint8_t               BACKLIGHT_TIME;
-	uint8_t               SCAN_RESUME_MODE;
-	uint8_t               SCAN_LIST_DEFAULT;
-	bool                  SCAN_LIST_ENABLED[2];
-	uint8_t               SCANLIST_PRIORITY_CH1[2];
-	uint8_t               SCANLIST_PRIORITY_CH2[2];
-
-	uint8_t               field29_0x26;
-	uint8_t               field30_0x27;
-	
-	uint8_t               field37_0x32;
-	uint8_t               field38_0x33;
-
-	bool                  AUTO_KEYPAD_LOCK;
-	POWER_OnDisplayMode_t POWER_ON_DISPLAY_MODE;
-	ROGER_Mode_t          ROGER;
-	uint8_t               REPEATER_TAIL_TONE_ELIMINATION;
-	uint8_t               KEY_1_SHORT_PRESS_ACTION;
-	uint8_t               KEY_1_LONG_PRESS_ACTION;
-	uint8_t               KEY_2_SHORT_PRESS_ACTION;
-	uint8_t               KEY_2_LONG_PRESS_ACTION;
-	uint8_t               MIC_SENSITIVITY;
-	uint8_t               MIC_SENSITIVITY_TUNING;
-	uint8_t               CHAN_1_CALL;
-	char                  DTMF_UP_CODE[16];
-
-	uint8_t               field57_0x6c;
-	uint8_t               field58_0x6d;
-
-	char                  DTMF_DOWN_CODE[16];
-
-	uint8_t               field60_0x7e;
-	uint8_t               field61_0x7f;
-
-	uint16_t              DTMF_PRELOAD_TIME;
-	uint16_t              DTMF_FIRST_CODE_PERSIST_TIME;
-	uint16_t              DTMF_HASH_CODE_PERSIST_TIME;
-	uint16_t              DTMF_CODE_PERSIST_TIME;
-	uint16_t              DTMF_CODE_INTERVAL_TIME;
-	bool                  DTMF_SIDE_TONE;
-	int16_t               BK4819_XTAL_FREQ_LOW;
-	uint8_t               VOLUME_GAIN;
-	uint8_t               DAC_GAIN;
-
-	VFO_Info_t            VfoInfo[2];
-	uint32_t              POWER_ON_PASSWORD;
-	uint16_t              VOX1_THRESHOLD;
-	uint16_t              VOX0_THRESHOLD;
-
-	uint8_t               field77_0x95;
-	uint8_t               field78_0x96;
-	uint8_t               field79_0x97;
-
-	uint8_t 			  KEY_M_LONG_PRESS_ACTION;
 	uint8_t               BACKLIGHT_MIN;
 	uint8_t               BACKLIGHT_MAX;
-	BATTERY_Type_t		  BATTERY_TYPE;
+	BATTERY_Type_t        BATTERY_TYPE;
+
+	// read only, from calibration and upstream settings
+	int16_t               BK4819_XTAL_FREQ_LOW;
 	uint8_t               S0_LEVEL;
 	uint8_t               S9_LEVEL;
+
+	VFO_Info_t            Vfo;
 } EEPROM_Config_t;
 
 extern EEPROM_Config_t gEeprom;
 
-void     SETTINGS_InitEEPROM(void);
-void     SETTINGS_LoadCalibration(void);
-uint32_t SETTINGS_FetchChannelFrequency(const int channel);
-void     SETTINGS_FetchChannelName(char *s, const int channel);
-void     SETTINGS_FactoryReset(bool bIsAll);
+void SETTINGS_InitEEPROM(void);
+void SETTINGS_LoadCalibration(void);
 void SETTINGS_SaveVfoIndices(void);
 void SETTINGS_SaveSettings(void);
-void SETTINGS_SaveChannelName(uint8_t channel, const char * name);
-void SETTINGS_SaveChannel(uint8_t Channel, uint8_t VFO, const VFO_Info_t *pVFO, uint8_t Mode);
-void SETTINGS_UpdateChannel(uint8_t channel, const VFO_Info_t *pVFO, bool keep);
+void SETTINGS_SaveChannel(const VFO_Info_t *pVFO);
 
 #endif

@@ -16,8 +16,6 @@
 
 #include <string.h>
 
-#include "app/chFrScanner.h"
-#include "app/scanner.h"
 #include "bitmaps.h"
 #include "driver/keyboard.h"
 #include "driver/st7565.h"
@@ -31,6 +29,8 @@
 #include "ui/ui.h"
 #include "ui/status.h"
 
+// Status line: TX/RX, monitor, key lock or F, "PKT", battery voltage, USB-C
+// charge, battery level.
 void UI_DisplayStatus()
 {
 	gUpdateStatus = false;
@@ -38,97 +38,37 @@ void UI_DisplayStatus()
 
 	uint8_t     *line = gStatusLine;
 	unsigned int x    = 0;
-	// **************
 
-	// POWER-SAVE indicator
 	if (gCurrentFunction == FUNCTION_TRANSMIT) {
 		memcpy(line + x, BITMAP_TX, sizeof(BITMAP_TX));
 	}
 	else if (FUNCTION_IsRx()) {
 		memcpy(line + x, BITMAP_RX, sizeof(BITMAP_RX));
 	}
-	else if (gCurrentFunction == FUNCTION_POWER_SAVE) {
-		memcpy(line + x, BITMAP_POWERSAVE, sizeof(BITMAP_POWERSAVE));
+	x += 10;
+
+	if (gMonitor) {
+		UI_PrintStringSmallBufferNormal("MON", line + x);
 	}
-	x += 8;
-	unsigned int x1 = x;
-
-
-	{ // SCAN indicator
-		if (gScanStateDir != SCAN_OFF || SCANNER_IsScanning()) {
-			char * s = "";
-			if (IS_MR_CHANNEL(gNextMrChannel) && !SCANNER_IsScanning()) { // channel mode
-				switch(gEeprom.SCAN_LIST_DEFAULT) {
-					case 0: s = "1"; break;
-					case 1: s = "2"; break;
-					case 2: s = "*"; break;
-				}
-			}
-			else {	// frequency mode
-				s = "S";
-			}
-			UI_PrintStringSmallBufferNormal(s, line + x + 1);
-			x1 = x + 10;
-		}
-	}
-	x += 10;  // font character width
-
-
-	if(!SCANNER_IsScanning()) {
-		uint8_t dw = (gEeprom.DUAL_WATCH != DUAL_WATCH_OFF) + (gEeprom.CROSS_BAND_RX_TX != CROSS_BAND_OFF) * 2;
-		if(dw == 1 || dw == 3) { // DWR - dual watch + respond
-			if(gDualWatchActive)
-				memcpy(line + x + (dw==1?0:2), BITMAP_TDR1, sizeof(BITMAP_TDR1) - (dw==1?0:5));
-			else
-				memcpy(line + x + 3, BITMAP_TDR2, sizeof(BITMAP_TDR2));
-		}
-		else if(dw == 2) { // XB - crossband
-			memcpy(line + x + 2, BITMAP_XB, sizeof(BITMAP_XB));
-		}
-	}
-	x += sizeof(BITMAP_TDR1) + 1;
-
-
-	x = MAX(x1, 61u);
+	x += 24;
 
 	// KEY-LOCK indicator
 	if (gEeprom.KEY_LOCK) {
 		memcpy(line + x, BITMAP_KeyLock, sizeof(BITMAP_KeyLock));
-		x += sizeof(BITMAP_KeyLock);
-		x1 = x;
 	}
 	else if (gWasFKeyPressed) {
 		memcpy(line + x, BITMAP_F_Key, sizeof(BITMAP_F_Key));
-		x += sizeof(BITMAP_F_Key);
-		x1 = x;
 	}
+	x += 10;
 
-	{	// battery voltage or percentage
-		char         s[8] = "";
-		unsigned int x2 = LCD_WIDTH - sizeof(BITMAP_BatteryLevel1) - 0;
+	UI_PrintStringSmallBufferNormal("PKT", line + x);
 
-		if (gChargingWithTypeC)
-			x2 -= sizeof(BITMAP_USB_C);  // the radio is on charge
-
-		switch (gSetting_battery_text) {
-			default:
-			case 0:
-				break;
-
-			case 1:	{	// voltage
-				const uint16_t voltage = (gBatteryVoltageAverage <= 999) ? gBatteryVoltageAverage : 999; // limit to 9.99V
-				sprintf(s, "%u.%02uV", voltage / 100, voltage % 100);
-				break;
-			}
-
-			case 2:		// percentage
-				sprintf(s, "%u%%", BATTERY_VoltsToPercent(gBatteryVoltageAverage));
-				break;
-		}
-
-		unsigned int space_needed = (7 * strlen(s));
-		if (x2 >= (x1 + space_needed))
-			UI_PrintStringSmallBufferNormal(s, line + x2 - space_needed);
+	{	// battery voltage
+		char         s[8];
+		unsigned int x2 = LCD_WIDTH - sizeof(BITMAP_BatteryLevel1) - sizeof(BITMAP_USB_C);
+		const uint16_t voltage = (gBatteryVoltageAverage <= 999) ? gBatteryVoltageAverage : 999; // limit to 9.99V
+		sprintf(s, "%u.%02uV", voltage / 100, voltage % 100);
+		UI_PrintStringSmallBufferNormal(s, line + x2 - (7 * strlen(s)));
 	}
 
 	// move to right side of the screen
@@ -141,8 +81,6 @@ void UI_DisplayStatus()
 
 	// BATTERY LEVEL indicator
 	UI_DrawBattery(line + x, gBatteryDisplayLevel, gLowBatteryBlink);
-
-	// **************
 
 	ST7565_BlitStatusLine();
 }

@@ -18,7 +18,6 @@
 #include <string.h>
 #include <stdio.h>     // NULL
 
-
 #include "audio.h"
 #include "board.h"
 #include "misc.h"
@@ -27,27 +26,25 @@
 #include "version.h"
 
 #include "app/app.h"
-#include "app/dtmf.h"
 #include "bsp/dp32g030/gpio.h"
 #include "bsp/dp32g030/syscon.h"
 
 #include "driver/backlight.h"
 #include "driver/bk4819.h"
 #include "driver/gpio.h"
+#include "driver/keyboard.h"
 #include "driver/system.h"
 #include "driver/systick.h"
-	#include "driver/uart.h"
+#include "driver/uart.h"
 
 #include "helper/battery.h"
-#include "helper/boot.h"
 
+#include "ui/ui.h"
 #include "ui/welcome.h"
-#include "ui/menu.h"
+
 void _putchar(__attribute__((unused)) char c)
 {
-
 	UART_Send((uint8_t *)&c, 1);
-
 }
 
 void Main(void)
@@ -61,9 +58,7 @@ void Main(void)
 		| SYSCON_DEV_CLK_GATE_SPI0_BITS_ENABLE
 		| SYSCON_DEV_CLK_GATE_SARADC_BITS_ENABLE
 		| SYSCON_DEV_CLK_GATE_CRC_BITS_ENABLE
-		| SYSCON_DEV_CLK_GATE_AES_BITS_ENABLE
 		| SYSCON_DEV_CLK_GATE_PWM_PLUS0_BITS_ENABLE;
-
 
 	SYSTICK_Init();
 	BOARD_Init();
@@ -73,11 +68,6 @@ void Main(void)
 	UART_Init();
 	UART_Send(UART_Version, strlen(UART_Version));
 
-	// Not implementing authentic device checks
-
-	memset(gDTMF_String, '-', sizeof(gDTMF_String));
-	gDTMF_String[sizeof(gDTMF_String) - 1] = 0;
-
 	BK4819_Init();
 
 	BOARD_ADC_GetBatteryInfo(&gBatteryCurrentVoltage, &gBatteryCurrent);
@@ -85,11 +75,7 @@ void Main(void)
 	SETTINGS_InitEEPROM();
 	SETTINGS_LoadCalibration();
 
-	RADIO_ConfigureChannel(0, VFO_CONFIGURE_RELOAD);
-	RADIO_ConfigureChannel(1, VFO_CONFIGURE_RELOAD);
-
-	RADIO_SelectVfos();
-
+	RADIO_ConfigureChannel();
 	RADIO_SetupRegisters(true);
 
 	for (unsigned int i = 0; i < ARRAY_SIZE(gBatteryVoltages); i++)
@@ -97,27 +83,8 @@ void Main(void)
 
 	BATTERY_GetReadings(false);
 
-
-	const BOOT_Mode_t  BootMode = BOOT_GetMode();
-
-	if (BootMode == BOOT_MODE_F_LOCK)
-	{
-		gF_LOCK = true;            // flag to say include the hidden menu items
-	}
-
-	// count the number of menu items
-	gMenuListCount = 0;
-	while (MenuList[gMenuListCount].name[0] != '\0') {
-		if(!gF_LOCK && MenuList[gMenuListCount].menu_id == FIRST_HIDDEN_MENU_ITEM)
-			break;
-
-		gMenuListCount++;
-	}
-
-	// wait for user to release all butts before moving on
-	if (!GPIO_CheckBit(&GPIOC->DATA, GPIOC_PIN_PTT) ||
-	     KEYBOARD_Poll() != KEY_INVALID ||
-		 BootMode != BOOT_MODE_NORMAL)
+	// wait for user to release all buttons before moving on
+	if (!GPIO_CheckBit(&GPIOC->DATA, GPIOC_PIN_PTT) || KEYBOARD_Poll() != KEY_INVALID)
 	{	// keys are pressed
 		UI_DisplayReleaseKeys();
 		BACKLIGHT_TurnOn();
@@ -134,13 +101,15 @@ void Main(void)
 	}
 
 	if (!gChargingWithTypeC && gBatteryDisplayLevel == 0)
-	{
-		FUNCTION_Select(FUNCTION_POWER_SAVE);
+	{	// battery critical: receiver off until a charger is connected
+		AUDIO_AudioPathOff();
+		BK4819_Sleep();
+		BK4819_ToggleGpioOut(BK4819_GPIO0_PIN28_RX_ENABLE, false);
 
-		if (gEeprom.BACKLIGHT_TIME < (ARRAY_SIZE(gSubMenu_BACKLIGHT) - 1)) // backlight is not set to be always on
-			BACKLIGHT_TurnOff();	// turn the backlight OFF
+		if (gEeprom.BACKLIGHT_TIME < 7) // backlight is not set to be always on
+			BACKLIGHT_TurnOff();
 		else
-			BACKLIGHT_TurnOn();  	// turn the backlight ON
+			BACKLIGHT_TurnOn();
 
 		gReducedService = true;
 	}
@@ -150,26 +119,21 @@ void Main(void)
 
 		BACKLIGHT_TurnOn();
 
-		if (gEeprom.POWER_ON_DISPLAY_MODE != POWER_ON_DISPLAY_MODE_NONE)
-		{	// 2.55 second boot-up screen
-			while (boot_counter_10ms > 0)
+		// 2.5 second boot-up screen, cut short by any key
+		while (boot_counter_10ms > 0)
+		{
+			if (KEYBOARD_Poll() != KEY_INVALID)
 			{
-				if (KEYBOARD_Poll() != KEY_INVALID)
-				{	// halt boot beeps
-					boot_counter_10ms = 0;
-					break;
-				}
+				boot_counter_10ms = 0;
+				break;
 			}
 		}
 
-
-		BOOT_ProcessMode(BootMode);
+		GUI_SelectNextDisplay(DISPLAY_MAIN);
 
 		GPIO_ClearBit(&GPIOA->DATA, GPIOA_PIN_VOICE_0);
 
 		gUpdateStatus = true;
-
-
 	}
 
 	while (true) {

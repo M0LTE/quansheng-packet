@@ -16,12 +16,11 @@
 
 #include <string.h>
 
-	#include "ARMCM0.h"
+#include "ARMCM0.h"
 #include "app/uart.h"
 #include "board.h"
 #include "bsp/dp32g030/dma.h"
 #include "bsp/dp32g030/gpio.h"
-#include "driver/aes.h"
 #include "driver/backlight.h"
 #include "driver/bk4819.h"
 #include "driver/crc.h"
@@ -116,19 +115,6 @@ typedef struct {
 
 typedef struct {
 	Header_t Header;
-	uint32_t Response[4];
-} CMD_052D_t;
-
-typedef struct {
-	Header_t Header;
-	struct {
-		bool bIsLocked;
-		uint8_t Padding[3];
-	} Data;
-} REPLY_052D_t;
-
-typedef struct {
-	Header_t Header;
 	uint32_t Timestamp;
 } CMD_052F_t;
 
@@ -149,6 +135,7 @@ static union
 
 static uint32_t Timestamp;
 static uint16_t gUART_WriteIndex;
+static uint16_t gUART_CommandSize;   // payload length of the command in UART_Command
 static bool     bIsEncrypted = true;
 
 static void SendReply(void *pReply, uint16_t Size)
@@ -188,36 +175,13 @@ static void SendVersion(void)
 {
 	REPLY_0514_t Reply;
 
+	memset(&Reply, 0, sizeof(Reply));
 	Reply.Header.ID = 0x0515;
 	Reply.Header.Size = sizeof(Reply.Data);
-	strcpy(Reply.Data.Version, Version);
-	Reply.Data.bHasCustomAesKey = bHasCustomAesKey;
-	Reply.Data.bIsInLockScreen = bIsInLockScreen;
-	Reply.Data.Challenge[0] = gChallenge[0];
-	Reply.Data.Challenge[1] = gChallenge[1];
-	Reply.Data.Challenge[2] = gChallenge[2];
-	Reply.Data.Challenge[3] = gChallenge[3];
+	strncpy(Reply.Data.Version, Version, sizeof(Reply.Data.Version) - 1);
+	// No AES key, lock screen or challenge in this firmware: all zero.
 
 	SendReply(&Reply, sizeof(Reply));
-}
-
-static bool IsBadChallenge(const uint32_t *pKey, const uint32_t *pIn, const uint32_t *pResponse)
-{
-	unsigned int i;
-	uint32_t     IV[4];
-
-	IV[0] = 0;
-	IV[1] = 0;
-	IV[2] = 0;
-	IV[3] = 0;
-
-	AES_Encrypt(pKey, IV, pIn, IV, true);
-
-	for (i = 0; i < 4; i++)
-		if (IV[i] != pResponse[i])
-			return true;
-
-	return false;
 }
 
 // session init, sends back version info and state
@@ -229,10 +193,7 @@ static void CMD_0514(const uint8_t *pBuffer)
 	Timestamp = pCmd->Timestamp;
 
 
-	gSerialConfigCountDown_500ms = 12; // 6 sec
-	
-	// turn the LCD backlight off
-	BACKLIGHT_TurnOff();
+	gSerialConfigCountDown_500ms = SERIAL_PTT_LOCK_500ms;
 
 	SendVersion();
 }
@@ -242,13 +203,15 @@ static void CMD_051B(const uint8_t *pBuffer)
 {
 	const CMD_051B_t *pCmd = (const CMD_051B_t *)pBuffer;
 	REPLY_051B_t      Reply;
-	bool              bLocked = false;
 
 	if (pCmd->Timestamp != Timestamp)
 		return;
 
-	gSerialConfigCountDown_500ms = 12; // 6 sec
+	// the reply buffer holds 128 bytes; upstream did not check
+	if (pCmd->Size > sizeof(Reply.Data.Data))
+		return;
 
+	gSerialConfigCountDown_500ms = SERIAL_PTT_LOCK_500ms;
 
 	memset(&Reply, 0, sizeof(Reply));
 	Reply.Header.ID   = 0x051C;
@@ -256,36 +219,23 @@ static void CMD_051B(const uint8_t *pBuffer)
 	Reply.Data.Offset = pCmd->Offset;
 	Reply.Data.Size   = pCmd->Size;
 
-	if (bHasCustomAesKey)
-		bLocked = gIsLocked;
-
-	if (!bLocked)
-		EEPROM_ReadBuffer(pCmd->Offset, Reply.Data.Data, pCmd->Size);
+	EEPROM_ReadBuffer(pCmd->Offset, Reply.Data.Data, pCmd->Size);
 
 	SendReply(&Reply, pCmd->Size + 8);
 }
 
 // write eeprom
-static void CMD_051D(const uint8_t *pBuffer)
+static void CMD_051D(const uint8_t *pBuffer, const uint16_t CommandSize)
 {
 	const CMD_051D_t *pCmd = (const CMD_051D_t *)pBuffer;
 	REPLY_051D_t Reply;
-	bool bReloadEeprom;
-	bool bIsLocked;
 
 	if (pCmd->Timestamp != Timestamp)
 		return;
 
-	gSerialConfigCountDown_500ms = 12; // 6 sec
-	
-	bReloadEeprom = false;
-
-
-	Reply.Header.ID   = 0x051E;
-	Reply.Header.Size = sizeof(Reply.Data);
-	Reply.Data.Offset = pCmd->Offset;
-
-	bIsLocked = bHasCustomAesKey ? gIsLocked : bHasCustomAesKey;
+	// the data must be whole 8-byte blocks, all inside the received frame
+	if ((pCmd->Size % 8) != 0 || sizeof(CMD_051D_t) + pCmd->Size > CommandSize)
+		return;
 
 	// Packet firmware: refuse the whole command, with no reply, if any block
 	// is unaligned or reaches the factory calibration (0x1E00 and up), so the
@@ -294,24 +244,14 @@ static void CMD_051D(const uint8_t *pBuffer)
 		if (!EEPROM_IsWritable(pCmd->Offset + (i * 8U)))
 			return;
 
-	if (!bIsLocked)
-	{
-		unsigned int i;
-		for (i = 0; i < (pCmd->Size / 8); i++)
-		{
-			const uint16_t Offset = pCmd->Offset + (i * 8U);
+	gSerialConfigCountDown_500ms = SERIAL_PTT_LOCK_500ms;
 
-			if (Offset >= 0x0F30 && Offset < 0x0F40)
-				if (!gIsLocked)
-					bReloadEeprom = true;
+	Reply.Header.ID   = 0x051E;
+	Reply.Header.Size = sizeof(Reply.Data);
+	Reply.Data.Offset = pCmd->Offset;
 
-			if ((Offset < 0x0E98 || Offset >= 0x0EA0) || !bIsInLockScreen || pCmd->bAllowPassword)
-				EEPROM_WriteBuffer(Offset, &pCmd->Data[i * 8U]);
-		}
-
-		if (bReloadEeprom)
-			SETTINGS_InitEEPROM();
-	}
+	for (unsigned int i = 0; i < (pCmd->Size / 8); i++)
+		EEPROM_WriteBuffer(pCmd->Offset + (i * 8U), &pCmd->Data[i * 8U]);
 
 	SendReply(&Reply, sizeof(Reply));
 }
@@ -344,73 +284,15 @@ static void CMD_0529(void)
 	SendReply(&Reply, sizeof(Reply));
 }
 
-static void CMD_052D(const uint8_t *pBuffer)
-{
-	const CMD_052D_t *pCmd = (const CMD_052D_t *)pBuffer;
-	REPLY_052D_t      Reply;
-	bool              bIsLocked;
-
-	Reply.Header.ID   = 0x052E;
-	Reply.Header.Size = sizeof(Reply.Data);
-
-	bIsLocked = bHasCustomAesKey;
-
-	if (!bIsLocked)
-		bIsLocked = IsBadChallenge(gCustomAesKey, gChallenge, pCmd->Response);
-
-	if (!bIsLocked)
-	{
-		bIsLocked = IsBadChallenge(gDefaultAesKey, gChallenge, pCmd->Response);
-		if (bIsLocked)
-			gTryCount++;
-	}
-
-	if (gTryCount < 3)
-	{
-		if (!bIsLocked)
-			gTryCount = 0;
-	}
-	else
-	{
-		gTryCount = 3;
-		bIsLocked = true;
-	}
-	
-	gIsLocked            = bIsLocked;
-	Reply.Data.bIsLocked = bIsLocked;
-
-	SendReply(&Reply, sizeof(Reply));
-}
-
-// session init, sends back version info and state
-// timestamp is a session id really
-// this command also disables dual watch, crossband, 
-// DTMF side tones, freq reverse, PTT ID, DTMF decoding, frequency offset
-// exits power save, sets main VFO to upper,
+// Same as 0x0514 (the vendor programming software's hello). Upstream also
+// changed several VFO settings here; none of them exist in this firmware.
 static void CMD_052F(const uint8_t *pBuffer)
 {
 	const CMD_052F_t *pCmd = (const CMD_052F_t *)pBuffer;
 
-	gEeprom.DUAL_WATCH                               = DUAL_WATCH_OFF;
-	gEeprom.CROSS_BAND_RX_TX                         = CROSS_BAND_OFF;
-	gEeprom.RX_VFO                                   = 0;
-	gEeprom.DTMF_SIDE_TONE                           = false;
-	gEeprom.VfoInfo[0].FrequencyReverse              = false;
-	gEeprom.VfoInfo[0].pRX                           = &gEeprom.VfoInfo[0].freq_config_RX;
-	gEeprom.VfoInfo[0].pTX                           = &gEeprom.VfoInfo[0].freq_config_TX;
-	gEeprom.VfoInfo[0].TX_OFFSET_FREQUENCY_DIRECTION = TX_OFFSET_FREQUENCY_DIRECTION_OFF;
-	gEeprom.VfoInfo[0].DTMF_PTT_ID_TX_MODE           = PTT_ID_OFF;
-
-
-	if (gCurrentFunction == FUNCTION_POWER_SAVE)
-		FUNCTION_Select(FUNCTION_FOREGROUND);
-
-	gSerialConfigCountDown_500ms = 12; // 6 sec
-
 	Timestamp = pCmd->Timestamp;
 
-	// turn the LCD backlight off
-	BACKLIGHT_TurnOff();
+	gSerialConfigCountDown_500ms = SERIAL_PTT_LOCK_500ms;
 
 	SendVersion();
 }
@@ -525,6 +407,7 @@ bool UART_IsCommandAvailable(void)
 		memset(UART_DMA_Buffer + gUART_WriteIndex, 0, TailIndex - gUART_WriteIndex);
 
 	gUART_WriteIndex = TailIndex;
+	gUART_CommandSize = Size;
 
 	if (UART_Command.Header.ID == 0x0514)
 		bIsEncrypted = false;
@@ -557,13 +440,7 @@ void UART_HandleCommand(void)
 			break;
 	
 		case 0x051D:
-			CMD_051D(UART_Command.Buffer);
-			break;
-	
-		case 0x051F:	// Not implementing non-authentic command
-			break;
-	
-		case 0x0521:	// Not implementing non-authentic command
+			CMD_051D(UART_Command.Buffer, gUART_CommandSize);
 			break;
 	
 		case 0x0527:
@@ -572,10 +449,6 @@ void UART_HandleCommand(void)
 	
 		case 0x0529:
 			CMD_0529();
-			break;
-	
-		case 0x052D:
-			CMD_052D(UART_Command.Buffer);
 			break;
 	
 		case 0x052F:

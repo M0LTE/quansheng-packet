@@ -17,9 +17,13 @@
 #ifndef APP_MAIN_H
 #define APP_MAIN_H
 
+#include <stdbool.h>
+
 #include "driver/keyboard.h"
 
 void MAIN_ProcessKeys(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld);
+void MAIN_ProcessSideKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld);
+void MAIN_Key_PTT(bool bKeyPressed);
+void MAIN_ToggleMonitor(void);
 
 #endif
-

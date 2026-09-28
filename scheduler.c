@@ -14,17 +14,8 @@
  *     limitations under the License.
  */
 
-#include "app/chFrScanner.h"
-#include "app/scanner.h"
-#include "audio.h"
 #include "functions.h"
-#include "helper/battery.h"
 #include "misc.h"
-#include "settings.h"
-
-#include "driver/backlight.h"
-#include "bsp/dp32g030/gpio.h"
-#include "driver/gpio.h"
 
 #define DECREMENT(cnt) \
 	do {               \
@@ -47,43 +38,15 @@ void SystickHandler(void);
 void SystickHandler(void)
 {
 	gGlobalSysTickCounter++;
-	
+
 	gNextTimeslice = true;
 
 	if ((gGlobalSysTickCounter % 50) == 0) {
 		gNextTimeslice_500ms = true;
-		
+
 		DECREMENT_AND_TRIGGER(gTxTimerCountdown_500ms, gTxTimeoutReached);
 		DECREMENT(gSerialConfigCountDown_500ms);
 	}
-
-	if ((gGlobalSysTickCounter & 3) == 0)
-		gNextTimeslice40ms = true;
-
-
-	DECREMENT(gFoundCDCSSCountdown_10ms);
-
-	DECREMENT(gFoundCTCSSCountdown_10ms);
-
-	if (gCurrentFunction == FUNCTION_FOREGROUND)
-		DECREMENT_AND_TRIGGER(gBatterySaveCountdown_10ms, gSchedulePowerSave);
-
-	if (gCurrentFunction == FUNCTION_POWER_SAVE)
-		DECREMENT_AND_TRIGGER(gPowerSave_10ms, gPowerSaveCountdownExpired);
-
-	if (gScanStateDir == SCAN_OFF && !gCssBackgroundScan && gEeprom.DUAL_WATCH != DUAL_WATCH_OFF)
-		if (gCurrentFunction != FUNCTION_MONITOR && gCurrentFunction != FUNCTION_TRANSMIT && gCurrentFunction != FUNCTION_RECEIVE)
-			DECREMENT_AND_TRIGGER(gDualWatchCountdown_10ms, gScheduleDualWatch);
-
-
-	if (gScanStateDir != SCAN_OFF)
-		if (gCurrentFunction != FUNCTION_MONITOR && gCurrentFunction != FUNCTION_TRANSMIT)
-			DECREMENT_AND_TRIGGER(gScanPauseDelayIn_10ms, gScheduleScanListen);
-
-	DECREMENT_AND_TRIGGER(gTailToneEliminationCountdown_10ms, gFlagTailToneEliminationComplete);
-
-
-
 
 	DECREMENT(boot_counter_10ms);
 }

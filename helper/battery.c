@@ -23,7 +23,8 @@
 #include "misc.h"
 #include "settings.h"
 #include "ui/battery.h"
-#include "ui/menu.h"
+#include "audio.h"
+#include "driver/bk4819.h"
 #include "ui/ui.h"
 
 uint16_t          gBatteryCalibration[6];
@@ -48,7 +49,6 @@ typedef enum {
 uint16_t          lowBatteryCountdown;
 const uint16_t 	  lowBatteryPeriod = 30;
 
-volatile uint16_t gPowerSave_10ms;
 
 
 const uint16_t Voltage2PercentageTable[][7][2] = {
@@ -117,9 +117,6 @@ void BATTERY_GetReadings(const bool bDisplayBatteryLevel)
 	}
 
 
-	if ((gScreenToDisplay == DISPLAY_MENU) && UI_MENU_GetCurrentMenuId() == MENU_VOL)
-		gUpdateDisplay = true;
-
 	if (gBatteryCurrent < 501)
 	{
 		if (gChargingWithTypeC)
@@ -182,9 +179,6 @@ void BATTERY_TimeSlice500ms(void)
 	// not transmitting
 
 	if (lowBatteryCountdown < lowBatteryPeriod) {
-		if (lowBatteryCountdown == lowBatteryPeriod-1 && !gChargingWithTypeC && !gLowBatteryConfirmed) {
-			AUDIO_PlayBeep(BEEP_500HZ_60MS_DOUBLE_BEEP);
-		}
 		return;
 	}
 
@@ -194,23 +188,22 @@ void BATTERY_TimeSlice500ms(void)
 		return;
 	}
 
-	// not on charge
-	if (!gLowBatteryConfirmed) {
-		AUDIO_PlayBeep(BEEP_500HZ_60MS_DOUBLE_BEEP);
-	}
-
+	// not on charge (no low battery beep in this firmware: it would go to the TNC)
 	if (gBatteryDisplayLevel != 0) {
 		return;
 	}
 
 
+	// battery critical: receiver off, wait for a charger (APP_TimeSlice500ms)
 	gReducedService = true;
 
-	FUNCTION_Select(FUNCTION_POWER_SAVE);
+	AUDIO_AudioPathOff();
+	BK4819_Sleep();
+	BK4819_ToggleGpioOut(BK4819_GPIO0_PIN28_RX_ENABLE, false);
 
 	ST7565_HardwareReset();
 
-	if (gEeprom.BACKLIGHT_TIME < (ARRAY_SIZE(gSubMenu_BACKLIGHT) - 1)) {
+	if (gEeprom.BACKLIGHT_TIME < 7) {
 		BACKLIGHT_TurnOff();
 	}
 }

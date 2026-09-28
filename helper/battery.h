@@ -32,7 +32,6 @@ extern bool              gLowBattery;
 extern bool              gLowBatteryConfirmed;
 extern uint16_t          gBatteryCheckCounter;
 
-extern volatile uint16_t gPowerSave_10ms;
 
 typedef enum {
     BATTERY_TYPE_1600_MAH,
