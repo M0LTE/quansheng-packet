@@ -137,6 +137,7 @@ void Main(void)
 	}
 
 	while (true) {
+		APP_CheckPtt();
 		APP_Update();
 
 		if (gNextTimeslice) {

@@ -67,9 +67,9 @@ bool              g_SquelchLost;
 
 bool              gKeyBeingHeld;
 bool              gPttIsPressed;
-uint8_t           gPttDebounceCounter;
 
 bool              gUpdateDisplay;
+bool              gFixDisplayAfterTx;
 
 volatile bool     gNextTimeslice;
 volatile uint8_t  boot_counter_10ms;

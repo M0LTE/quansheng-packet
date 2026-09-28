@@ -52,6 +52,7 @@ OBJS += frequencies.o
 OBJS += functions.o
 OBJS += helper/battery.o
 OBJS += misc.o
+OBJS += ptt.o
 OBJS += radio.o
 OBJS += scheduler.o
 OBJS += settings.o

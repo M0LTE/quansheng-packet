@@ -28,6 +28,7 @@ Flash for the firmware is 61440 bytes (60 KiB). All sizes are gcc 10.3.1 (Docker
 | Settings reload after UART writes, version check (`5e77b4b`) | 22524 | 38916 |
 | Review fixes (see below) | 22660 | 38780 |
 | Bench deviation defaults, register override table (`b2e8a25`) | 22972 | 38468 |
+| 1 ms PTT sampling, timing settings, key-up before redraw | 23356 | 38084 |
 
 ## What was removed
 
@@ -99,6 +100,35 @@ The same settings are in the menu (MENU, then UP/DOWN, MENU to edit and again to
 
 Keys on the main screen: digits enter a frequency (or a channel number in memory mode), UP/DOWN step, F then 3 switches frequency and memory mode, F then 6 cycles power, F held locks the keypad, SIDE1 toggles monitor (squelch open).
 
+## Key-up and key-down
+
+**PTT sampling.** SysTick now runs at 1 ms (upstream 10 ms; the 10 ms and 500 ms slices are derived from it). `ptt.c` samples the PTT line every tick with separate press and release debounce, and the main loop acts on a change at once instead of waiting for the next 10 ms slice (upstream: 3 samples of 10 ms both ways, 20 to 30 ms).
+
+Timing settings, 8 bytes at `0x1D50` (one UART write; not in the menu; used only with a valid settings block, blanked with the override table on the first menu save over foreign data):
+
+| Address | Setting | Range | Default |
+|---|---|---|---|
+| 0x1D50 | PTT press debounce, ms | 1 to 40 | 5 |
+| 0x1D51 | PTT release debounce, ms | 1 to 40 | 3 |
+| 0x1D52 | delay after PA enable, before the PA bias, ms | 0 to 20 | 5 (upstream) |
+| 0x1D53 | delay after the PA bias, ms | 0 to 20 | 10 (upstream) |
+| 0x1D54 | reserved, 0xFF | | |
+
+**Why a 5 ms press debounce is still safe with UART on the same contact.** A tick only counts towards a press if the line reads low continuously for 280 us (`PTT_WINDOW_US`), read in a tight loop well under 1 us per read. At 38400 baud one character is 260 us and always ends in a high stop bit of 26 us, and the line idles high between characters, so any UART traffic, even an unbroken run of 0x00 bytes (low for 9 of every 10 bits), shows a high level inside every 280 us window and never counts. A real press (the AIOC holding the line low) passes. The busy read runs only while the radio is not keyed and the line reads low, so it costs at most 0.28 ms per ms, and only during a candidate press or during serial traffic. On top of that the payload of obfuscated frames is XORed with a 16-byte key (so zero runs become mixed bytes), frames start with `AB CD`, and the post-frame PTT lock (1 to 1.5 s after every valid frame) still holds PTT off and forces release. The host tests sweep a 2000-byte stream of zero bytes and of random bytes over every start phase: no window passes and nothing keys even with a 1 ms debounce; shortening the window to 200 us makes them fail. Limit: this relies on the host sending at 38400 baud. A host at a much lower baud rate (a character longer than 280 us) is only covered by the post-frame lock.
+
+**Key-up path**, with the defaults: 5 ms debounce plus up to 1.3 ms of tick phase and window, then the main loop picks the change up (usually well under 1 ms, longer if it is in the middle of a screen redraw or a UART command), then about 30 register operations (roughly 3 ms of bit-banged SPI: filters, frequency, TX set-up, TX enable), PA enable, 5 ms, PA bias (RF appears here), 10 ms (ready for modulation). The screen is no longer redrawn before key-up; the 10 ms slice redraws it afterwards. Expected: RF about 14 ms and ready for modulation about 24 ms after PTT goes low; with the PA delays at 1 and 2 ms, about 10 and 12 ms. Upstream measured 61 to 66 ms to RF.
+
+**Key-down path**: 3 ms debounce plus up to 1 ms, main loop latency, then the PA bias goes to zero and the PA enable and red LED go off first (these are the same writes upstream made, but upstream changed filters and bandwidth before them while still keyed), then the full receive set-up. Expected: RF gone about 4 to 5 ms after PTT is released (upstream measured 33 to 37 ms). The PA bias still steps straight to zero, as upstream; if the RSP1 shows a click, the PA delay settings do not help there and a ramp would be a firmware change.
+
+**Also moved out of the key-down path:** the LCD re-initialisation after transmit (`ST7565_FixInterfGlitch`) now runs just before the next redraw in the 10 ms slice.
+
+**Left in the release path, could be deferred later** (not changed, because each affects receive readiness or needs measuring):
+- `RADIO_SetupRegisters` does a full receive set-up after every transmission: bandwidth and filter registers, the squelch thresholds, frequency, and `BK4819_RX_TurnOn`, which writes REG_30 to 0 and back and so re-runs the VCO calibration. On a simplex frequency most of this is unchanged from before the transmission; skipping the unchanged parts could bring receive audio back sooner.
+- The loop that drains pending BK4819 interrupts (REG_0C, with a 1 ms delay per pass).
+- The same full set-up runs on every squelch close (end of each received frame), which matters for the next frame's turnaround.
+- Postponed EEPROM saves (8 ms per 8-byte block) run after the transmission ends if a key was held during it; rare, and after RF is already off.
+- TX timeout and the battery ADC read are unaffected.
+
 ## UART commands
 
 38400 8N1, upstream framing (see the bench repo's `docs/k5-firmware.md`). Plain mode after a hello whose raw id is `14 05`.
@@ -137,4 +167,4 @@ Keys on the main screen: digits enter a frequency (or a channel number in memory
 
 ## Left for measurement to decide
 
-Whether narrow at 0x762 really gives half the wide deviation with the chip in its 12.5 kHz mode, the TX low-frequency lift (+6.7 dB at 50 to 63 Hz, +2 dB at 315 Hz, -1.1 dB at 3.15 kHz, -5.5 dB at 6 kHz re 1 kHz, measured), the RX gain defaults (target: 3 kHz deviation near -10 dBFS at the AIOC), whether keeping REG_7E bit 15 during TX matters at all, REG_43 receive bandwidths, REG_47 output select (FM against BASEBAND1), and the turnaround path: the 30 ms PTT debounce, the screen redraw before key-up, the full receiver set-up (including a PLL retune) on every squelch close and after every transmission.
+Whether narrow at 0x762 really gives half the wide deviation with the chip in its 12.5 kHz mode, the TX low-frequency lift (+6.7 dB at 50 to 63 Hz, +2 dB at 315 Hz, -1.1 dB at 3.15 kHz, -5.5 dB at 6 kHz re 1 kHz, measured), the RX gain defaults (target: 3 kHz deviation near -10 dBFS at the AIOC), whether keeping REG_7E bit 15 during TX matters at all, REG_43 receive bandwidths, REG_47 output select (FM against BASEBAND1), and the rest of the turnaround path listed under "Key-up and key-down".

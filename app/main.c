@@ -281,7 +281,6 @@ void MAIN_Key_PTT(bool bKeyPressed)
 
 	// request start TX
 	gFlagPrepareTX      = true;
-	gPttDebounceCounter = 0;
 
 	if (gScreenToDisplay != DISPLAY_MENU)     // 1of11 .. don't close the menu
 		gRequestDisplayScreen = DISPLAY_MAIN;

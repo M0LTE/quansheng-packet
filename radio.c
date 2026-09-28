@@ -340,11 +340,14 @@ void RADIO_SetTxParameters(void)
 
 	BK4819_ToggleGpioOut(BK4819_GPIO1_PIN29_PA_ENABLE, true);
 
-	SYSTEM_DelayMs(5);
+	// PA ramp: upstream waited 5 ms then 10 ms; both are settings now
+	if (gEeprom.PA_ENABLE_DELAY_MS)
+		SYSTEM_DelayMs(gEeprom.PA_ENABLE_DELAY_MS);
 
 	BK4819_SetupPowerAmplifier(gVfo->TXP_CalculatedSetting, gVfo->Frequency);
 
-	SYSTEM_DelayMs(10);
+	if (gEeprom.PA_BIAS_DELAY_MS)
+		SYSTEM_DelayMs(gEeprom.PA_BIAS_DELAY_MS);
 
 	BK4819_ExitSubAu();   // no CTCSS/DCS
 
@@ -389,6 +392,12 @@ void RADIO_PrepareTX(void)
 
 void RADIO_SendEndOfTransmission(void)
 {
-	// No roger beep, no DTMF, no tail tone: straight back to receive.
+	// No roger beep, no DTMF, no tail tone. Drop the carrier first (the same
+	// PA writes RADIO_SetupRegisters makes, just earlier: upstream changed
+	// the filters and bandwidth while still keyed), then set up receive.
+	BK4819_SetupPowerAmplifier(0, 0);
+	BK4819_ToggleGpioOut(BK4819_GPIO1_PIN29_PA_ENABLE, false);
+	BK4819_ToggleGpioOut(BK4819_GPIO5_PIN1_RED, false);
+
 	RADIO_SetupRegisters(false);
 }

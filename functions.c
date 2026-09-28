@@ -44,14 +44,15 @@ static void FUNCTION_Transmit(void)
 	// if DTMF is enabled when TX'ing, it changes the TX audio filtering !! .. 1of11
 	BK4819_DisableDTMF();
 
-	gUpdateStatus = true;
-
-	GUI_DisplayScreen();
-
+	// Key up first; the screen and status line are redrawn afterwards by
+	// the 10 ms slice (upstream redrew the whole screen before key-up).
 	RADIO_SetTxParameters();
 
 	// turn the RED LED on
 	BK4819_ToggleGpioOut(BK4819_GPIO5_PIN1_RED, true);
+
+	gUpdateStatus  = true;
+	gUpdateDisplay = true;
 }
 
 void FUNCTION_Select(FUNCTION_Type_t Function)
@@ -62,8 +63,10 @@ void FUNCTION_Select(FUNCTION_Type_t Function)
 
 	switch (Function) {
 		case FUNCTION_FOREGROUND:
-			if (PreviousFunction == FUNCTION_TRANSMIT)
-				ST7565_FixInterfGlitch();
+			if (PreviousFunction == FUNCTION_TRANSMIT) {
+				gFixDisplayAfterTx = true;   // done before the next redraw
+				gUpdateDisplay     = true;
+			}
 			gUpdateStatus = true;
 			break;
 

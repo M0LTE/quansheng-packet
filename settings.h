@@ -86,6 +86,20 @@ enum {
 // clamped to PKT_DEVIATION_MAX. The table is read at power-on and after a
 // UART EEPROM write session, like the settings.
 #define SETTINGS_REG_OVERRIDES    0x1D10u
+
+// Key-up and key-down timing, 8 bytes at 0x1D50 (after the override table),
+// used only with a valid settings block like the table. One 8-byte UART
+// write changes all of it; the menu does not show it.
+//
+//   0x1D50  PTT press debounce, ms, 1 to 40 (default 5)
+//   0x1D51  PTT release debounce, ms, 1 to 40 (default 3)
+//   0x1D52  delay after PA enable, before the PA bias, ms, 0 to 20 (default 5)
+//   0x1D53  delay after the PA bias, ms, 0 to 20 (default 10)
+//   0x1D54  reserved (0xFF)
+#define SETTINGS_TIMING           0x1D50u
+#define PA_DELAY_MAX_MS           20u
+#define PA_ENABLE_DELAY_DEFAULT   5u
+#define PA_BIAS_DELAY_DEFAULT     10u
 #define REG_OVERRIDE_MAX          8u
 #define REG_OVERRIDE_TX           0x01u
 #define REG_OVERRIDE_RX           0x02u
@@ -117,6 +131,11 @@ typedef struct {
 	uint16_t              DEVIATION_NARROW;
 	uint8_t               RX_GAIN;
 	uint8_t               RX_DAC_GAIN;
+
+	uint8_t               PTT_PRESS_MS;
+	uint8_t               PTT_RELEASE_MS;
+	uint8_t               PA_ENABLE_DELAY_MS;
+	uint8_t               PA_BIAS_DELAY_MS;
 
 	bool                  KEY_LOCK;
 	uint8_t               BACKLIGHT_TIME;

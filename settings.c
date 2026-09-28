@@ -20,6 +20,7 @@
 #include "driver/eeprom.h"
 #include "misc.h"
 #include "packet.h"
+#include "ptt.h"
 #include "settings.h"
 
 EEPROM_Config_t gEeprom = { 0 };
@@ -81,6 +82,16 @@ void SETTINGS_InitEEPROM(void)
 	if (!blockValid)
 		memset(Data, 0xFF, 16);   // blank, or left over from another firmware: all defaults
 	LoadRegOverrides(blockValid);
+
+	// 1D50..1D57: key-up and key-down timing
+	uint8_t T[8];
+	EEPROM_ReadBuffer(SETTINGS_TIMING, T, 8);
+	if (!blockValid)
+		memset(T, 0xFF, 8);
+	gEeprom.PTT_PRESS_MS       = (T[0] >= PTT_DEBOUNCE_MIN_MS && T[0] <= PTT_DEBOUNCE_MAX_MS) ? T[0] : PTT_PRESS_DEFAULT_MS;
+	gEeprom.PTT_RELEASE_MS     = (T[1] >= PTT_DEBOUNCE_MIN_MS && T[1] <= PTT_DEBOUNCE_MAX_MS) ? T[1] : PTT_RELEASE_DEFAULT_MS;
+	gEeprom.PA_ENABLE_DELAY_MS = ByteOr(T[2], PA_DELAY_MAX_MS, PA_ENABLE_DELAY_DEFAULT);
+	gEeprom.PA_BIAS_DELAY_MS   = ByteOr(T[3], PA_DELAY_MAX_MS, PA_BIAS_DELAY_DEFAULT);
 	const uint16_t devWide   = Data[4] | (Data[5] << 8);
 	const uint16_t devNarrow = Data[6] | (Data[7] << 8);
 	gEeprom.SQUELCH_LEVEL    = ByteOr(Data[1], 9, 1);
@@ -184,6 +195,7 @@ void SETTINGS_SaveSettings(void)
 		memset(State, 0xFF, sizeof(State));
 		for (unsigned int i = 0; i < REG_OVERRIDE_MAX; i++)
 			EEPROM_WriteBuffer(SETTINGS_REG_OVERRIDES + i * 8, State);
+		EEPROM_WriteBuffer(SETTINGS_TIMING, State);
 	}
 
 	memset(State, 0xFF, sizeof(State));

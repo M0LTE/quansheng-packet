@@ -16,6 +16,7 @@
 
 #include "functions.h"
 #include "misc.h"
+#include "ptt.h"
 
 #define DECREMENT(cnt) \
 	do {               \
@@ -31,12 +32,19 @@
 	} while (0)
 
 static volatile uint32_t gGlobalSysTickCounter;
+static uint8_t           gTicks1ms;
 
 void SystickHandler(void);
 
-// we come here every 10ms
+// we come here every 1 ms: PTT every tick, everything else every 10 ms
 void SystickHandler(void)
 {
+	PTT_Tick();
+
+	if (++gTicks1ms < 10)
+		return;
+	gTicks1ms = 0;
+
 	gGlobalSysTickCounter++;
 
 	gNextTimeslice = true;

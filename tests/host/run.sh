@@ -12,3 +12,6 @@ gcc $CFLAGS -o "$out" \
 gcc $CFLAGS -I tests/host -I external/CMSIS_5/Device/ARM/ARMCM0/Include -include tests/host/uart_shim.h -o "$out-uart" \
 	tests/host/test_uart.c app/uart.c misc.c
 "$out-uart"
+
+gcc $CFLAGS -DPTT_HOST_TEST -o "$out-ptt" tests/host/test_ptt.c ptt.c
+"$out-ptt"

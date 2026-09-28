@@ -23,7 +23,7 @@ static uint32_t gTickMultiplier;
 
 void SYSTICK_Init(void)
 {
-	SysTick_Config(480000);
+	SysTick_Config(48000);   // 1 ms (upstream: 10 ms); SystickHandler divides
 	gTickMultiplier = 48;
 }
 

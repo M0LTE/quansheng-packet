@@ -37,6 +37,7 @@
 #include "helper/battery.h"
 #include "misc.h"
 #include "packet.h"
+#include "ptt.h"
 #include "radio.h"
 #include "settings.h"
 #include "ui/battery.h"
@@ -206,35 +207,6 @@ void APP_Update(void)
 // called every 10ms
 static void CheckKeys(void)
 {
-// -------------------- PTT ------------------------
-	if (gPttIsPressed)
-	{
-		if (GPIO_CheckBit(&GPIOC->DATA, GPIOC_PIN_PTT) || SerialConfigInProgress())
-		{	// PTT released or serial comms config in progress
-			if (++gPttDebounceCounter >= 3 || SerialConfigInProgress())	    // 30ms
-			{	// stop transmitting
-				ProcessKey(KEY_PTT, false, false);
-				gPttIsPressed = false;
-				if (gKeyReading1 != KEY_INVALID)
-					gPttWasReleased = true;
-			}
-		}
-		else
-			gPttDebounceCounter = 0;
-	}
-	else if (!GPIO_CheckBit(&GPIOC->DATA, GPIOC_PIN_PTT) && !SerialConfigInProgress())
-	{	// PTT pressed
-		if (++gPttDebounceCounter >= 3)	    // 30ms
-		{	// start transmitting
-			boot_counter_10ms   = 0;
-			gPttDebounceCounter = 0;
-			gPttIsPressed       = true;
-			ProcessKey(KEY_PTT, true, false);
-		}
-	}
-	else
-		gPttDebounceCounter = 0;
-
 // --------------------- OTHER KEYS ----------------------------
 
 	// scan the hardware keys
@@ -302,6 +274,28 @@ static void CheckKeys(void)
 	}
 }
 
+// Called on every pass of the main loop: acts on the PTT state the 1 ms
+// SysTick debouncer (ptt.c) keeps, without waiting for the 10 ms slice.
+void APP_CheckPtt(void)
+{
+	const bool pressed = PTT_IsPressed();
+
+	if (pressed == gPttIsPressed)
+		return;
+
+	gPttIsPressed = pressed;
+	boot_counter_10ms = 0;
+
+	if (pressed) {
+		ProcessKey(KEY_PTT, true, false);
+	}
+	else {
+		ProcessKey(KEY_PTT, false, false);
+		if (gKeyReading1 != KEY_INVALID)
+			gPttWasReleased = true;
+	}
+}
+
 void APP_TimeSlice10ms(void)
 {
 	gNextTimeslice = false;
@@ -319,6 +313,11 @@ void APP_TimeSlice10ms(void)
 
 	if (gUpdateDisplay) {
 		gUpdateDisplay = false;
+		if (gFixDisplayAfterTx) {
+			// moved out of the key-down path: re-init the LCD after TX
+			gFixDisplayAfterTx = false;
+			ST7565_FixInterfGlitch();
+		}
 		GUI_DisplayScreen();
 	}
 

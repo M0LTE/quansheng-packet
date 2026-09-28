@@ -123,9 +123,9 @@ extern bool                  g_SquelchLost;
 
 extern bool                  gKeyBeingHeld;
 extern bool                  gPttIsPressed;
-extern uint8_t               gPttDebounceCounter;
 extern volatile bool         gNextTimeslice;
 extern bool                  gUpdateDisplay;
+extern bool                  gFixDisplayAfterTx;
 extern volatile uint8_t      gVFOStateResumeCountdown_500ms;
 extern volatile uint8_t      boot_counter_10ms;
 
