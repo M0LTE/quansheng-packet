@@ -27,7 +27,7 @@ Flash for the firmware is 61440 bytes (60 KiB). All sizes are gcc 10.3.1 (Docker
 | App layer replaced by the packet station (`c991086`) | 22432 | 39008 |
 | Settings reload after UART writes, version check (`5e77b4b`) | 22524 | 38916 |
 | Review fixes (see below) | 22660 | 38780 |
-| Bench deviation defaults, register override table | see git log | |
+| Bench deviation defaults, register override table (`b2e8a25`) | 22972 | 38468 |
 
 ## What was removed
 
