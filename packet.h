@@ -28,11 +28,13 @@
 #ifndef PACKET_H
 #define PACKET_H
 
-// REG_7D: mic sensitivity. <4:0> is the gain, 0.5 dB per step (0 to 31).
-// The upper bits are the upstream value.
+// REG_7D: mic sensitivity. <4:0> is the gain, nominally 0.5 dB per step
+// (0 to 31). Measured on the bench K5 (2026-09-28): the whole range moves
+// the deviation by only about 0.5 dB, so REG_40 sets the level. The upper
+// bits are the upstream value.
 #define PKT_REG_7D_BASE          0xE940u
 #define PKT_MIC_GAIN_MAX         31u
-#define PKT_MIC_GAIN_DEFAULT     0u      // upstream DIG value
+#define PKT_MIC_GAIN_DEFAULT     31u
 
 // REG_47 while transmitting: AF output muted, <0> = 1 bypasses all AF TX
 // filters. <14> is cleared, as upstream DIG does (undocumented).
@@ -52,12 +54,19 @@
 
 // REG_40: TX deviation. <11:0> is the deviation, <12> is set as upstream
 // does, <15:13> keep the chip's own power-on value (read after soft reset).
-// Upstream DIG used 0x383 wide and 0x4D6 narrow, so wide was 2.8 dB below
-// narrow. The default here is the chip default 0x4D0 for both; the chip's
-// bandwidth mode (REG_43) does the rest. Measurement decides.
+//
+// <11:0> is logarithmic (bench K5, 2026-09-28): +0x100 doubles the
+// deviation, about 0.0235 dB per LSB. 0x862 gives 3.13 kHz for a 999 Hz
+// tone at -6 dBFS from the AIOC (mic level), linear up to 0 dBFS; 0x800
+// gives 3.67 kHz at -1.94 dBFS. From 0xB00 up the value wraps to near zero
+// deviation, so the settings are clamped to PKT_DEVIATION_MAX.
+// Narrow is half the wide deviation: 0x862 - 0x100 * log2(5 / 2.5) = 0x762.
+// (Upstream DIG used 0x383 wide and 0x4D6 narrow.)
 #define PKT_REG_40_ENABLE        0x1000u
-#define PKT_DEVIATION_MAX        0x0FFFu
-#define PKT_DEVIATION_DEFAULT    0x04D0u
+#define PKT_REG_40_DEV_MASK      0x0FFFu
+#define PKT_DEVIATION_MAX        0x0A7Fu
+#define PKT_DEVIATION_WIDE_DEFAULT    0x0862u
+#define PKT_DEVIATION_NARROW_DEFAULT  0x0762u
 
 // REG_48: RX audio. <15:12> = 11 (upstream, undocumented), <11:10> AF RX
 // gain 1 = 0 dB, <9:4> AF RX gain 2 (0 to 63, 0.5 dB steps), <3:0> AF DAC

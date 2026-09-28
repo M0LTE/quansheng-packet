@@ -27,6 +27,7 @@ Flash for the firmware is 61440 bytes (60 KiB). All sizes are gcc 10.3.1 (Docker
 | App layer replaced by the packet station (`c991086`) | 22432 | 39008 |
 | Settings reload after UART writes, version check (`5e77b4b`) | 22524 | 38916 |
 | Review fixes (see below) | 22660 | 38780 |
+| Bench deviation defaults, register override table | see git log | |
 
 ## What was removed
 
@@ -48,8 +49,8 @@ Always the upstream DIG path: no pre-emphasis or de-emphasis, no TX or RX audio 
 
 | Register | Value | Where |
 |---|---|---|
-| REG_7D | `0xE940` or mic gain | settings (mic gain) |
-| REG_40 | top 3 bits from the chip, bit 12, deviation | settings (wide and narrow deviation) |
+| REG_7D | `0xE940` or mic gain | settings (mic gain); on the bench the whole 0 to 31 range moves deviation by only about 0.5 dB |
+| REG_40 | top 3 bits from the chip, bit 12, deviation | settings (wide and narrow deviation); logarithmic, see below |
 | REG_48 | `11<<12`, gain 1 0 dB, gain 2, DAC gain | settings (RX gain, RX DAC gain) |
 | REG_47 (TX) | `0x2041`: AF muted, TX filters bypassed | `PKT_REG_47_TX` |
 | REG_7E | DC filters off; bit 15 set for TX, cleared on RX | `PKT_REG_7E_*` |
@@ -67,14 +68,30 @@ Stored in a 16-byte block at EEPROM `0x1D00` (the old DTMF contacts area). The b
 | 0x1D00 | layout version | 1 | |
 | 0x1D01 | squelch | 0 (open) to 9 | 1 |
 | 0x1D02 | TX timeout | 0 to 6 = 5, 10, 15, 20, 30, 60, 120 s | 4 (30 s) |
-| 0x1D03 | mic gain, REG_7D<4:0>, 0.5 dB steps | 0 to 31 | 0 (upstream DIG) |
-| 0x1D04 | wide deviation, REG_40<11:0>, u16 LE | 0 to 4095 | 0x4D0 |
-| 0x1D06 | narrow deviation, REG_40<11:0>, u16 LE | 0 to 4095 | 0x4D0 |
+| 0x1D03 | mic gain, REG_7D<4:0> | 0 to 31 | 31 |
+| 0x1D04 | wide deviation, REG_40<11:0>, u16 LE | 0 to 0xA7F | 0x862 (3.13 kHz at -6 dBFS) |
+| 0x1D06 | narrow deviation, REG_40<11:0>, u16 LE | 0 to 0xA7F | 0x762 (half the wide deviation) |
 | 0x1D08 | RX AF gain 2, REG_48<9:4>, 0.5 dB steps | 0 to 63 | factory calibration (0x1F8E) |
 | 0x1D09 | RX DAC gain, REG_48<3:0>, about 2 dB steps | 0 to 15 | 15 |
 | 0x1D0A | backlight | 0 (off) to 7 (on) | 3 (20 s) |
 | 0x1D0B | battery type | 0 = 1600, 1 = 2200 mAh | 0 |
 | 0x1D0C | key lock | 0, 1 | 0 |
+
+**Deviation is logarithmic.** Measured on the bench K5 (2026-09-28): +0x100 in REG_40<11:0> doubles the deviation, about 0.0235 dB per step. 0x862 gives 3.13 kHz for a 999 Hz tone at -6 dBFS from the AIOC at mic level, linear up to 0 dBFS; 0x800 gives 3.67 kHz at -1.94 dBFS. From 0xB00 up the chip wraps to near zero deviation, so both settings (and any REG_40 override) are clamped to 0xA7F. Narrow is 0x100 below wide, which halves the deviation. A value above 0xA7F in EEPROM means "use the default".
+
+### Register override table
+
+For experiments without reflashing (TX filters and so on), 8 entries of 8 bytes at `0x1D10..0x1D4F`. It is used only when the settings block has its version byte, and the first menu save over foreign data in `0x1D00` blanks it.
+
+| Offset | Field |
+|---|---|
+| +0 | phase: bit 0 = after the TX set-up (every key-up), bit 1 = after the RX set-up (every return to receive and every squelch open); 0 or 0xFF ends the list |
+| +1 | BK4819 register; 0xFF ends the list |
+| +2 | AND mask, u16 LE |
+| +4 | OR value, u16 LE |
+| +6 | reserved, 0xFF |
+
+The register becomes `(value & mask) | or`, written after all of the firmware's own writes for that phase, so it wins. Refused (skipped): 0x00 soft reset, 0x30 TX/RX enables, 0x33 GPIO outputs (PA enable, RX enable, LNA switch, LEDs), 0x36 PA bias and gain, 0x37 power and LDOs, 0x38 and 0x39 frequency, 0x3B and 0x3C crystal trim, and anything above 0x7F. A REG_40 result is clamped to 0xA7F. The table is read at power-on and after a UART write session, like the settings; each entry is one 8-byte UART write. Example: `01 2B F8 FF 00 00 FF FF` clears REG_2B<2:0> on every key-up, which turns the TX HPF300, LPF and pre-emphasis back on.
 
 Other EEPROM the firmware reads: channel indices at `0x0E80` (and writes them), S-meter levels at `0x0EA0`, TX band limits at `0x0F40` (no menu), channel attributes at `0x0D60`. Calibration (`0x1E00` up) is read only.
 
@@ -104,7 +121,7 @@ Keys on the main screen: digits enter a frequency (or a channel number in memory
 ## Fixes
 
 - **AGC.** Upstream DIG sets REG_7E bit 15 (AGC fix) at every key-up and never cleared it, so after the first transmission receive ran at a fixed AGC index (the maximum). It is now cleared on every return to receive. Receive levels measured on upstream DIG after any transmission were taken with the AGC frozen, so expect them to change.
-- **Deviation.** Upstream DIG wrote REG_40 = 0x383 wide and 0x4D6 narrow, so wide was 2.8 dB below narrow. Both are now settings, default 0x4D0 (the chip default) so that the chip's bandwidth mode does the wide/narrow difference, as in voice mode. That makes wide 2.7 dB hotter than upstream DIG and leaves narrow the same within 0.05 dB. The top 3 bits are read from the chip after its reset, not before.
+- **Deviation.** Upstream DIG wrote REG_40 = 0x383 wide and 0x4D6 narrow, so wide was 2.8 dB below narrow. Both are now settings, clamped below the wrap at 0xB00, with bench-measured defaults: 0x862 wide (3.13 kHz at -6 dBFS) and 0x762 narrow (half), and mic gain 31. The top 3 bits are read from the chip after its reset, not before.
 - **Calibration.** Upstream wrote a build-options byte to 0x1FF0 on every boot and could save battery calibration from the menu. This firmware never writes 0x1E00 and up (checked in the EEPROM driver and in the UART handler).
 - **TX timeout** returns to receive at once, and the next transmission needs PTT released first. It has 0.5 s resolution.
 - **Nothing is saved during a transmission.** Saves postponed while UP/DOWN was held, menu changes and the receiver set-up that follows them wait until TX ends; EXIT held does not turn the monitor off mid-transmission.
@@ -120,4 +137,4 @@ Keys on the main screen: digits enter a frequency (or a channel number in memory
 
 ## Left for measurement to decide
 
-Mic gain and deviation defaults (plan target 3 kHz for -6 dBFS from the AIOC), whether REG_40 behaves linearly and how narrow scales it, the RX gain defaults (target: 3 kHz deviation near -10 dBFS at the AIOC), whether keeping REG_7E bit 15 during TX matters at all, REG_43 receive bandwidths, REG_47 output select (FM against BASEBAND1), and the turnaround path: the 30 ms PTT debounce, the screen redraw before key-up, the full receiver set-up (including a PLL retune) on every squelch close and after every transmission.
+Whether narrow at 0x762 really gives half the wide deviation with the chip in its 12.5 kHz mode, the TX low-frequency lift (+6.7 dB at 50 to 63 Hz, +2 dB at 315 Hz, -1.1 dB at 3.15 kHz, -5.5 dB at 6 kHz re 1 kHz, measured), the RX gain defaults (target: 3 kHz deviation near -10 dBFS at the AIOC), whether keeping REG_7E bit 15 during TX matters at all, REG_43 receive bandwidths, REG_47 output select (FM against BASEBAND1), and the turnaround path: the 30 ms PTT debounce, the screen redraw before key-up, the full receiver set-up (including a PLL retune) on every squelch close and after every transmission.

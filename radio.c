@@ -242,6 +242,21 @@ void RADIO_SetRxAudio(void)
 		((gEeprom.RX_DAC_GAIN & PKT_RX_DAC_GAIN_MAX) << 0));
 }
 
+// The register override table (settings.h), last word on the registers for
+// this phase.
+void RADIO_ApplyRegOverrides(uint8_t phase)
+{
+	for (unsigned int i = 0; i < gRegOverrideCount; i++) {
+		const RegOverride_t *o = &gRegOverrides[i];
+		if (!(o->phase & phase))
+			continue;
+		uint16_t v = (BK4819_ReadRegister(o->reg) & o->andMask) | o->orValue;
+		if (o->reg == BK4819_REG_40 && (v & PKT_REG_40_DEV_MASK) > PKT_DEVIATION_MAX)
+			v = (v & ~PKT_REG_40_DEV_MASK) | PKT_DEVIATION_MAX;
+		BK4819_WriteRegister(o->reg, v);
+	}
+}
+
 // Set the chip up to receive on gVfo. Called at power-on, after every
 // transmission, at every squelch close and after any setting change.
 void RADIO_SetupRegisters(bool switchToForeground)
@@ -298,6 +313,8 @@ void RADIO_SetupRegisters(bool switchToForeground)
 	// enable/disable BK4819 selected interrupts
 	BK4819_WriteRegister(BK4819_REG_3F, BK4819_REG_3F_SQUELCH_FOUND | BK4819_REG_3F_SQUELCH_LOST);
 
+	RADIO_ApplyRegOverrides(REG_OVERRIDE_RX);
+
 	FUNCTION_Init();
 
 	if (switchToForeground)
@@ -330,6 +347,8 @@ void RADIO_SetTxParameters(void)
 	SYSTEM_DelayMs(10);
 
 	BK4819_ExitSubAu();   // no CTCSS/DCS
+
+	RADIO_ApplyRegOverrides(REG_OVERRIDE_TX);
 }
 
 void RADIO_SetVfoState(VfoState_t State)

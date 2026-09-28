@@ -77,6 +77,7 @@ void     RADIO_ConfigureChannel(void);
 void     RADIO_ConfigureSquelchAndOutputPower(VFO_Info_t *pInfo);
 void     RADIO_SetupRegisters(bool switchToForeground);
 void     RADIO_SetRxAudio(void);
+void     RADIO_ApplyRegOverrides(uint8_t phase);
 void     RADIO_SetTxParameters(void);
 void     RADIO_SetVfoState(VfoState_t State);
 void     RADIO_PrepareTX(void);

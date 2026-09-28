@@ -148,8 +148,9 @@ static void test_settings_defaults_and_roundtrip(void)
 	CHECK(gEeprom.SQUELCH_LEVEL == 1);
 	CHECK(gTxTimeoutSeconds[gEeprom.TX_TIMEOUT] == 30);
 	CHECK(gEeprom.MIC_GAIN == PKT_MIC_GAIN_DEFAULT);
-	CHECK(gEeprom.DEVIATION_WIDE == PKT_DEVIATION_DEFAULT);
-	CHECK(gEeprom.DEVIATION_NARROW == PKT_DEVIATION_DEFAULT);
+	CHECK(gEeprom.DEVIATION_WIDE == 0x862);
+	CHECK(gEeprom.DEVIATION_NARROW == 0x762);
+	CHECK(gEeprom.MIC_GAIN == 31);
 	CHECK(gEeprom.RX_GAIN == 50);
 	CHECK(gEeprom.RX_DAC_GAIN == PKT_RX_DAC_GAIN_DEFAULT);
 	CHECK(gEeprom.ScreenChannel == FREQ_CHANNEL_FIRST + BAND3_137MHz);
@@ -157,7 +158,7 @@ static void test_settings_defaults_and_roundtrip(void)
 	gEeprom.SQUELCH_LEVEL    = 0;
 	gEeprom.TX_TIMEOUT       = 1;
 	gEeprom.MIC_GAIN         = 31;
-	gEeprom.DEVIATION_WIDE   = 0x0FFF;
+	gEeprom.DEVIATION_WIDE   = 0x0A7F;
 	gEeprom.DEVIATION_NARROW = 0x0123;
 	gEeprom.RX_GAIN          = 63;
 	gEeprom.RX_DAC_GAIN      = 0;
@@ -170,7 +171,7 @@ static void test_settings_defaults_and_roundtrip(void)
 	CHECK(gEeprom.SQUELCH_LEVEL == 0);
 	CHECK(gTxTimeoutSeconds[gEeprom.TX_TIMEOUT] == 10);
 	CHECK(gEeprom.MIC_GAIN == 31);
-	CHECK(gEeprom.DEVIATION_WIDE == 0x0FFF);
+	CHECK(gEeprom.DEVIATION_WIDE == 0x0A7F);
 	CHECK(gEeprom.DEVIATION_NARROW == 0x0123);
 	CHECK(gEeprom.RX_GAIN == 63);
 	CHECK(gEeprom.RX_DAC_GAIN == 0);
@@ -184,10 +185,13 @@ static void test_settings_defaults_and_roundtrip(void)
 
 	// out of range bytes fall back to the defaults
 	eeprom[SETTINGS_PKT_BLOCK + 3] = 32;
-	eeprom[SETTINGS_PKT_BLOCK + 5] = 0x10;   // wide deviation 0x10FF
+	eeprom[SETTINGS_PKT_BLOCK + 4] = 0x80;   // wide deviation 0xA80: past the clamp
+	eeprom[SETTINGS_PKT_BLOCK + 5] = 0x0A;
+	eeprom[SETTINGS_PKT_BLOCK + 7] = 0x10;   // narrow deviation 0x1023
 	SETTINGS_InitEEPROM();
 	CHECK(gEeprom.MIC_GAIN == PKT_MIC_GAIN_DEFAULT);
-	CHECK(gEeprom.DEVIATION_WIDE == PKT_DEVIATION_DEFAULT);
+	CHECK(gEeprom.DEVIATION_WIDE == PKT_DEVIATION_WIDE_DEFAULT);
+	CHECK(gEeprom.DEVIATION_NARROW == PKT_DEVIATION_NARROW_DEFAULT);
 }
 
 static void test_channel_load_save(void)
@@ -309,8 +313,63 @@ static void test_tx_rx_registers(void)
 	CHECK(tx_dev == 0x300);
 }
 
+static void put_override(unsigned i, uint8_t phase, uint8_t reg, uint16_t andMask, uint16_t orValue)
+{
+	uint8_t *e = &eeprom[SETTINGS_REG_OVERRIDES + i * 8];
+	e[0] = phase; e[1] = reg;
+	e[2] = andMask & 0xFF; e[3] = andMask >> 8;
+	e[4] = orValue & 0xFF; e[5] = orValue >> 8;
+	e[6] = 0xFF; e[7] = 0xFF;
+}
+
+static void test_reg_overrides(void)
+{
+	memset(eeprom, 0xFF, sizeof(eeprom));
+	put_override(0, REG_OVERRIDE_TX, 0x2B, 0xFFF8, 0x0001);      // TX: re-enable part of the TX filters
+	put_override(1, REG_OVERRIDE_RX, 0x47, 0xF0FF, 0x0400);      // RX: AF output select
+	put_override(2, REG_OVERRIDE_TX, 0x30, 0x0000, 0xFFFF);      // refused: TX/RX enables
+	put_override(3, REG_OVERRIDE_TX | REG_OVERRIDE_RX, 0x36, 0, 0xFFFF); // refused: PA
+	put_override(4, REG_OVERRIDE_TX, 0x40, 0xF000, 0x0FFF);      // deviation past the clamp
+	put_override(5, 0xFF, 0x7E, 0, 0);                           // end of list
+	put_override(6, REG_OVERRIDE_TX, 0x7E, 0, 0x1234);           // after the end: ignored
+
+	// without a valid settings block the table is not used
+	SETTINGS_InitEEPROM();
+	CHECK(gRegOverrideCount == 0);
+
+	eeprom[SETTINGS_PKT_BLOCK] = SETTINGS_PKT_VERSION;
+	SETTINGS_InitEEPROM();
+	SETTINGS_LoadCalibration();
+	CHECK(gRegOverrideCount == 3);
+	RADIO_ConfigureChannel();
+
+	memset(regs, 0, sizeof(regs));
+	regs[0x2B] = 0x0707; regs[0x47] = 0x6040; regs[0x30] = 0x1111; regs[0x36] = 0x2222; regs[0x7E] = 0;
+	RADIO_SetTxParameters();
+	CHECK(regs[0x2B] == 0x0701);
+	CHECK(regs[0x47] == 0x6040);                 // RX entry not applied on TX
+	CHECK(regs[0x30] == 0x1111 && regs[0x36] == 0x2222);
+	CHECK((regs[0x40] & 0x0FFF) == PKT_DEVIATION_MAX);
+	CHECK(regs[0x7E] != 0x1234);
+
+	RADIO_SetupRegisters(false);
+	CHECK((regs[0x47] & 0x0F00) == 0x0400);
+	CHECK(regs[0x30] == 0x1111);
+
+	// the first menu save over foreign data clears the table
+	memset(eeprom, 0xFF, sizeof(eeprom));
+	eeprom[SETTINGS_PKT_BLOCK] = 0x41;
+	put_override(0, REG_OVERRIDE_TX, 0x2B, 0, 0);
+	SETTINGS_InitEEPROM();
+	SETTINGS_SaveSettings();
+	CHECK(eeprom[SETTINGS_REG_OVERRIDES] == 0xFF && eeprom[SETTINGS_REG_OVERRIDES + 1] == 0xFF);
+	SETTINGS_InitEEPROM();
+	CHECK(gRegOverrideCount == 0);
+}
+
 int main(void)
 {
+	test_reg_overrides();
 	test_eeprom_guard();
 	test_settings_defaults_and_roundtrip();
 	test_channel_load_save();

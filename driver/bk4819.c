@@ -608,7 +608,9 @@ void BK4819_PrepareDigitalTransmit(const uint8_t micGain, const uint16_t deviati
 	BK4819_SetRegValue(micAgcDisableRegSpec, 1);
 	// Mic sensitivity and deviation, both settings (see packet.h)
 	BK4819_WriteRegister(BK4819_REG_7D, PKT_REG_7D_BASE | (micGain & PKT_MIC_GAIN_MAX));
-	BK4819_WriteRegister(BK4819_REG_40, gBK4819_Reg40TopBits | PKT_REG_40_ENABLE | (deviation & PKT_DEVIATION_MAX));
+	// never past PKT_DEVIATION_MAX: above it the chip wraps to near zero
+	const uint16_t dev = (deviation > PKT_DEVIATION_MAX) ? PKT_DEVIATION_MAX : deviation;
+	BK4819_WriteRegister(BK4819_REG_40, gBK4819_Reg40TopBits | PKT_REG_40_ENABLE | (dev & PKT_REG_40_DEV_MASK));
 
 	BK4819_ExitTxMute();
 	BK4819_TxOn();

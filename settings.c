@@ -26,6 +26,46 @@ EEPROM_Config_t gEeprom = { 0 };
 
 const uint8_t gTxTimeoutSeconds[7] = {5, 10, 15, 20, 30, 60, 120};
 
+RegOverride_t gRegOverrides[REG_OVERRIDE_MAX];
+uint8_t       gRegOverrideCount;
+
+// Registers an override may never touch: soft reset (00), TX/RX and PA
+// enables (30), GPIO outputs incl. PA enable, RX enable, LNA switch and
+// LEDs (33), PA bias and gain (36), power and LDOs (37), frequency (38,
+// 39), crystal trim (3B, 3C). Anything above 0x7F is not a register.
+bool SETTINGS_RegOverrideAllowed(uint8_t reg)
+{
+	switch (reg) {
+		case 0x00: case 0x30: case 0x33: case 0x36: case 0x37:
+		case 0x38: case 0x39: case 0x3B: case 0x3C:
+			return false;
+		default:
+			return reg <= 0x7F;
+	}
+}
+
+static void LoadRegOverrides(bool blockValid)
+{
+	gRegOverrideCount = 0;
+	if (!blockValid)
+		return;
+
+	for (unsigned int i = 0; i < REG_OVERRIDE_MAX; i++) {
+		uint8_t e[8];
+		EEPROM_ReadBuffer(SETTINGS_REG_OVERRIDES + i * 8, e, 8);
+		const uint8_t phase = e[0] & (REG_OVERRIDE_TX | REG_OVERRIDE_RX);
+		if (e[0] == 0xFF || phase == 0 || e[1] == 0xFF)
+			break;                          // end of the list
+		if (!SETTINGS_RegOverrideAllowed(e[1]))
+			continue;                       // refused, skipped
+		RegOverride_t *o = &gRegOverrides[gRegOverrideCount++];
+		o->phase   = phase;
+		o->reg     = e[1];
+		o->andMask = e[2] | (e[3] << 8);
+		o->orValue = e[4] | (e[5] << 8);
+	}
+}
+
 static uint8_t ByteOr(uint8_t value, uint8_t max, uint8_t def)
 {
 	return (value <= max) ? value : def;
@@ -37,15 +77,17 @@ void SETTINGS_InitEEPROM(void)
 
 	// Packet firmware settings (see settings.h)
 	EEPROM_ReadBuffer(SETTINGS_PKT_BLOCK, Data, 16);
-	if (Data[0] != SETTINGS_PKT_VERSION)
+	const bool blockValid = Data[0] == SETTINGS_PKT_VERSION;
+	if (!blockValid)
 		memset(Data, 0xFF, 16);   // blank, or left over from another firmware: all defaults
+	LoadRegOverrides(blockValid);
 	const uint16_t devWide   = Data[4] | (Data[5] << 8);
 	const uint16_t devNarrow = Data[6] | (Data[7] << 8);
 	gEeprom.SQUELCH_LEVEL    = ByteOr(Data[1], 9, 1);
 	gEeprom.TX_TIMEOUT       = ByteOr(Data[2], ARRAY_SIZE(gTxTimeoutSeconds) - 1, TX_TIMEOUT_DEFAULT_INDEX);
 	gEeprom.MIC_GAIN         = ByteOr(Data[3], PKT_MIC_GAIN_MAX, PKT_MIC_GAIN_DEFAULT);
-	gEeprom.DEVIATION_WIDE   = (devWide   <= PKT_DEVIATION_MAX) ? devWide   : PKT_DEVIATION_DEFAULT;
-	gEeprom.DEVIATION_NARROW = (devNarrow <= PKT_DEVIATION_MAX) ? devNarrow : PKT_DEVIATION_DEFAULT;
+	gEeprom.DEVIATION_WIDE   = (devWide   <= PKT_DEVIATION_MAX) ? devWide   : PKT_DEVIATION_WIDE_DEFAULT;
+	gEeprom.DEVIATION_NARROW = (devNarrow <= PKT_DEVIATION_MAX) ? devNarrow : PKT_DEVIATION_NARROW_DEFAULT;
 	gEeprom.RX_GAIN          = Data[8];   // checked in SETTINGS_LoadCalibration
 	gEeprom.RX_DAC_GAIN      = ByteOr(Data[9], PKT_RX_DAC_GAIN_MAX, PKT_RX_DAC_GAIN_DEFAULT);
 	gEeprom.BACKLIGHT_TIME   = ByteOr(Data[10], 7, 3);
@@ -134,6 +176,15 @@ void SETTINGS_SaveVfoIndices(void)
 void SETTINGS_SaveSettings(void)
 {
 	uint8_t State[16];
+
+	// First save over data that is not ours: blank the override table too,
+	// so leftovers there never become register overrides.
+	EEPROM_ReadBuffer(SETTINGS_PKT_BLOCK, State, 1);
+	if (State[0] != SETTINGS_PKT_VERSION) {
+		memset(State, 0xFF, sizeof(State));
+		for (unsigned int i = 0; i < REG_OVERRIDE_MAX; i++)
+			EEPROM_WriteBuffer(SETTINGS_REG_OVERRIDES + i * 8, State);
+	}
 
 	memset(State, 0xFF, sizeof(State));
 	State[0]  = SETTINGS_PKT_VERSION;

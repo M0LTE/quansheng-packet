@@ -115,6 +115,9 @@ void APP_StartListening(FUNCTION_Type_t function)
 	BK4819_SetRegValue(afcDisableRegSpec, 0);    // enable AFC
 	BK4819_WriteRegister(BK4819_REG_3D, PKT_REG_3D_RX);
 
+	// the squelch-open writes above would undo RX overrides of REG_47/48
+	RADIO_ApplyRegOverrides(REG_OVERRIDE_RX);
+
 	FUNCTION_Select(function);
 
 	if (function == FUNCTION_MONITOR)

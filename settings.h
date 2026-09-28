@@ -53,8 +53,8 @@ enum {
 //   0x1D01  squelch level, 0 (open) to 9
 //   0x1D02  TX timeout, index into gTxTimeoutSeconds
 //   0x1D03  mic gain, REG_7D<4:0>, 0 to 31
-//   0x1D04  wide deviation, REG_40<11:0>, u16 little-endian
-//   0x1D06  narrow deviation, REG_40<11:0>, u16 little-endian
+//   0x1D04  wide deviation, REG_40<11:0>, u16 little-endian, at most 0xA7F
+//   0x1D06  narrow deviation, REG_40<11:0>, u16 little-endian, at most 0xA7F
 //   0x1D08  RX AF gain 2, REG_48<9:4>, 0 to 63
 //   0x1D09  RX AF DAC gain, REG_48<3:0>, 0 to 15
 //   0x1D0A  backlight time, 0 (off) to 7 (always on)
@@ -66,6 +66,41 @@ enum {
 // data) about 1 to 1.5 s after the last UART EEPROM write of a session.
 #define SETTINGS_PKT_BLOCK        0x1D00u
 #define SETTINGS_PKT_VERSION      1u
+
+// Register override table (for experiments without reflashing): 8 entries
+// of 8 bytes at 0x1D10..0x1D4F, used only when the settings block above
+// carries its layout version. Each entry:
+//
+//   +0  phase: bit 0 = after the TX set-up (every key-up),
+//              bit 1 = after the RX set-up (every return to receive and
+//              every squelch open); 0 or 0xFF ends the list
+//   +1  BK4819 register; 0xFF ends the list
+//   +2  AND mask, u16 little-endian
+//   +4  OR value, u16 little-endian
+//   +6  reserved (0xFF)
+//
+// The register becomes (value & mask) | or, written after all of the
+// firmware's own writes for that phase, so it wins. Registers that key the
+// transmitter, drive the PA, set the frequency or reset or power the chip
+// are refused (see RegOverrideAllowed in settings.c). A REG_40 result is
+// clamped to PKT_DEVIATION_MAX. The table is read at power-on and after a
+// UART EEPROM write session, like the settings.
+#define SETTINGS_REG_OVERRIDES    0x1D10u
+#define REG_OVERRIDE_MAX          8u
+#define REG_OVERRIDE_TX           0x01u
+#define REG_OVERRIDE_RX           0x02u
+
+typedef struct {
+	uint8_t  phase;
+	uint8_t  reg;
+	uint16_t andMask;
+	uint16_t orValue;
+} RegOverride_t;
+
+extern RegOverride_t gRegOverrides[REG_OVERRIDE_MAX];
+extern uint8_t       gRegOverrideCount;
+
+bool SETTINGS_RegOverrideAllowed(uint8_t reg);
 
 extern const uint8_t gTxTimeoutSeconds[7];
 #define TX_TIMEOUT_DEFAULT_INDEX  4u     // 30 s
