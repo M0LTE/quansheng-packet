@@ -27,44 +27,6 @@
 	#define ARRAY_SIZE(arr) (sizeof(arr)/sizeof((arr)[0]))
 #endif
 
-void UI_GenerateChannelString(char *pString, const uint8_t Channel)
-{
-	unsigned int i;
-
-	if (gInputBoxIndex == 0)
-	{
-		sprintf(pString, "CH-%02u", Channel + 1);
-		return;
-	}
-
-	pString[0] = 'C';
-	pString[1] = 'H';
-	pString[2] = '-';
-	for (i = 0; i < 2; i++)
-		pString[i + 3] = (gInputBox[i] == 10) ? '-' : gInputBox[i] + '0';
-}
-
-void UI_GenerateChannelStringEx(char *pString, const bool bShowPrefix, const uint8_t ChannelNumber)
-{
-	if (gInputBoxIndex > 0) {
-		for (unsigned int i = 0; i < 3; i++) {
-			pString[i] = (gInputBox[i] == 10) ? '-' : gInputBox[i] + '0';
-		}
-
-		pString[3] = 0;
-		return;
-	}
-
-	if (bShowPrefix) {
-		// BUG here? Prefixed NULLs are allowed
-		sprintf(pString, "CH-%03u", ChannelNumber + 1);
-	} else if (ChannelNumber == 0xFF) {
-		strcpy(pString, "NULL");
-	} else {
-		sprintf(pString, "%03u", ChannelNumber + 1);
-	}
-}
-
 void UI_PrintStringBuffer(const char *pString, uint8_t * buffer, uint32_t char_width, const uint8_t *font)
 {
 	const size_t Length = strlen(pString);
@@ -128,13 +90,6 @@ void UI_PrintStringSmallBufferNormal(const char *pString, uint8_t * buffer)
 	UI_PrintStringBuffer(pString, buffer, ARRAY_SIZE(gFontSmall[0]), (uint8_t *)gFontSmall);
 }
 
-void UI_PrintStringSmallBufferBold(const char *pString, uint8_t * buffer)
-{
-	const uint8_t *font = (uint8_t *)gFontSmall;
-	const uint8_t char_width = ARRAY_SIZE(gFontSmall[0]);
-	UI_PrintStringBuffer(pString, buffer, char_width, font);
-}
-
 void UI_DisplayFrequency(const char *string, uint8_t X, uint8_t Y, bool center)
 {
 	const unsigned int char_width  = 13;
@@ -169,53 +124,6 @@ void UI_DisplayFrequency(const char *string, uint8_t X, uint8_t Y, bool center)
 		pFb1 += char_width;
 	}
 }
-
-void UI_DrawPixelBuffer(uint8_t (*buffer)[128], uint8_t x, uint8_t y, bool black)
-{
-	const uint8_t pattern = 1 << (y % 8);
-	if(black)
-		buffer[y/8][x] |= pattern;
-	else
-		buffer[y/8][x] &= ~pattern;
-}
-
-static void sort(int16_t *a, int16_t *b)
-{
-	if(*a > *b) {
-		int16_t t = *a;
-		*a = *b;
-		*b = t;
-	}
-}
-
-void UI_DrawLineBuffer(uint8_t (*buffer)[128], int16_t x1, int16_t y1, int16_t x2, int16_t y2, bool black)
-{
-	if(x2==x1) {
-		sort(&y1, &y2);
-		for(int16_t i = y1; i <= y2; i++) {
-			UI_DrawPixelBuffer(buffer, x1, i, black);
-		}
-	} else {
-		const int multipl = 1000;
-		int a = (y2-y1)*multipl / (x2-x1);
-		int b = y1 - a * x1 / multipl;
-
-		sort(&x1, &x2);
-		for(int i = x1; i<= x2; i++)
-		{
-			UI_DrawPixelBuffer(buffer, i, i*a/multipl +b, black);
-		}
-	}
-}
-
-void UI_DrawRectangleBuffer(uint8_t (*buffer)[128], int16_t x1, int16_t y1, int16_t x2, int16_t y2, bool black)
-{
-	UI_DrawLineBuffer(buffer, x1,y1, x1,y2, black);
-	UI_DrawLineBuffer(buffer, x1,y1, x2,y1, black);
-	UI_DrawLineBuffer(buffer, x2,y1, x2,y2, black);
-	UI_DrawLineBuffer(buffer, x1,y2, x2,y2, black);
-}
-
 
 void UI_DisplayPopup(const char *string)
 {
