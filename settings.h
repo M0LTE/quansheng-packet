@@ -44,8 +44,10 @@ enum {
 };
 
 // Packet firmware settings block in EEPROM, in the old DTMF contacts area
-// (unused here). All 16 bytes are this firmware's own; a byte that is out of
-// range (0xFF when blank) means "use the default".
+// (unused here). All 16 bytes are this firmware's own. Unless the first byte
+// is the layout version the whole block is ignored (defaults used), so data
+// left there by another firmware is never taken as settings; a single byte
+// that is out of range (0xFF when blank) means "use the default".
 //
 //   0x1D00  layout version (1)
 //   0x1D01  squelch level, 0 (open) to 9

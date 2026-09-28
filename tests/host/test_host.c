@@ -175,6 +175,13 @@ static void test_settings_defaults_and_roundtrip(void)
 	CHECK(gEeprom.RX_GAIN == 63);
 	CHECK(gEeprom.RX_DAC_GAIN == 0);
 
+	// without the layout version byte the block is ignored
+	eeprom[SETTINGS_PKT_BLOCK] = 0x41;
+	SETTINGS_InitEEPROM();
+	CHECK(gEeprom.SQUELCH_LEVEL == 1);
+	CHECK(gEeprom.MIC_GAIN == PKT_MIC_GAIN_DEFAULT);
+	eeprom[SETTINGS_PKT_BLOCK] = SETTINGS_PKT_VERSION;
+
 	// out of range bytes fall back to the defaults
 	eeprom[SETTINGS_PKT_BLOCK + 3] = 32;
 	eeprom[SETTINGS_PKT_BLOCK + 5] = 0x10;   // wide deviation 0x10FF

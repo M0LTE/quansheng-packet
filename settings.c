@@ -37,6 +37,8 @@ void SETTINGS_InitEEPROM(void)
 
 	// Packet firmware settings (see settings.h)
 	EEPROM_ReadBuffer(SETTINGS_PKT_BLOCK, Data, 16);
+	if (Data[0] != SETTINGS_PKT_VERSION)
+		memset(Data, 0xFF, 16);   // blank, or left over from another firmware: all defaults
 	const uint16_t devWide   = Data[4] | (Data[5] << 8);
 	const uint16_t devNarrow = Data[6] | (Data[7] << 8);
 	gEeprom.SQUELCH_LEVEL    = ByteOr(Data[1], 9, 1);
