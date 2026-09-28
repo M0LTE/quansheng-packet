@@ -36,6 +36,7 @@ bool              gMonitor = false;           // true opens the squelch
 ChannelAttributes_t gMR_ChannelAttributes[FREQ_CHANNEL_LAST + 1];
 
 volatile uint8_t  gSerialConfigCountDown_500ms;
+bool              gReloadSettingsAfterSerial;
 volatile bool     gNextTimeslice_500ms;
 volatile uint16_t gTxTimerCountdown_500ms;
 volatile bool     gTxTimeoutReached;

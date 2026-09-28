@@ -60,8 +60,8 @@ enum {
 //   0x1D0C  keypad lock, 0 or 1
 //   0x1D0D  reserved (0xFF)
 //
-// The radio reads this block at power-on. Tools that change it over UART
-// should reboot the radio afterwards (command 0x05DD).
+// The radio reads this block at power-on, and again (with the channel
+// data) about 1 to 1.5 s after the last UART EEPROM write of a session.
 #define SETTINGS_PKT_BLOCK        0x1D00u
 #define SETTINGS_PKT_VERSION      1u
 

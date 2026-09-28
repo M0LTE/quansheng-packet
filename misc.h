@@ -89,6 +89,9 @@ typedef union {
 extern ChannelAttributes_t   gMR_ChannelAttributes[FREQ_CHANNEL_LAST + 1];
 
 extern volatile uint8_t      gSerialConfigCountDown_500ms;
+// set by a UART EEPROM write; settings and channel are reloaded once the
+// serial PTT lock has run out
+extern bool                  gReloadSettingsAfterSerial;
 extern volatile bool         gNextTimeslice_500ms;
 extern volatile uint16_t     gTxTimerCountdown_500ms;
 extern volatile bool         gTxTimeoutReached;

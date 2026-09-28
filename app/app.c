@@ -389,6 +389,18 @@ void APP_TimeSlice500ms(void)
 	if ((gBatteryCheckCounter & 3) == 0)
 		gUpdateStatus = true;
 
+	if (gReloadSettingsAfterSerial && !SerialConfigInProgress() && gCurrentFunction != FUNCTION_TRANSMIT)
+	{	// EEPROM was written over UART: use the new settings and channel data
+		gReloadSettingsAfterSerial = false;
+		SETTINGS_InitEEPROM();
+		SETTINGS_LoadCalibration();
+		RADIO_ConfigureChannel();
+		RADIO_SetupRegisters(true);
+		gMonitor       = false;
+		gUpdateStatus  = true;
+		gUpdateDisplay = true;
+	}
+
 	if (!gPttIsPressed && gVFOStateResumeCountdown_500ms > 0 && --gVFOStateResumeCountdown_500ms == 0)
 		RADIO_SetVfoState(VFO_STATE_NORMAL);
 

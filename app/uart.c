@@ -253,6 +253,9 @@ static void CMD_051D(const uint8_t *pBuffer, const uint16_t CommandSize)
 	for (unsigned int i = 0; i < (pCmd->Size / 8); i++)
 		EEPROM_WriteBuffer(pCmd->Offset + (i * 8U), &pCmd->Data[i * 8U]);
 
+	// apply it once the host has gone quiet (APP_TimeSlice500ms)
+	gReloadSettingsAfterSerial = true;
+
 	SendReply(&Reply, sizeof(Reply));
 }
 

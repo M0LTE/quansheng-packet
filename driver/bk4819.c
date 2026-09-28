@@ -45,9 +45,6 @@ void BK4819_Init(void)
 	BK4819_WriteRegister(BK4819_REG_00, 0x8000);
 	BK4819_WriteRegister(BK4819_REG_00, 0x0000);
 
-	// Upstream read REG_40 before the soft reset above, so after an MCU-only
-	// reset it could pick up a leftover transmit value. Read it after.
-	gBK4819_Reg40TopBits = BK4819_ReadRegister(BK4819_REG_40) & 0xE000;
 
 	BK4819_WriteRegister(BK4819_REG_37, 0x1D0F);
 	BK4819_WriteRegister(BK4819_REG_36, 0x0022);
@@ -105,6 +102,11 @@ void BK4819_Init(void)
 	// scales linearly with the size of the capcitory. 2.5s is needed for 10uF.
 	BK4819_WriteRegister(BK4819_REG_30, 4);
 	SYSTEM_DelayMs(250);
+
+	// Upstream read REG_40 before the soft reset, so after an MCU-only reset
+	// it could pick up a leftover transmit value. Read it here instead, well
+	// after the reset; nothing above writes REG_40.
+	gBK4819_Reg40TopBits = BK4819_ReadRegister(BK4819_REG_40) & 0xE000;
 }
 
 static uint16_t BK4819_ReadU16(void)
