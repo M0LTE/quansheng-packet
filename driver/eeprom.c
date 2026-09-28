@@ -39,9 +39,17 @@ void EEPROM_ReadBuffer(uint16_t Address, void *pBuffer, uint8_t Size)
 	I2C_Stop();
 }
 
+bool EEPROM_IsWritable(uint16_t Address)
+{
+	// Packet firmware: the factory calibration (0x1E00 to 0x1FFF) is read
+	// only, and every write is one aligned 8-byte block so it can never
+	// wrap inside an EEPROM page.
+	return Address < EEPROM_CALIBRATION_START && (Address & 7u) == 0;
+}
+
 void EEPROM_WriteBuffer(uint16_t Address, const void *pBuffer)
 {
-	if (pBuffer == NULL || Address >= 0x2000)
+	if (pBuffer == NULL || !EEPROM_IsWritable(Address))
 		return;
 
 

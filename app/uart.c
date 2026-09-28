@@ -287,6 +287,13 @@ static void CMD_051D(const uint8_t *pBuffer)
 
 	bIsLocked = bHasCustomAesKey ? gIsLocked : bHasCustomAesKey;
 
+	// Packet firmware: refuse the whole command, with no reply, if any block
+	// is unaligned or reaches the factory calibration (0x1E00 and up), so the
+	// host sees a failure instead of a silent partial write.
+	for (unsigned int i = 0; i < (pCmd->Size / 8); i++)
+		if (!EEPROM_IsWritable(pCmd->Offset + (i * 8U)))
+			return;
+
 	if (!bIsLocked)
 	{
 		unsigned int i;

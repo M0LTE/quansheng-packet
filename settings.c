@@ -468,16 +468,6 @@ void SETTINGS_SaveChannel(uint8_t Channel, uint8_t VFO, const VFO_Info_t *pVFO, 
 
 }
 
-void SETTINGS_SaveBatteryCalibration(const uint16_t * batteryCalibration)
-{
-	uint16_t buf[4];
-	EEPROM_WriteBuffer(0x1F40, batteryCalibration);
-	EEPROM_ReadBuffer( 0x1F48, buf, sizeof(buf));
-	buf[0] = batteryCalibration[4];
-	buf[1] = batteryCalibration[5];
-	EEPROM_WriteBuffer(0x1F48, buf);
-}
-
 void SETTINGS_SaveChannelName(uint8_t channel, const char * name)
 {
 	uint16_t offset = channel * 16;
@@ -522,17 +512,4 @@ void SETTINGS_UpdateChannel(uint8_t channel, const VFO_Info_t *pVFO, bool keep)
 			}
 		}
 	}
-}
-
-void SETTINGS_WriteBuildOptions(void)
-{
-	uint8_t buf[8] = {0};
-buf[0] = 0
-;
-
-buf[1] = 0
-    | (1 << 6)
-
-;
-	EEPROM_WriteBuffer(0x1FF0, buf);
 }

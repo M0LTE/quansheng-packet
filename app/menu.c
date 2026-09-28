@@ -614,7 +614,7 @@ void MENU_AcceptSetting(void)
 			gBatteryCalibration[3] =          gSubMenuSelection;         // 7.6V,  ~29%, 3 bars above this value
 			// gBatteryCalibration[4] = (771ul * gSubMenuSelection) / 760;  // 7.71V, ~65%, 4 bars above this value
 			// gBatteryCalibration[5] = 2300;
-			SETTINGS_SaveBatteryCalibration(gBatteryCalibration);
+			// Packet firmware: calibration is read only, so this lasts until power off.
 			return;
 		}
 

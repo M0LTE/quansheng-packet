@@ -83,7 +83,6 @@ void Main(void)
 	BOARD_ADC_GetBatteryInfo(&gBatteryCurrentVoltage, &gBatteryCurrent);
 
 	SETTINGS_InitEEPROM();
-	SETTINGS_WriteBuildOptions();
 	SETTINGS_LoadCalibration();
 
 	RADIO_ConfigureChannel(0, VFO_CONFIGURE_RELOAD);
