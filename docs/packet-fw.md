@@ -1,0 +1,119 @@
+# UV-K5 packet firmware (branch `packet-fw`)
+
+A cut-down build of [mobilinkd/uv-k5-firmware-custom](https://github.com/mobilinkd/uv-k5-firmware-custom) (base `e1e2fea`) for a UV-K5 used as a packet radio behind an AIOC. It does one thing: receive and transmit FM through the flat ("DIG") audio path, on one frequency, with as few settings as possible. Apache-2.0, as upstream.
+
+Status: first pass, built and host-tested only. **Not yet run on a radio.**
+
+## Build and test
+
+```sh
+/home/tf/src/uvk5-packet-bench/tools/k5/build.sh --src . --out out/NAME   # pinned gcc 10.3.1 in Docker
+tests/host/run.sh                                                          # host-side logic tests, system gcc
+/home/tf/src/uvk5-work/venv/bin/python3 /home/tf/src/uvk5-packet-bench/tools/k5/k5.py image-info out/NAME/firmware.packed.bin
+```
+
+There are no feature flags left in the Makefile, only `ENABLE_CLANG`, `ENABLE_SWD` and `ENABLE_LTO`. The packed image carries `*PKTFW <git hash>` as its version.
+
+## Size
+
+Flash for the firmware is 61440 bytes (60 KiB). All sizes are gcc 10.3.1 (Docker).
+
+| Build | Image | Free |
+|---|---|---|
+| Upstream, default flags | 61364 | 76 |
+| Upstream, DIG + BK register commands, no spectrum | 56080 | 5360 |
+| Compile-time features resolved out (commit `7be7800`) | 45624 | 15816 |
+| Calibration write guard (`c217d5e`) | 45608 | 15832 |
+| App layer replaced by the packet station (`c991086`) | 22432 | 39008 |
+| Settings reload after UART writes, version check (`5e77b4b`) | 22524 | 38916 |
+
+## What was removed
+
+FM broadcast radio, spectrum, all scanning (frequency, channel, scan lists, CTCSS/DCS scan), dual watch and cross band, battery save (the receiver no longer sleeps between polls, which would miss the start of a packet), DTMF (calling, ANI, PTT ID, live decoder, side tones), VOX, flashlight, voice prompts, alarm and 1750 Hz tone, roger beep and every other beep (they would go to the TNC), CTCSS/DCS and tail tones, scrambler, compander, AM, USB and the FM voice mode, NOAA, aircopy, power-on password, AES challenge and lock, boot modes and the hidden menu, channel names, TX offset and reverse, the 60-item menu, and the SRAM overlay.
+
+CTCSS/DCS went because packet uses carrier squelch and dropping it removes the tone scanning, tail detection and interrupt handling with it.
+
+## What remains
+
+- One VFO, simplex (TX frequency = RX frequency), carrier squelch.
+- Frequency entry on the keypad, up/down stepping, 200 memory channels and 7 band slots in the upstream EEPROM layout (CHIRP-compatible). Only frequency, power, bandwidth and step are read and saved; the other channel fields are left untouched.
+- Power (low, mid, high from the factory calibration), bandwidth (wide, narrow), squelch (0 to 9 from the factory tables), TX timeout, battery monitoring (TX refused below about 6.3 V and above about 8.9 V, as upstream), backlight, key lock.
+- Display: frequency, memory or band slot, TX/RX, RSSI in dBm and S-units, and the settings in use.
+- UART: the upstream EEPROM protocol and the BK4819 register commands.
+
+## The audio path
+
+Always the upstream DIG path: no pre-emphasis or de-emphasis, no TX or RX audio filters, no DC filters, no mic AGC, no ALC, no compander. The fixed register values are named in `packet.h`; the ones to tune are settings.
+
+| Register | Value | Where |
+|---|---|---|
+| REG_7D | `0xE940` or mic gain | settings (mic gain) |
+| REG_40 | top 3 bits from the chip, bit 12, deviation | settings (wide and narrow deviation) |
+| REG_48 | `11<<12`, gain 1 0 dB, gain 2, DAC gain | settings (RX gain, RX DAC gain) |
+| REG_47 (TX) | `0x2041`: AF muted, TX filters bypassed | `PKT_REG_47_TX` |
+| REG_7E | DC filters off; bit 15 set for TX, cleared on RX | `PKT_REG_7E_*` |
+| REG_2B | `|0x0707`: RX and TX filters and emphasis off | `PKT_REG_2B_FLAT_MASK` |
+| REG_43 | upstream DIG wide and narrow values | `BK4819_SetFilterBandwidth` |
+| REG_31 | scrambler, VOX, compander bits cleared | `PKT_REG_31_OFF_MASK` |
+| REG_3D | `0x2AAB` on squelch open | `PKT_REG_3D_RX` |
+
+## Settings
+
+Stored in a 16-byte block at EEPROM `0x1D00` (the old DTMF contacts area). The block is ignored unless byte 0 is the layout version (1); an out-of-range byte means "use the default".
+
+| Address | Setting | Range | Default |
+|---|---|---|---|
+| 0x1D00 | layout version | 1 | |
+| 0x1D01 | squelch | 0 (open) to 9 | 1 |
+| 0x1D02 | TX timeout | 0 to 6 = 5, 10, 15, 20, 30, 60, 120 s | 4 (30 s) |
+| 0x1D03 | mic gain, REG_7D<4:0>, 0.5 dB steps | 0 to 31 | 0 (upstream DIG) |
+| 0x1D04 | wide deviation, REG_40<11:0>, u16 LE | 0 to 4095 | 0x4D0 |
+| 0x1D06 | narrow deviation, REG_40<11:0>, u16 LE | 0 to 4095 | 0x4D0 |
+| 0x1D08 | RX AF gain 2, REG_48<9:4>, 0.5 dB steps | 0 to 63 | factory calibration (0x1F8E) |
+| 0x1D09 | RX DAC gain, REG_48<3:0>, about 2 dB steps | 0 to 15 | 15 |
+| 0x1D0A | backlight | 0 (off) to 7 (on) | 3 (20 s) |
+| 0x1D0B | battery type | 0 = 1600, 1 = 2200 mAh | 0 |
+| 0x1D0C | key lock | 0, 1 | 0 |
+
+Other EEPROM the firmware reads: channel indices at `0x0E80` (and writes them), S-meter levels at `0x0EA0`, TX band limits at `0x0F40` (no menu), channel attributes at `0x0D60`. Calibration (`0x1E00` up) is read only.
+
+The same settings are in the menu (MENU, then UP/DOWN, MENU to edit and again to store, EXIT to cancel): Sql, Step, TxPwr, W/N, MicG, DevW, DevN, RxG, RxDAC, TxTOut, BackLt, BatTyp, plus the battery voltage and the version.
+
+Keys on the main screen: digits enter a frequency (or a channel number in memory mode), UP/DOWN step, F then 3 switches frequency and memory mode, F then 6 cycles power, F held locks the keypad, SIDE1 toggles monitor (squelch open).
+
+## UART commands
+
+38400 8N1, upstream framing (see the bench repo's `docs/k5-firmware.md`). Plain mode after a hello whose raw id is `14 05`.
+
+| Command | Does | Change from upstream |
+|---|---|---|
+| 0x0514 hello | version reply, starts the PTT lock | no backlight change, no AES fields |
+| 0x052F hello | same as 0x0514 | no longer changes VFO settings |
+| 0x051B read EEPROM | up to 128 bytes | refuses more than 128 (upstream overflowed its stack) |
+| 0x051D write EEPROM | 8-byte blocks | refused whole, with no reply, if any block is unaligned or at 0x1E00 and up, or if the data does not fit the frame; applied about 1 to 1.5 s after the session goes quiet |
+| 0x0527 | RSSI, noise, glitch | none |
+| 0x0529 | battery voltage and current | none |
+| 0x05DD | reboot | none |
+| 0x0601 / 0x0602 | BK4819 register read / write | always built in |
+
+0x052D (AES challenge), 0x051F and 0x0521 are gone. Register writes still get overwritten by the firmware on the next receive set-up or key-up for the registers it manages (7D, 40, 47, 48, 7E, 2B, 43, 31): change those through the settings instead.
+
+**PTT lock.** On the K1 connector the UART receive line shares a contact with PTT, so after a hello or an EEPROM command the firmware ignores PTT, and drops any transmission, for a while. Upstream held this for 6 s; here it is 1 to 1.5 s (`SERIAL_PTT_LOCK_500ms`). The risk: a host that pauses for more than a second in the middle of a session and then sends a long frame full of zero bytes could hold the line low for 30 ms before the frame is complete and the lock re-arms, which would key the radio briefly. Upstream had the same exposure on the first frame of every session. Keep sessions continuous, start with a short hello, and wait 1.5 s after the last command before keying. The BK4819 register commands do not touch the lock, as upstream.
+
+## Fixes
+
+- **AGC.** Upstream DIG sets REG_7E bit 15 (AGC fix) at every key-up and never cleared it, so after the first transmission receive ran at a fixed AGC index (the maximum). It is now cleared on every return to receive. Receive levels measured on upstream DIG after any transmission were taken with the AGC frozen, so expect them to change.
+- **Deviation.** Upstream DIG wrote REG_40 = 0x383 wide and 0x4D6 narrow, so wide was 2.8 dB below narrow. Both are now settings, default 0x4D0 (the chip default) so that the chip's bandwidth mode does the wide/narrow difference, as in voice mode. That makes wide 2.7 dB hotter than upstream DIG and leaves narrow the same within 0.05 dB. The top 3 bits are read from the chip after its reset, not before.
+- **Calibration.** Upstream wrote a build-options byte to 0x1FF0 on every boot and could save battery calibration from the menu. This firmware never writes 0x1E00 and up (checked in the EEPROM driver and in the UART handler).
+- **TX timeout** returns to receive at once, and the next transmission needs PTT released first. It has 0.5 s resolution.
+
+## Other differences from upstream DIG that a measurement could see
+
+- REG_24 (DTMF detector) is cleared at power-on, not only at the first key-up; the DTMF coefficient writes (REG_09) are gone.
+- REG_48 uses the RX DAC gain setting (default 15) at all times; upstream used the calibration value (usually 8) while the squelch was closed, when the audio is muted anyway.
+- A blank 2 m band slot starts at 144.800 MHz (upstream: 137.000 MHz); a blank 70 cm slot at 433.500 MHz. The default slot is 2 m.
+- The first-power-on defaults differ from upstream: no dual watch, and a 30 s TX timeout instead of 1 minute.
+
+## Left for measurement to decide
+
+Mic gain and deviation defaults (plan target 3 kHz for -6 dBFS from the AIOC), whether REG_40 behaves linearly and how narrow scales it, the RX gain defaults (target: 3 kHz deviation near -10 dBFS at the AIOC), whether keeping REG_7E bit 15 during TX matters at all, REG_43 receive bandwidths, REG_47 output select (FM against BASEBAND1), and the turnaround path: the 30 ms PTT debounce, the screen redraw before key-up, the full receiver set-up (including a PLL retune) on every squelch close and after every transmission.
