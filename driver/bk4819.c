@@ -127,7 +127,6 @@ void BK4819_Init(void)
 	BK4819_WriteRegister(BK4819_REG_33, 0x9000);
 	BK4819_WriteRegister(BK4819_REG_3F, 0);
 
-#ifdef ENABLE_DIGITAL_MODULATION
 	// When digital modes are possible, the MIC ADC must be enabled for a bit
 	// in order to ensure the proper DC bias is reached on the BK4819 MIC line.
 	// This must occur with Rx DSP disabled. The delay required is dependent
@@ -135,7 +134,6 @@ void BK4819_Init(void)
 	// scales linearly with the size of the capcitory. 2.5s is needed for 10uF.
 	BK4819_WriteRegister(BK4819_REG_30, 4);
 	SYSTEM_DelayMs(250);
-#endif
 }
 
 static uint16_t BK4819_ReadU16(void)
@@ -623,12 +621,9 @@ void BK4819_SetFilterBandwidth(const BK4819_FilterBandwidth_t Bandwidth, const b
 	// <1:0>   0 ???
 
 	uint16_t val = 0;
-#ifdef ENABLE_DIGITAL_MODULATION
 	bool digitalFilters = false;
-#endif
 	switch (Bandwidth)
 	{
-#ifdef ENABLE_DIGITAL_MODULATION
 		case BK4819_FILTER_BW_DIGITAL_WIDE:
 			val = (4u << 12) |     // RF RX filter bandwidth (7.5kHz)
 				  (3u <<  9) |     // Weak RX signal bandwidth (6kHz)
@@ -647,7 +642,6 @@ void BK4819_SetFilterBandwidth(const BK4819_FilterBandwidth_t Bandwidth, const b
 				  (0u <<  2);      // 0 Gain after FM Demodulation
 			digitalFilters = true;
 			break;
-#endif
 		default:
 		case BK4819_FILTER_BW_WIDE:	// 25kHz
 			val = (4u << 12) |     // *3 RF filter bandwidth
@@ -698,7 +692,6 @@ void BK4819_SetFilterBandwidth(const BK4819_FilterBandwidth_t Bandwidth, const b
 	}
 
 	BK4819_WriteRegister(BK4819_REG_43, val);
-#ifdef ENABLE_DIGITAL_MODULATION
 	if (digitalFilters) {
 		// NOTE: AFTxLPF2 is bypassed in BK4819_PrepareDigitalTransmit()
 		// Disable DC filter (RX & TX).
@@ -711,7 +704,6 @@ void BK4819_SetFilterBandwidth(const BK4819_FilterBandwidth_t Bandwidth, const b
 		// Enable FM sub-audio filters & emphasis
 		BK4819_WriteRegister(BK4819_REG_2B, BK4819_ReadRegister(BK4819_REG_2B) & 0xF8F8);
 	}
-#endif
 }
 
 void BK4819_SetupPowerAmplifier(const uint8_t bias, const uint32_t frequency)
@@ -795,11 +787,7 @@ void BK4819_SetupSquelch(
 
 		// original (*)
 	(1u << 14) |                  //  1 ???
-#ifdef ENABLE_DIGITAL_MODULATION
 	(0u << 11) |                  // *0  squelch = open  delay .. 0 ~ 7
-#else
-	(5u << 11) |                  // *5  squelch = open  delay .. 0 ~ 7
-#endif
 	(6u <<  9) |                  // *3  squelch = close delay .. 0 ~ 3
 	SquelchOpenGlitchThresh);     //  0 ~ 255
 
@@ -1112,17 +1100,6 @@ void BK4819_TurnsOffTones_TurnsOnRX(void)
 		BK4819_REG_30_ENABLE_RX_DSP);
 }
 
-#ifdef ENABLE_AIRCOPY
-	void BK4819_SetupAircopy(void)
-	{
-		BK4819_WriteRegister(BK4819_REG_70, 0x00E0);    // Enable Tone2, tuning gain 48
-		BK4819_WriteRegister(BK4819_REG_72, 0x3065);    // Tone2 baudrate 1200
-		BK4819_WriteRegister(BK4819_REG_58, 0x00C1);    // FSK Enable, FSK 1.2K RX Bandwidth, Preamble 0xAA or 0x55, RX Gain 0, RX Mode
-		                                                // (FSK1.2K, FSK2.4K Rx and NOAA SAME Rx), TX Mode FSK 1.2K and FSK 2.4K Tx
-		BK4819_WriteRegister(BK4819_REG_5C, 0x5665);    // Enable CRC among other things we don't know yet
-		BK4819_WriteRegister(BK4819_REG_5D, 0x4700);    // FSK Data Length 72 Bytes (0xabcd + 2 byte length + 64 byte payload + 2 byte CRC + 0xdcba)
-	}
-#endif
 
 void BK4819_ResetFSK(void)
 {
@@ -1178,17 +1155,14 @@ void BK4819_ExitBypass(void)
 		| (5u <<  3)       // 5  DC Filter band width for Tx (MIC In)
 
 	);
-#ifdef ENABLE_DIGITAL_MODULATION
 	// Enable ALC
 	BK4819_SetRegValue(alcDisableRegSpec, 0);
 	// Enable MIC AGC
 	BK4819_SetRegValue(micAgcDisableRegSpec, 0);
 	// Set default deviation
 	BK4819_WriteRegister(BK4819_REG_40, gBK4819_DefaultDeviation);
-#endif
 }
 
-#ifdef ENABLE_DIGITAL_MODULATION
 void BK4819_PrepareDigitalTransmit(const BK4819_FilterBandwidth_t Bandwidth)
 {
 	// Mute output audio and bypass all AF TX filters.
@@ -1221,7 +1195,6 @@ void BK4819_PrepareDigitalTransmit(const BK4819_FilterBandwidth_t Bandwidth)
 	BK4819_ExitTxMute();
 	BK4819_TxOn_Beep();
 }
-#endif
 
 void BK4819_PrepareTransmit(void)
 {
@@ -1501,11 +1474,7 @@ void BK4819_PlayCDCSSTail(void)
 
 void BK4819_PlayCTCSSTail(void)
 {
-	#ifdef ENABLE_CTCSS_TAIL_PHASE_SHIFT
-		BK4819_GenTail(2);       // 180° phase shift
-	#else
 		BK4819_GenTail(4);       // 55Hz tone freq
-	#endif
 
 	// REG_51
 	//

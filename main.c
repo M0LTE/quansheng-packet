@@ -18,9 +18,6 @@
 #include <string.h>
 #include <stdio.h>     // NULL
 
-#ifdef ENABLE_AM_FIX
-	#include "am_fix.h"
-#endif
 
 #include "audio.h"
 #include "board.h"
@@ -39,22 +36,17 @@
 #include "driver/gpio.h"
 #include "driver/system.h"
 #include "driver/systick.h"
-#ifdef ENABLE_UART
 	#include "driver/uart.h"
-#endif
 
 #include "helper/battery.h"
 #include "helper/boot.h"
 
-#include "ui/lock.h"
 #include "ui/welcome.h"
 #include "ui/menu.h"
 void _putchar(__attribute__((unused)) char c)
 {
 
-#ifdef ENABLE_UART
 	UART_Send((uint8_t *)&c, 1);
-#endif
 
 }
 
@@ -78,10 +70,8 @@ void Main(void)
 
 	boot_counter_10ms = 250;   // 2.5 sec
 
-#ifdef ENABLE_UART
 	UART_Init();
 	UART_Send(UART_Version, strlen(UART_Version));
-#endif
 
 	// Not implementing authentic device checks
 
@@ -108,9 +98,6 @@ void Main(void)
 
 	BATTERY_GetReadings(false);
 
-#ifdef ENABLE_AM_FIX
-	AM_fix_init();
-#endif
 
 	const BOOT_Mode_t  BootMode = BOOT_GetMode();
 
@@ -173,21 +160,9 @@ void Main(void)
 					boot_counter_10ms = 0;
 					break;
 				}
-#ifdef ENABLE_BOOT_BEEPS
-				if ((boot_counter_10ms % 25) == 0)
-					AUDIO_PlayBeep(BEEP_880HZ_40MS_OPTIONAL);
-#endif
 			}
 		}
 
-#ifdef ENABLE_PWRON_PASSWORD
-		if (gEeprom.POWER_ON_PASSWORD < 1000000)
-		{
-			bIsInLockScreen = true;
-			UI_DisplayLock();
-			bIsInLockScreen = false;
-		}
-#endif
 
 		BOOT_ProcessMode(BootMode);
 
@@ -195,28 +170,7 @@ void Main(void)
 
 		gUpdateStatus = true;
 
-#ifdef ENABLE_VOICE
-		{
-			uint8_t Channel;
 
-			AUDIO_SetVoiceID(0, VOICE_ID_WELCOME);
-
-			Channel = gEeprom.ScreenChannel[gEeprom.TX_VFO];
-			if (IS_MR_CHANNEL(Channel))
-			{
-				AUDIO_SetVoiceID(1, VOICE_ID_CHANNEL_MODE);
-				AUDIO_SetDigitVoice(2, Channel + 1);
-			}
-			else if (IS_FREQ_CHANNEL(Channel))
-				AUDIO_SetVoiceID(1, VOICE_ID_FREQUENCY_MODE);
-
-			AUDIO_PlaySingleVoice(0);
-		}
-#endif
-
-#ifdef ENABLE_NOAA
-		RADIO_ConfigureNOAA();
-#endif
 	}
 
 	while (true) {

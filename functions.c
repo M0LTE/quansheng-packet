@@ -17,16 +17,10 @@
 #include <string.h>
 
 #include "app/dtmf.h"
-#if defined(ENABLE_FMRADIO)
-	#include "app/fm.h"
-#endif
 #include "audio.h"
 #include "bsp/dp32g030/gpio.h"
 #include "dcs.h"
 #include "driver/backlight.h"
-#if defined(ENABLE_FMRADIO)
-	#include "driver/bk1080.h"
-#endif
 #include "driver/bk4819.h"
 #include "driver/gpio.h"
 #include "driver/system.h"
@@ -67,31 +61,14 @@ void FUNCTION_Init(void)
 
 	gCurrentCodeType = (gRxVfo->Modulation != MODULATION_FM) ? CODE_TYPE_OFF : gRxVfo->pRX->CodeType;
 
-#ifdef ENABLE_VOX
-	g_VOX_Lost     = false;
-#endif
 
-#ifdef ENABLE_DTMF_CALLING
-	DTMF_clear_RX();
-#endif
 
-#ifdef ENABLE_NOAA
-	gNOAACountdown_10ms = 0;
-
-	if (IS_NOAA_CHANNEL(gRxVfo->CHANNEL_SAVE)) {
-		gCurrentCodeType = CODE_TYPE_CONTINUOUS_TONE;
-	}
-#endif
 
 	gUpdateStatus = true;
 }
 
 void FUNCTION_Foreground(const FUNCTION_Type_t PreviousFunction)
 {
-#ifdef ENABLE_DTMF_CALLING
-	if (gDTMF_ReplyState != DTMF_REPLY_NONE)
-		RADIO_PrepareCssTX();
-#endif
 
 	if (PreviousFunction == FUNCTION_TRANSMIT) {
 		ST7565_FixInterfGlitch();
@@ -101,19 +78,7 @@ void FUNCTION_Foreground(const FUNCTION_Type_t PreviousFunction)
 		return;
 	}
 
-#if defined(ENABLE_FMRADIO)
-	if (gFmRadioMode)
-		gFM_RestoreCountdown_10ms = fm_restore_countdown_10ms;
-#endif
 
-#ifdef ENABLE_DTMF_CALLING
-	if (gDTMF_CallState == DTMF_CALL_STATE_CALL_OUT ||
-		gDTMF_CallState == DTMF_CALL_STATE_RECEIVED ||
-		gDTMF_CallState == DTMF_CALL_STATE_RECEIVED_STAY)
-	{
-		gDTMF_auto_reset_time_500ms = gEeprom.DTMF_auto_reset_time * 2;
-	}
-#endif
 	gUpdateStatus = true;
 }
 
@@ -141,42 +106,12 @@ void FUNCTION_Transmit()
 	// if DTMF is enabled when TX'ing, it changes the TX audio filtering !! .. 1of11
 	BK4819_DisableDTMF();
 
-#ifdef ENABLE_DTMF_CALLING
-	// clear the DTMF RX buffer
-	DTMF_clear_RX();
-#endif
 
 	// clear the DTMF RX live decoder buffer
 	gDTMF_RX_live_timeout = 0;
 	memset(gDTMF_RX_live, 0, sizeof(gDTMF_RX_live));
 
-#if defined(ENABLE_FMRADIO)
-	if (gFmRadioMode)
-		BK1080_Init0();
-#endif
 
-#ifdef ENABLE_ALARM
-	if (gAlarmState == ALARM_STATE_SITE_ALARM)
-	{
-		GUI_DisplayScreen();
-
-		AUDIO_AudioPathOff();
-
-		SYSTEM_DelayMs(20);
-		BK4819_PlayTone(500, 0);
-		SYSTEM_DelayMs(2);
-
-		AUDIO_AudioPathOn();
-
-		gEnableSpeaker = true;
-
-		SYSTEM_DelayMs(60);
-		BK4819_ExitTxMute();
-
-		gAlarmToneCounter = 0;
-		return;
-	}
-#endif
 
 	gUpdateStatus = true;
 
@@ -192,27 +127,6 @@ void FUNCTION_Transmit()
 	if (gCurrentVfo->DTMF_PTT_ID_TX_MODE == PTT_ID_APOLLO)
 		BK4819_PlaySingleTone(2525, 250, 0, gEeprom.DTMF_SIDE_TONE);
 
-#if defined(ENABLE_ALARM) || defined(ENABLE_TX1750)
-	if (gAlarmState != ALARM_STATE_OFF) {
-		#ifdef ENABLE_TX1750
-		if (gAlarmState == ALARM_STATE_TX1750)
-			BK4819_TransmitTone(true, 1750);
-		#endif
-
-		#ifdef ENABLE_ALARM
-		if (gAlarmState == ALARM_STATE_TXALARM)
-			BK4819_TransmitTone(true, 500);
-
-		gAlarmToneCounter = 0;
-		#endif
-
-		SYSTEM_DelayMs(2);
-		AUDIO_AudioPathOn();
-		gEnableSpeaker = true;
-
-		return;
-	}
-#endif
 
 	if (gCurrentVfo->SCRAMBLING_TYPE > 0 && gSetting_ScrambleEnable)
 		BK4819_EnableScramble(gCurrentVfo->SCRAMBLING_TYPE - 1);
@@ -266,8 +180,4 @@ void FUNCTION_Select(FUNCTION_Type_t Function)
 	gBatterySaveCountdown_10ms = battery_save_count_10ms;
 	gSchedulePowerSave         = false;
 
-#if defined(ENABLE_FMRADIO)
-	if(Function != FUNCTION_INCOMING)
-		gFM_RestoreCountdown_10ms = 0;
-#endif
 }

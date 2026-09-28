@@ -9,10 +9,6 @@ int8_t            gScanStateDir;
 bool              gScanKeepResult;
 bool              gScanPauseMode;
 
-#ifdef ENABLE_SCAN_RANGES
-uint32_t          gScanRangeStart;
-uint32_t          gScanRangeStop;
-#endif
 
 typedef enum {
 	SCAN_NEXT_CHAN_SCANLIST1 = 0,
@@ -156,23 +152,13 @@ void CHFRSCANNER_Stop(void)
 
 static void NextFreqChannel(void)
 {
-#ifdef ENABLE_SCAN_RANGES
-	if(gScanRangeStart) {
-		gRxVfo->freq_config_RX.Frequency = APP_SetFreqByStepAndLimits(gRxVfo, gScanStateDir, gScanRangeStart, gScanRangeStop);
-	}
-	else
-#endif
 		gRxVfo->freq_config_RX.Frequency = APP_SetFrequencyByStep(gRxVfo, gScanStateDir);
 
 	RADIO_ApplyOffset(gRxVfo);
 	RADIO_ConfigureSquelchAndOutputPower(gRxVfo);
 	RADIO_SetupRegisters(true);
 
-#ifdef ENABLE_FASTER_CHANNEL_SCAN
-	gScanPauseDelayIn_10ms = 9;   // 90ms
-#else
 	gScanPauseDelayIn_10ms = scan_pause_delay_in_6_10ms;
-#endif
 
 	gUpdateDisplay     = true;
 }
@@ -261,11 +247,7 @@ static void NextMemChannel(void)
 		gUpdateDisplay = true;
 	}
 
-#ifdef ENABLE_FASTER_CHANNEL_SCAN
-	gScanPauseDelayIn_10ms = 9;  // 90ms .. <= ~60ms it misses signals (squelch response and/or PLL lock time) ?
-#else
 	gScanPauseDelayIn_10ms = scan_pause_delay_in_3_10ms;
-#endif
 
 	if (enabled)
 		if (++currentScanList >= SCAN_NEXT_NUM)

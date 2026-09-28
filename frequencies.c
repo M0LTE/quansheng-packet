@@ -29,15 +29,9 @@ const freq_band_table_t BX4819_band2 = {84000000, BX4819_band2_upper};
 
 const freq_band_table_t frequencyBandTable[] =
 {
-	#ifndef ENABLE_WIDE_RX
 		// QS original
 		[BAND1_50MHz ]={.lower =  5000000,  .upper =  7600000},
 		[BAND7_470MHz]={.lower = 47000000,  .upper = 60000000},
-	#else
-		// extended range
-		[BAND1_50MHz ]={.lower =  BX4819_band1_lower, .upper =  10800000},
-		[BAND7_470MHz]={.lower = 47000000, .upper = BX4819_band2_upper},
-	#endif
 		[BAND2_108MHz]={.lower = 10800000,  .upper = 13700000},
 		[BAND3_137MHz]={.lower = 13700000,  .upper = 17400000},
 		[BAND4_174MHz]={.lower = 17400000,  .upper = 35000000},
@@ -45,21 +39,6 @@ const freq_band_table_t frequencyBandTable[] =
 		[BAND6_400MHz]={.lower = 40000000,  .upper = 47000000}
 };
 
-#ifdef ENABLE_NOAA
-	const uint32_t NoaaFrequencyTable[10] =
-	{
-		16255000,
-		16240000,
-		16247500,
-		16242500,
-		16245000,
-		16250000,
-		16252500,
-		16152500,
-		16177500,
-		16327500
-	};
-#endif
 
 
 // this order of steps has to be preserved for backwards compatibility with other/stock firmwares

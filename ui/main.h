@@ -42,8 +42,5 @@ void UI_DisplayAudioBar(void);
 void UI_MAIN_TimeSlice500ms(void);
 void UI_DisplayMain(void);
 
-#ifdef ENABLE_AGC_SHOW_DATA
-void UI_MAIN_PrintAGC(bool force);
-#endif
 
 #endif

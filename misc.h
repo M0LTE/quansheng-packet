@@ -90,11 +90,6 @@ extern const uint8_t         menu_timeout_500ms;
 extern const uint16_t        menu_timeout_long_500ms;
 
 extern const uint8_t         DTMF_RX_live_timeout_500ms;
-#ifdef ENABLE_DTMF_CALLING
-extern const uint8_t         DTMF_RX_timeout_500ms;
-extern const uint8_t         DTMF_decode_ring_countdown_500ms;
-extern const uint8_t         DTMF_txstop_countdown_500ms;
-#endif
 
 extern const uint8_t         key_input_timeout_500ms;
 
@@ -109,9 +104,6 @@ extern const uint16_t        battery_save_count_10ms;
 extern const uint16_t        power_save1_10ms;
 extern const uint16_t        power_save2_10ms;
 
-#ifdef ENABLE_VOX
-	extern const uint16_t    vox_stop_count_down_10ms;
-#endif
 
 extern const uint16_t        NOAA_countdown_10ms;
 extern const uint16_t        NOAA_countdown_2_10ms;
@@ -123,9 +115,6 @@ extern const uint16_t        dual_watch_count_after_1_10ms;
 extern const uint16_t        dual_watch_count_after_2_10ms;
 extern const uint16_t        dual_watch_count_toggle_10ms;
 extern const uint16_t        dual_watch_count_noaa_10ms;
-#ifdef ENABLE_VOX
-	extern const uint16_t    dual_watch_count_after_vox_10ms;
-#endif
 
 extern const uint16_t        scan_pause_delay_in_1_10ms;
 extern const uint16_t        scan_pause_delay_in_2_10ms;
@@ -141,9 +130,6 @@ extern const uint16_t        scan_pause_delay_in_7_10ms;
 extern const uint8_t         gMicGain_dB2[5];
 
 extern bool                  gSetting_350TX;
-#ifdef ENABLE_DTMF_CALLING
-extern bool                  gSetting_KILLED;
-#endif
 extern bool                  gSetting_200TX;
 extern bool                  gSetting_500TX;
 extern bool                  gSetting_350EN;
@@ -152,13 +138,7 @@ extern bool                  gSetting_ScrambleEnable;
 
 extern enum BacklightOnRxTx_t gSetting_backlight_on_tx_rx;
 
-#ifdef ENABLE_AM_FIX
-	extern bool              gSetting_AM_fix;
-#endif
 
-#ifdef ENABLE_AUDIO_BAR
-	extern bool              gSetting_mic_bar;
-#endif
 extern bool                  gSetting_live_DTMF_decoder;
 extern uint8_t               gSetting_battery_text;
 
@@ -207,9 +187,6 @@ extern volatile bool         gTxTimeoutReached;
 
 extern volatile uint16_t     gTailToneEliminationCountdown_10ms;
 
-#ifdef ENABLE_NOAA
-	extern volatile uint16_t gNOAA_Countdown_10ms;
-#endif
 extern bool                  gEnableSpeaker;
 extern uint8_t               gKeyInputCountdown;
 extern uint8_t               gKeyLockCountdown;
@@ -251,28 +228,16 @@ extern bool                  gFlagResetVfos;
 extern bool                  gRequestSaveVFO;
 extern uint8_t               gRequestSaveChannel;
 extern bool                  gRequestSaveSettings;
-#ifdef ENABLE_FMRADIO
-	extern bool              gRequestSaveFM;
-#endif
 extern uint8_t               gKeypadLocked;
 extern bool                  gFlagPrepareTX;
 
 extern bool                  gFlagAcceptSetting;   // accept menu setting
 extern bool                  gFlagRefreshSetting;  // refresh menu display
 
-#ifdef ENABLE_FMRADIO
-	extern bool              gFlagSaveFM;
-#endif
 extern bool                  g_CDCSS_Lost;
 extern uint8_t               gCDCSSCodeType;
 extern bool                  g_CTCSS_Lost;
 extern bool                  g_CxCSS_TAIL_Found;
-#ifdef ENABLE_VOX
-	extern bool              g_VOX_Lost;
-	extern bool              gVOX_NoiseDetected;
-	extern uint16_t          gVoxResumeCountdown;
-	extern uint16_t          gVoxPauseCountdown;
-#endif
 
 // true means we are receiving signal
 extern bool                  g_SquelchLost;
@@ -294,32 +259,15 @@ extern uint8_t               gMenuListCount;
 extern uint8_t               gBackup_CROSS_BAND_RX_TX;
 extern uint8_t               gScanDelay_10ms;
 extern uint8_t               gFSKWriteIndex;
-#ifdef ENABLE_NOAA
-	extern bool              gIsNoaaMode;
-	extern uint8_t           gNoaaChannel;
-#endif
 extern volatile bool         gNextTimeslice;
 extern bool                  gUpdateDisplay;
 extern bool                  gF_LOCK;
-#ifdef ENABLE_FMRADIO
-	extern uint8_t           gFM_ChannelPosition;
-#endif
 extern uint8_t               gShowChPrefix;
 extern volatile uint8_t      gFoundCDCSSCountdown_10ms;
 extern volatile uint8_t      gFoundCTCSSCountdown_10ms;
-#ifdef ENABLE_VOX
-	extern volatile uint16_t gVoxStopCountdown_10ms;
-#endif
 extern volatile bool         gNextTimeslice40ms;
-#ifdef ENABLE_NOAA
-	extern volatile uint16_t gNOAACountdown_10ms;
-	extern volatile bool     gScheduleNOAA;
-#endif
 extern volatile bool         gFlagTailToneEliminationComplete;
 extern volatile uint8_t      gVFOStateResumeCountdown_500ms;
-#ifdef ENABLE_FMRADIO
-	extern volatile bool     gScheduleFM;
-#endif
 extern uint8_t               gIsLocked;
 extern volatile uint8_t      boot_counter_10ms;
 

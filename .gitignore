@@ -7,5 +7,5 @@ firmware
 .cache
 compile_commands.json
 .vscode
-/docs
+/out
 k5_eeprom.raw

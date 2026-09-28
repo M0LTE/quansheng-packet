@@ -17,9 +17,6 @@
 #include <string.h>
 
 #include "app/chFrScanner.h"
-#ifdef ENABLE_FMRADIO
-	#include "app/fm.h"
-#endif
 #include "app/scanner.h"
 #include "bitmaps.h"
 #include "driver/keyboard.h"
@@ -56,28 +53,7 @@ void UI_DisplayStatus()
 	x += 8;
 	unsigned int x1 = x;
 
-#ifdef ENABLE_NOAA
-	if (gIsNoaaMode) { // NOASS SCAN indicator
-		memcpy(line + x, BITMAP_NOAA, sizeof(BITMAP_NOAA));
-		x1 = x + sizeof(BITMAP_NOAA);
-	}
-	x += sizeof(BITMAP_NOAA);
-#endif
 
-#ifdef ENABLE_DTMF_CALLING
-	if (gSetting_KILLED) {
-		memset(line + x, 0xFF, 10);
-		x1 = x + 10;
-	}
-	else
-#endif
-#ifdef ENABLE_FMRADIO
-	if (gFmRadioMode) { // FM indicator
-		memcpy(line + x, BITMAP_FM, sizeof(BITMAP_FM));
-		x1 = x + sizeof(BITMAP_FM);
-	}
-	else
-#endif
 	{ // SCAN indicator
 		if (gScanStateDir != SCAN_OFF || SCANNER_IsScanning()) {
 			char * s = "";
@@ -97,14 +73,6 @@ void UI_DisplayStatus()
 	}
 	x += 10;  // font character width
 
-#ifdef ENABLE_VOICE
-	// VOICE indicator
-	if (gEeprom.VOICE_PROMPT != VOICE_PROMPT_OFF){
-		memcpy(line + x, BITMAP_VoicePrompt, sizeof(BITMAP_VoicePrompt));
-		x1 = x + sizeof(BITMAP_VoicePrompt);
-	}
-	x += sizeof(BITMAP_VoicePrompt);
-#endif
 
 	if(!SCANNER_IsScanning()) {
 		uint8_t dw = (gEeprom.DUAL_WATCH != DUAL_WATCH_OFF) + (gEeprom.CROSS_BAND_RX_TX != CROSS_BAND_OFF) * 2;
@@ -120,14 +88,6 @@ void UI_DisplayStatus()
 	}
 	x += sizeof(BITMAP_TDR1) + 1;
 
-#ifdef ENABLE_VOX
-	// VOX indicator
-	if (gEeprom.VOX_SWITCH) {
-		memcpy(line + x, BITMAP_VOX, sizeof(BITMAP_VOX));
-		x1 = x + sizeof(BITMAP_VOX) + 1;
-	}
-	x += sizeof(BITMAP_VOX) + 1;
-#endif
 
 	x = MAX(x1, 61u);
 

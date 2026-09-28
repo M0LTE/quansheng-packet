@@ -49,10 +49,8 @@ enum BK4819_FilterBandwidth_t
 	BK4819_FILTER_BW_WIDE = 0,
 	BK4819_FILTER_BW_NARROW,
 	BK4819_FILTER_BW_NARROWER,
-#ifdef ENABLE_DIGITAL_MODULATION
 	BK4819_FILTER_BW_DIGITAL_WIDE,
 	BK4819_FILTER_BW_DIGITAL_NARROW,
-#endif
 };
 
 typedef enum BK4819_FilterBandwidth_t BK4819_FilterBandwidth_t;
@@ -114,15 +112,10 @@ void     BK4819_EnterTxMute(void);
 void     BK4819_ExitTxMute(void);
 void     BK4819_Sleep(void);
 void     BK4819_TurnsOffTones_TurnsOnRX(void);
-#ifdef ENABLE_AIRCOPY
-	void     BK4819_SetupAircopy(void);
-#endif
 void     BK4819_ResetFSK(void);
 void     BK4819_Idle(void);
 void     BK4819_ExitBypass(void);
-#ifdef ENABLE_DIGITAL_MODULATION
 void     BK4819_PrepareDigitalTransmit(const BK4819_FilterBandwidth_t Bandwidth);
-#endif
 void     BK4819_PrepareTransmit(void);
 void     BK4819_TxOn_Beep(void);
 void     BK4819_ExitSubAu(void);

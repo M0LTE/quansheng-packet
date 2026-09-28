@@ -49,18 +49,12 @@ enum
 	MENU_MEM_NAME,
 	MENU_MDF,
 	MENU_SAVE,
-#ifdef ENABLE_VOX
-	MENU_VOX,
-#endif
 	MENU_ABR,
 	MENU_ABR_ON_TX_RX,
 	MENU_ABR_MIN,
 	MENU_ABR_MAX,
 	MENU_TDR,
 	MENU_BEEP,
-#ifdef ENABLE_VOICE
-	MENU_VOICE,
-#endif
 	MENU_SC_REV,
 	MENU_AUTOLK,
 	MENU_S_ADD1,
@@ -68,45 +62,22 @@ enum
 	MENU_STE,
 	MENU_RP_STE,
 	MENU_MIC,
-#ifdef ENABLE_AUDIO_BAR
-	MENU_MIC_BAR,
-#endif
 	MENU_COMPAND,
 	MENU_1_CALL,
 	MENU_S_LIST,
 	MENU_SLIST1,
 	MENU_SLIST2,
-#ifdef ENABLE_ALARM
-	MENU_AL_MOD,
-#endif
-#ifdef ENABLE_DTMF_CALLING
-	MENU_ANI_ID,
-#endif
 	MENU_UPCODE,
 	MENU_DWCODE,
 	MENU_PTT_ID,
 	MENU_D_ST,
-#ifdef ENABLE_DTMF_CALLING
-	MENU_D_RSP,
-	MENU_D_HOLD,
-#endif
 	MENU_D_PRE,
-#ifdef ENABLE_DTMF_CALLING	
-	MENU_D_DCD,
-	MENU_D_LIST,
-#endif
 	MENU_D_LIVE_DEC,
 	MENU_PONMSG,
 	MENU_ROGER,
 	MENU_VOL,
 	MENU_BAT_TXT,
 	MENU_AM,
-#ifdef ENABLE_AM_FIX
-	MENU_AM_FIX,
-#endif
-#ifdef ENABLE_NOAA
-	MENU_NOAA_S,
-#endif
 	MENU_RESET,
 	MENU_F_LOCK,
 	MENU_200TX,
@@ -114,9 +85,6 @@ enum
 	MENU_500TX,
 	MENU_350EN,
 	MENU_SCREN,
-#ifdef ENABLE_F_CAL_MENU
-	MENU_F_CALI,  // reference xtal calibration
-#endif
 	MENU_BATCAL,  // battery voltage calibration
 	MENU_F1SHRT,
 	MENU_F1LONG,
@@ -137,17 +105,8 @@ extern const char        gSubMenu_SAVE[5][4];
 extern const char        gSubMenu_TOT[11][7];
 extern const char* const gSubMenu_RXMode[4];
 
-#ifdef ENABLE_VOICE
-	extern const char    gSubMenu_VOICE[3][4];
-#endif
 extern const char        gSubMenu_SC_REV[3][8];
 extern const char* const gSubMenu_MDF[4];
-#ifdef ENABLE_ALARM
-	extern const char    gSubMenu_AL_MOD[2][5];
-#endif
-#ifdef ENABLE_DTMF_CALLING
-extern const char        gSubMenu_D_RSP[4][11];
-#endif
 extern const char* const gSubMenu_PTT_ID[5];
 extern const char        gSubMenu_PONMSG[4][8];
 extern const char        gSubMenu_ROGER[3][6];

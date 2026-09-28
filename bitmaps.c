@@ -62,7 +62,6 @@ const uint8_t BITMAP_BatteryLevel[2] =
 	0b01011101
 };
 
-#ifndef ENABLE_REVERSE_BAT_SYMBOL
 	// Quansheng way (+ pole to the left)
 	const uint8_t BITMAP_BatteryLevel1[17] =
 	{
@@ -84,29 +83,6 @@ const uint8_t BITMAP_BatteryLevel[2] =
 		0b01000001,
 		0b01111111
 	};
-#else
-	// reversed (+ pole to the right)
-	const uint8_t BITMAP_BatteryLevel1[17] =
-	{
-		0b00000000,
-		0b01111111,
-		0b01000001,
-		0b01000001,
-		0b01000001,
-		0b01000001,
-		0b01000001,
-		0b01000001,
-		0b01000001,
-		0b01000001,
-		0b01000001,
-		0b01000001,
-		0b01000001,
-		0b01000001,
-		0b01000001,
-		0b00100010,
-		0b00111110
-	};
-#endif
 
 const uint8_t BITMAP_USB_C[9] =
 {	// USB symbol
@@ -141,29 +117,6 @@ const uint8_t BITMAP_F_Key[6] =
 	0b01000001
 };
 
-#ifdef ENABLE_VOX
-	const uint8_t BITMAP_VOX[18] =
-	{	// "VOX"
-		0b00000000,
-		0b00011111,
-		0b00100000,
-		0b01000000,
-		0b00100000,
-		0b00011111,
-		0b00000000,
-		0b00111110,
-		0b01000001,
-		0b01000001,
-		0b01000001,
-		0b00111110,
-		0b00000000,
-		0b01100011,
-		0b00010100,
-		0b00001000,
-		0b00010100,
-		0b01100011
-	};
-#endif
 
 
 // 'XB' (cross-band/cross-VFO)
@@ -218,37 +171,7 @@ const uint8_t BITMAP_TDR2[10] =
 	0b00100010,
 };
 
-#ifdef ENABLE_VOICE
-	const uint8_t BITMAP_VoicePrompt[9] =
-	{
-		0b00000000,
-		0b00011000,
-		0b00011000,
-		0b00100100,
-		0b00100100,
-		0b01000010,
-		0b01000010,
-		0b11111111,
-		0b00011000
-	};
-#endif
 
-#ifdef ENABLE_NOAA
-	const uint8_t BITMAP_NOAA[11] =
-	{	// "NS"
-		0b00000000,
-		0b01111111,
-		0b00000100,
-		0b00001000,
-		0b00010000,
-		0b01111111,
-		0b00000000,
-		0b01000110,
-		0b01001001,
-		0b01001001,
-		0b00110001
-	};
-#endif
 
 const uint8_t BITMAP_Antenna[5] =
 {
@@ -313,7 +236,6 @@ const uint8_t BITMAP_compand[6] =
 	0b00100100
 };
 
-#ifndef ENABLE_CUSTOM_MENU_LAYOUT
 const uint8_t BITMAP_CurrentIndicator[8] = {
 	0xFF,
 	0xFF,
@@ -324,4 +246,3 @@ const uint8_t BITMAP_CurrentIndicator[8] = {
 	0x18,
 	0x18
 };
-#endif
