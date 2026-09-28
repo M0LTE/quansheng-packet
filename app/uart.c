@@ -193,8 +193,6 @@ static void CMD_0514(const uint8_t *pBuffer)
 	Timestamp = pCmd->Timestamp;
 
 
-	gSerialConfigCountDown_500ms = SERIAL_PTT_LOCK_500ms;
-
 	SendVersion();
 }
 
@@ -210,8 +208,6 @@ static void CMD_051B(const uint8_t *pBuffer)
 	// the reply buffer holds 128 bytes; upstream did not check
 	if (pCmd->Size > sizeof(Reply.Data.Data))
 		return;
-
-	gSerialConfigCountDown_500ms = SERIAL_PTT_LOCK_500ms;
 
 	memset(&Reply, 0, sizeof(Reply));
 	Reply.Header.ID   = 0x051C;
@@ -243,8 +239,6 @@ static void CMD_051D(const uint8_t *pBuffer, const uint16_t CommandSize)
 	for (unsigned int i = 0; i < (pCmd->Size / 8); i++)
 		if (!EEPROM_IsWritable(pCmd->Offset + (i * 8U)))
 			return;
-
-	gSerialConfigCountDown_500ms = SERIAL_PTT_LOCK_500ms;
 
 	Reply.Header.ID   = 0x051E;
 	Reply.Header.Size = sizeof(Reply.Data);
@@ -294,8 +288,6 @@ static void CMD_052F(const uint8_t *pBuffer)
 	const CMD_052F_t *pCmd = (const CMD_052F_t *)pBuffer;
 
 	Timestamp = pCmd->Timestamp;
-
-	gSerialConfigCountDown_500ms = SERIAL_PTT_LOCK_500ms;
 
 	SendVersion();
 }
@@ -430,8 +422,23 @@ bool UART_IsCommandAvailable(void)
 	return (CRC_Calculate(UART_Command.Buffer, Size) != CRC) ? false : true;
 }
 
+// Stop transmitting before a reboot: PA off, red LED off, BK4819 off.
+// (No delays here: this runs with interrupts disabled.)
+static void DeKey(void)
+{
+	BK4819_SetupPowerAmplifier(0, 0);
+	BK4819_ToggleGpioOut(BK4819_GPIO1_PIN29_PA_ENABLE, false);
+	BK4819_ToggleGpioOut(BK4819_GPIO5_PIN1_RED, false);
+	BK4819_WriteRegister(BK4819_REG_30, 0);
+}
+
 void UART_HandleCommand(void)
 {
+	// Every valid frame, whatever it asks for, holds PTT off (and ends any
+	// transmission) for SERIAL_PTT_LOCK_500ms: the UART line shares a
+	// contact with PTT on the K1 connector.
+	gSerialConfigCountDown_500ms = SERIAL_PTT_LOCK_500ms;
+
 	switch (UART_Command.Header.ID)
 	{
 		case 0x0514:
@@ -459,15 +466,18 @@ void UART_HandleCommand(void)
 			break;
 	
 		case 0x05DD: // reset
-				NVIC_SystemReset();
+			DeKey();
+			NVIC_SystemReset();
 			break;
-			
-		case 0x0601:
-			CMD_0601_ReadBK4819Reg(UART_Command.Buffer);
+
+		case 0x0601: // id, size, register
+			if (gUART_CommandSize >= 5)
+				CMD_0601_ReadBK4819Reg(UART_Command.Buffer);
 			break;
-		
-		case 0x0602:
-			CMD_0602_WriteBK4819Reg(UART_Command.Buffer);
+
+		case 0x0602: // id, size, register, value
+			if (gUART_CommandSize >= 7)
+				CMD_0602_WriteBK4819Reg(UART_Command.Buffer);
 			break;
 	}
 }

@@ -26,6 +26,7 @@ Flash for the firmware is 61440 bytes (60 KiB). All sizes are gcc 10.3.1 (Docker
 | Calibration write guard (`c217d5e`) | 45608 | 15832 |
 | App layer replaced by the packet station (`c991086`) | 22432 | 39008 |
 | Settings reload after UART writes, version check (`5e77b4b`) | 22524 | 38916 |
+| Review fixes (see below) | 22660 | 38780 |
 
 ## What was removed
 
@@ -93,12 +94,12 @@ Keys on the main screen: digits enter a frequency (or a channel number in memory
 | 0x051D write EEPROM | 8-byte blocks | refused whole, with no reply, if any block is unaligned or at 0x1E00 and up, or if the data does not fit the frame; applied about 1 to 1.5 s after the session goes quiet |
 | 0x0527 | RSSI, noise, glitch | none |
 | 0x0529 | battery voltage and current | none |
-| 0x05DD | reboot | none |
-| 0x0601 / 0x0602 | BK4819 register read / write | always built in |
+| 0x05DD | reboot | de-keys first (PA off, BK4819 off) |
+| 0x0601 / 0x0602 | BK4819 register read / write | always built in; frames too short to hold the register (and value) are ignored |
 
 0x052D (AES challenge), 0x051F and 0x0521 are gone. Register writes still get overwritten by the firmware on the next receive set-up or key-up for the registers it manages (7D, 40, 47, 48, 7E, 2B, 43, 31): change those through the settings instead.
 
-**PTT lock.** On the K1 connector the UART receive line shares a contact with PTT, so after a hello or an EEPROM command the firmware ignores PTT, and drops any transmission, for a while. Upstream held this for 6 s; here it is 1 to 1.5 s (`SERIAL_PTT_LOCK_500ms`). The risk: a host that pauses for more than a second in the middle of a session and then sends a long frame full of zero bytes could hold the line low for 30 ms before the frame is complete and the lock re-arms, which would key the radio briefly. Upstream had the same exposure on the first frame of every session. Keep sessions continuous, start with a short hello, and wait 1.5 s after the last command before keying. The BK4819 register commands do not touch the lock, as upstream.
+**PTT lock.** On the K1 connector the UART receive line shares a contact with PTT, so after a hello or an EEPROM command the firmware ignores PTT, and drops any transmission, for a while. Upstream held this for 6 s after a hello or EEPROM command; here it is 1 to 1.5 s (`SERIAL_PTT_LOCK_500ms`), refreshed by every valid frame, including the RSSI, battery and BK4819 register commands. The risk: a host that pauses for more than a second in the middle of a session and then sends a long frame full of zero bytes could hold the line low for 30 ms before the frame is complete and the lock re-arms, which would key the radio briefly. Upstream had the same exposure on the first frame of every session. Keep sessions continuous, start with a short hello, and wait 1.5 s after the last command before keying. Because every frame holds PTT off, registers cannot be changed while transmitting (upstream allowed 0x0601/0x0602 during a side-PTT transmission), and a tool that polls RSSI more often than once a second keeps the radio from transmitting at all.
 
 ## Fixes
 
@@ -106,6 +107,9 @@ Keys on the main screen: digits enter a frequency (or a channel number in memory
 - **Deviation.** Upstream DIG wrote REG_40 = 0x383 wide and 0x4D6 narrow, so wide was 2.8 dB below narrow. Both are now settings, default 0x4D0 (the chip default) so that the chip's bandwidth mode does the wide/narrow difference, as in voice mode. That makes wide 2.7 dB hotter than upstream DIG and leaves narrow the same within 0.05 dB. The top 3 bits are read from the chip after its reset, not before.
 - **Calibration.** Upstream wrote a build-options byte to 0x1FF0 on every boot and could save battery calibration from the menu. This firmware never writes 0x1E00 and up (checked in the EEPROM driver and in the UART handler).
 - **TX timeout** returns to receive at once, and the next transmission needs PTT released first. It has 0.5 s resolution.
+- **Nothing is saved during a transmission.** Saves postponed while UP/DOWN was held, menu changes and the receiver set-up that follows them wait until TX ends; EXIT held does not turn the monitor off mid-transmission.
+- **Settings reload after UART writes** closes an open menu item, so MENU cannot store the value it showed before the reload.
+- **Blank channel records**: the first save to a never-written band slot or channel writes zeros (no offset, no tones, FM, no scrambler) rather than leaving 0xFF in the fields this firmware does not use.
 
 ## Other differences from upstream DIG that a measurement could see
 

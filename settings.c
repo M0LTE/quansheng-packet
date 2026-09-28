@@ -160,18 +160,28 @@ void SETTINGS_SaveChannel(const VFO_Info_t *pVFO)
 {
 	const uint8_t Channel = pVFO->CHANNEL_SAVE;
 	uint16_t Offset = Channel * 16;
-	uint8_t  State[8];
+	uint8_t  Head[8];
+	uint8_t  Tail[8];
 
 	if (IS_FREQ_CHANNEL(Channel)) // a band slot, VFO A
 		Offset = 0x0C80 + (Channel - FREQ_CHANNEL_FIRST) * 32;
 
-	EEPROM_ReadBuffer(Offset + 0, State, 8);
-	memcpy(State, &pVFO->Frequency, 4);
-	EEPROM_WriteBuffer(Offset + 0, State);
+	EEPROM_ReadBuffer(Offset + 0, Head, 8);
+	EEPROM_ReadBuffer(Offset + 8, Tail, 8);
 
-	EEPROM_ReadBuffer(Offset + 8, State, 8);
-	const uint8_t flags = (State[4] == 0xFF) ? 0 : (State[4] & ~((3u << 2) | (1u << 1)));
-	State[4] = flags | (pVFO->OUTPUT_POWER << 2) | (pVFO->CHANNEL_BANDWIDTH << 1);
-	State[6] = pVFO->STEP_SETTING;
-	EEPROM_WriteBuffer(Offset + 8, State);
+	// A record never written before (flags byte 0xFF) gets zeros in the
+	// fields this firmware does not use: no offset, no tones, FM, no
+	// scrambler, so it reads cleanly in other firmwares and CHIRP.
+	const bool blank = Tail[4] == 0xFF;
+	if (blank) {
+		memset(Head, 0, sizeof(Head));
+		memset(Tail, 0, sizeof(Tail));
+	}
+
+	memcpy(Head, &pVFO->Frequency, 4);
+	EEPROM_WriteBuffer(Offset + 0, Head);
+
+	Tail[4] = (Tail[4] & ~((3u << 2) | (1u << 1))) | (pVFO->OUTPUT_POWER << 2) | (pVFO->CHANNEL_BANDWIDTH << 1);
+	Tail[6] = pVFO->STEP_SETTING;
+	EEPROM_WriteBuffer(Offset + 8, Tail);
 }

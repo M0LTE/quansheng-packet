@@ -202,6 +202,23 @@ static void test_channel_load_save(void)
 	CHECK(gVfo->CHANNEL_BANDWIDTH == BANDWIDTH_WIDE);
 	CHECK(gVfo->OUTPUT_POWER == OUTPUT_POWER_LOW);
 
+	// saving a blank slot writes zeros in the fields this firmware does not use
+	{
+		const uint16_t b = 0x0C80 + BAND3_137MHz * 32;
+		gVfo->OUTPUT_POWER = OUTPUT_POWER_HIGH;
+		SETTINGS_SaveChannel(gVfo);
+		uint32_t fs; memcpy(&fs, &eeprom[b], 4);
+		CHECK(fs == 14480000);
+		CHECK(eeprom[b + 4] == 0 && eeprom[b + 7] == 0);            // offset
+		CHECK(eeprom[b + 8] == 0 && eeprom[b + 9] == 0);            // tone codes
+		CHECK(eeprom[b + 10] == 0 && eeprom[b + 11] == 0);          // tone types, FM, no offset
+		CHECK(eeprom[b + 12] == (OUTPUT_POWER_HIGH << 2));
+		CHECK(eeprom[b + 13] == 0 && eeprom[b + 15] == 0);          // PTT ID, scrambler
+		CHECK(eeprom[b + 14] == gVfo->STEP_SETTING);
+		memset(&eeprom[b], 0xFF, 16);
+		gVfo->OUTPUT_POWER = OUTPUT_POWER_LOW;
+	}
+
 	// a CHIRP-style record for the 2 m slot with tones and an offset set
 	const uint16_t base = 0x0C80 + BAND3_137MHz * 32;
 	const uint32_t f = 14493750;

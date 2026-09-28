@@ -397,6 +397,10 @@ void APP_TimeSlice500ms(void)
 		RADIO_ConfigureChannel();
 		RADIO_SetupRegisters(true);
 		gMonitor       = false;
+		// an open menu item would otherwise store its old value on MENU
+		gIsInSubMenu   = false;
+		if (gScreenToDisplay == DISPLAY_MENU)
+			MENU_ShowCurrentSetting();
 		gUpdateStatus  = true;
 		gUpdateDisplay = true;
 	}
@@ -408,6 +412,33 @@ void APP_TimeSlice500ms(void)
 	UI_MAIN_TimeSlice500ms();
 }
 
+// Saves postponed while an UP/DOWN key was held. EEPROM writes and the
+// receiver set-up that follows them never happen while transmitting: they
+// wait until the transmission has ended.
+static void FlushHeldKeySaves(void)
+{
+	if (gCurrentFunction == FUNCTION_TRANSMIT)
+		return;
+
+	if (flagSaveVfo) {
+		SETTINGS_SaveVfoIndices();
+		flagSaveVfo = false;
+	}
+
+	if (flagSaveSettings) {
+		SETTINGS_SaveSettings();
+		flagSaveSettings = false;
+	}
+
+	if (flagSaveChannel) {
+		SETTINGS_SaveChannel(gVfo);
+		flagSaveChannel = false;
+
+		if (gVfoConfigureMode == VFO_CONFIGURE_NONE)
+			gVfoConfigureMode = VFO_CONFIGURE;
+	}
+}
+
 static void ProcessKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 {
 	if (Key == KEY_EXIT && !BACKLIGHT_IsOn() && gEeprom.BACKLIGHT_TIME > 0)
@@ -417,23 +448,7 @@ static void ProcessKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 	}
 
 	if (!bKeyPressed) { // key released
-		if (flagSaveVfo) {
-			SETTINGS_SaveVfoIndices();
-			flagSaveVfo = false;
-		}
-
-		if (flagSaveSettings) {
-			SETTINGS_SaveSettings();
-			flagSaveSettings = false;
-		}
-
-		if (flagSaveChannel) {
-			SETTINGS_SaveChannel(gVfo);
-			flagSaveChannel = false;
-
-			if (gVfoConfigureMode == VFO_CONFIGURE_NONE)
-				gVfoConfigureMode = VFO_CONFIGURE;
-		}
+		FlushHeldKeySaves();
 	}
 	else { // key pressed or held
 		if (Key != KEY_PTT)
@@ -442,7 +457,7 @@ static void ProcessKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 		if (Key == KEY_EXIT && bKeyHeld) { // exit key held pressed
 			cancelUserInputModes();
 
-			if (gMonitor)
+			if (gMonitor && gCurrentFunction != FUNCTION_TRANSMIT)
 				MAIN_ToggleMonitor(); //turn off the monitor
 		}
 
@@ -527,66 +542,74 @@ static void ProcessKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 		ProcessKeysFunctions[gScreenToDisplay](Key, bKeyPressed, bKeyHeld);
 
 Skip:
-	if (gFlagAcceptSetting) {
-		gMenuCountdown = menu_timeout_500ms;
+	// Nothing below writes EEPROM or touches the receiver while
+	// transmitting; the requests stay pending until TX has ended (the PTT
+	// release that ends it comes through here too).
+	if (gCurrentFunction != FUNCTION_TRANSMIT) {
+		if (!bKeyPressed)
+			FlushHeldKeySaves();
 
-		MENU_AcceptSetting();
+		if (gFlagAcceptSetting) {
+			gMenuCountdown = menu_timeout_500ms;
 
-		gFlagRefreshSetting = true;
-		gFlagAcceptSetting  = false;
-	}
+			MENU_AcceptSetting();
 
-	if (gRequestSaveSettings) {
-		if (!bKeyHeld)
-			SETTINGS_SaveSettings();
-		else
-			flagSaveSettings = true;
-		gRequestSaveSettings = false;
-		gUpdateStatus        = true;
-	}
-
-	if (gRequestSaveVFO) {
-		gRequestSaveVFO = false;
-		if (!bKeyHeld)
-			SETTINGS_SaveVfoIndices();
-		else
-			flagSaveVfo = true;
-	}
-
-	if (gRequestSaveChannel) {
-		if (!bKeyHeld) {
-			SETTINGS_SaveChannel(gVfo);
-
-			if (gVfoConfigureMode == VFO_CONFIGURE_NONE)
-				gVfoConfigureMode = VFO_CONFIGURE;
+			gFlagRefreshSetting = true;
+			gFlagAcceptSetting  = false;
 		}
-		else { // save when the up/down button is released
-			flagSaveChannel = true;
+
+		if (gRequestSaveSettings) {
+			if (!bKeyHeld)
+				SETTINGS_SaveSettings();
+			else
+				flagSaveSettings = true;
+			gRequestSaveSettings = false;
+			gUpdateStatus        = true;
+		}
+
+		if (gRequestSaveVFO) {
+			gRequestSaveVFO = false;
+			if (!bKeyHeld)
+				SETTINGS_SaveVfoIndices();
+			else
+				flagSaveVfo = true;
+		}
+
+		if (gRequestSaveChannel) {
+			if (!bKeyHeld) {
+				SETTINGS_SaveChannel(gVfo);
+
+				if (gVfoConfigureMode == VFO_CONFIGURE_NONE)
+					gVfoConfigureMode = VFO_CONFIGURE;
+			}
+			else { // save when the up/down button is released
+				flagSaveChannel = true;
+
+				if (gRequestDisplayScreen == DISPLAY_INVALID)
+					gRequestDisplayScreen = DISPLAY_MAIN;
+			}
+
+			gRequestSaveChannel = false;
+		}
+
+		if (gVfoConfigureMode != VFO_CONFIGURE_NONE) {
+			RADIO_ConfigureChannel();
 
 			if (gRequestDisplayScreen == DISPLAY_INVALID)
 				gRequestDisplayScreen = DISPLAY_MAIN;
+
+			gFlagReconfigureVfos = true;
+			gVfoConfigureMode    = VFO_CONFIGURE_NONE;
 		}
 
-		gRequestSaveChannel = false;
-	}
+		if (gFlagReconfigureVfos) {
+			RADIO_SetupRegisters(true);
 
-	if (gVfoConfigureMode != VFO_CONFIGURE_NONE) {
-		RADIO_ConfigureChannel();
+			gFlagReconfigureVfos = false;
 
-		if (gRequestDisplayScreen == DISPLAY_INVALID)
-			gRequestDisplayScreen = DISPLAY_MAIN;
-
-		gFlagReconfigureVfos = true;
-		gVfoConfigureMode    = VFO_CONFIGURE_NONE;
-	}
-
-	if (gFlagReconfigureVfos) {
-		RADIO_SetupRegisters(true);
-
-		gFlagReconfigureVfos = false;
-
-		if (gMonitor)
-			MAIN_ToggleMonitor();   // 1of11
+			if (gMonitor)
+				MAIN_ToggleMonitor();   // 1of11
+		}
 	}
 
 	if (gFlagRefreshSetting) {

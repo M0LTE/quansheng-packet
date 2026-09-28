@@ -48,7 +48,16 @@ uint16_t BK4819_ReadRegister(BK4819_REGISTER_t r) { return regs[r & 127]; }
 void BK4819_WriteRegister(BK4819_REGISTER_t r, uint16_t v) { regs[r & 127] = v; }
 void BOARD_ADC_GetBatteryInfo(uint16_t *v, uint16_t *c) { *v = 2000; *c = 0; }
 static int resets;
-void NVIC_SystemReset(void) { resets++; }
+static int pa_off_before_reset;
+static bool pa_enabled = true;
+void BK4819_SetupPowerAmplifier(const uint8_t bias, const uint32_t f) { (void)f; if (bias == 0) regs[0x36] = 0; }
+void BK4819_ToggleGpioOut(BK4819_GPIO_PIN_t Pin, bool bSet) { if (Pin == BK4819_GPIO1_PIN29_PA_ENABLE) pa_enabled = bSet; }
+void NVIC_SystemReset(void)
+{
+	resets++;
+	if (!pa_enabled && regs[0x30] == 0 && regs[0x36] == 0)
+		pa_off_before_reset++;
+}
 
 static uint8_t  tx[1024];
 static unsigned tx_len;
@@ -167,6 +176,23 @@ int main(void)
 	write_cmd(0x0200, 64, data, 8);
 	CHECK(tx_len == 0 && eeprom[0x0200] == 0xFF);
 
+	// every valid frame refreshes the PTT lock, register and status commands too
+	gSerialConfigCountDown_500ms = 0;
+	send(0x0527, NULL, 0);
+	CHECK(reply_id() == 0x0528 && gSerialConfigCountDown_500ms == SERIAL_PTT_LOCK_500ms);
+	gSerialConfigCountDown_500ms = 0;
+	uint8_t r0[1] = { 0x30 };
+	send(0x0601, r0, 1);
+	CHECK(gSerialConfigCountDown_500ms == SERIAL_PTT_LOCK_500ms);
+
+	// register commands shorter than they should be are ignored
+	regs[0x7D] = 0x1234;
+	uint8_t w_short[2] = { 0x7D, 0x5A };
+	send(0x0602, w_short, 2);
+	CHECK(regs[0x7D] == 0x1234);
+	send(0x0601, NULL, 0);
+	CHECK(tx_len == 0);
+
 	// BK4819 register write and read (0x0602 has no reply)
 	uint8_t w[3] = { 0x7D, 0x5A, 0xE9 };
 	send(0x0602, w, 3);
@@ -175,9 +201,11 @@ int main(void)
 	send(0x0601, r, 1);
 	CHECK(reply_id() == 0x0601 && tx[8] == 0x7D && tx[9] == 0x5A && tx[10] == 0xE9);
 
-	// reboot
+	// reboot de-keys first
+	regs[0x30] = 0xC1FE; regs[0x36] = 0xFFFF; pa_enabled = true;
 	send(0x05DD, NULL, 0);
 	CHECK(resets == 1);
+	CHECK(pa_off_before_reset == 1);
 
 	if (failures) {
 		printf("%d check(s) failed\n", failures);
