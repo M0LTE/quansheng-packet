@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>M0LTE.Uvk5</RootNamespace>
+    <AssemblyName>M0LTE.Uvk5</AssemblyName>
+    <PackageId>M0LTE.Uvk5</PackageId>
+    <Description>Serial control of a Quansheng UV-K5 running the packet firmware (protocol v2, v1 and stock legacy commands), PTT-lock aware, with an in-process simulated radio and a bootloader flasher.</Description>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IsAotCompatible>true</IsAotCompatible>
+    <IsTrimmable>true</IsTrimmable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.IO.Ports" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="M0LTE.Uvk5.Tests" />
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
+</Project>
