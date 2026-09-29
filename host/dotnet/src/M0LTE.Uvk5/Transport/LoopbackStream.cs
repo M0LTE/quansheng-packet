@@ -14,7 +14,7 @@ public static class LoopbackStream
         return (new End(ba, ab), new End(ab, ba));
     }
 
-    internal sealed class End(ByteQueue incoming, ByteQueue outgoing) : Stream
+    internal sealed class End(ByteQueue incoming, IByteSink outgoing) : Stream
     {
         public override bool CanRead => true;
 
@@ -72,8 +72,16 @@ public static class LoopbackStream
     }
 }
 
+/// <summary>Where one end's writes go.</summary>
+internal interface IByteSink
+{
+    void Write(ReadOnlySpan<byte> data);
+
+    void Complete();
+}
+
 /// <summary>A byte FIFO with an async reader. Thread-safe.</summary>
-internal sealed class ByteQueue
+internal sealed class ByteQueue : IByteSink
 {
     private readonly Lock _gate = new();
     private readonly Queue<byte[]> _chunks = new();
