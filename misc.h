@@ -59,12 +59,18 @@ extern const uint16_t        key_repeat_delay_10ms;
 extern const uint16_t        key_repeat_10ms;
 extern const uint16_t        key_debounce_10ms;
 
-// PTT is ignored, and any transmission is stopped, for this long after the
-// last UART configuration command (hello, EEPROM read or write). On the K1
-// connector the UART receive line shares a contact with PTT, so serial
-// traffic must never be taken as a key press. Upstream used 12 (6 s).
-// Counted in 500 ms ticks, so 3 means 1.0 to 1.5 s.
-#define SERIAL_PTT_LOCK_500ms  3u
+// Serial PTT lock (protocol v2, 5.3). Every valid frame from the host sets
+// gSerialLockMs to the SERIAL_LOCK_MS setting (default 20 ms) and ends any
+// transmission; the SysTick handler counts it down every 1 ms. A press
+// while it runs keys at most LATE_KEY_MAX_MS late, or is refused until PTT
+// is released (pttarb.h). v1 held PTT off for 1.0 to 1.5 s here.
+#define SERIAL_LOCK_DEFAULT_MS  20u
+#define SERIAL_LOCK_MAX_MS      1500u
+#define LATE_KEY_MAX_MS         30u
+
+// The settings reload after a legacy 0x051D EEPROM write session waits for
+// this long after the last write, and never runs during a transmission.
+#define SERIAL_RELOAD_QUIET_MS  1000u
 
 // TX frequency limits, read from EEPROM 0x0F40 (no menu for them).
 extern bool                  gSetting_350TX;
@@ -88,9 +94,11 @@ typedef union {
 
 extern ChannelAttributes_t   gMR_ChannelAttributes[FREQ_CHANNEL_LAST + 1];
 
-extern volatile uint8_t      gSerialConfigCountDown_500ms;
+extern volatile uint32_t     g_ms;               // ms since boot, SysTick
+extern volatile uint16_t     gSerialLockMs;      // serial PTT lock remaining, ms
+extern volatile uint16_t     gReloadQuietMs;     // quiet time left before the reload, ms
 // set by a UART EEPROM write; settings and channel are reloaded once the
-// serial PTT lock has run out
+// host has been quiet for SERIAL_RELOAD_QUIET_MS
 extern bool                  gReloadSettingsAfterSerial;
 extern volatile bool         gNextTimeslice_500ms;
 extern volatile uint16_t     gTxTimerCountdown_500ms;
@@ -106,7 +114,6 @@ extern uint8_t               gBatteryVoltageIndex;
 
 extern uint16_t              gMenuCountdown;
 extern bool                  gPttWasReleased;
-extern bool                  gPttWasPressed;
 extern bool                  gFlagReconfigureVfos;
 extern uint8_t               gVfoConfigureMode;
 extern bool                  gRequestSaveVFO;
@@ -132,6 +139,6 @@ extern volatile uint8_t      boot_counter_10ms;
 int32_t NUMBER_AddWithWraparound(int32_t Base, int32_t Add, int32_t LowerLimit, int32_t UpperLimit);
 unsigned long StrToUL(const char * str);
 
-inline bool SerialConfigInProgress() { return gSerialConfigCountDown_500ms != 0; }
+static inline bool SerialConfigInProgress(void) { return gSerialLockMs != 0; }
 
 #endif

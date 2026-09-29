@@ -18,9 +18,25 @@
 #define APP_UART_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
-bool UART_IsCommandAvailable(void);
-void UART_HandleCommand(void);
+// A frame still incomplete this long after the last byte arrived is taken
+// as truncated and dropped (protocol v2, 2.3).
+#define UART_GAP_MS    5u
+#define UART_BODY_MAX  150u     // largest body the radio sends
+
+extern uint32_t gRxMs;          // when the command being handled was seen complete
+extern uint16_t gRxUs;
+
+bool     UART_IsCommandAvailable(void);
+void     UART_HandleCommand(void);
+void     UART_Poll(void);
+
+// Outgoing frames: build the body in UART_FrameBody(), then send it.
+uint8_t *UART_FrameBody(void);
+void     UART_SendFrameBody(uint16_t id, uint16_t n);
+bool     UART_SendStampedHeader(uint16_t n, uint32_t *ms, uint16_t *us);
+void     UART_SendStampedBody(uint16_t id, uint16_t n);
 
 #endif
 

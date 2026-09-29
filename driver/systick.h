@@ -21,6 +21,7 @@
 
 void SYSTICK_Init(void);
 void SYSTICK_DelayUs(uint32_t Delay);
+void CLOCK_Now(uint32_t *ms, uint16_t *us);
 
 #endif
 

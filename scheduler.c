@@ -16,6 +16,7 @@
 
 #include "functions.h"
 #include "misc.h"
+#include "outq.h"
 #include "ptt.h"
 
 #define DECREMENT(cnt) \
@@ -36,9 +37,17 @@ static uint8_t           gTicks1ms;
 
 void SystickHandler(void);
 
-// we come here every 1 ms: PTT every tick, everything else every 10 ms
+// we come here every 1 ms: the clock, the UART output, the serial PTT lock
+// and PTT every tick, everything else every 10 ms
 void SystickHandler(void)
 {
+	g_ms++;
+
+	OUTQ_Drain();
+
+	DECREMENT(gSerialLockMs);
+	DECREMENT(gReloadQuietMs);
+
 	PTT_Tick();
 
 	if (++gTicks1ms < 10)
@@ -53,7 +62,6 @@ void SystickHandler(void)
 		gNextTimeslice_500ms = true;
 
 		DECREMENT_AND_TRIGGER(gTxTimerCountdown_500ms, gTxTimeoutReached);
-		DECREMENT(gSerialConfigCountDown_500ms);
 	}
 
 	DECREMENT(boot_counter_10ms);

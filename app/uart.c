@@ -17,7 +17,11 @@
 #include <string.h>
 
 #include "ARMCM0.h"
+#include "app/app.h"
+#include "app/events.h"
 #include "app/uart.h"
+#include "app/v2.h"
+#include "app/wire.h"
 #include "board.h"
 #include "bsp/dp32g030/dma.h"
 #include "bsp/dp32g030/gpio.h"
@@ -27,8 +31,10 @@
 #include "driver/eeprom.h"
 #include "driver/gpio.h"
 #include "driver/uart.h"
+#include "driver/systick.h"
 #include "functions.h"
 #include "misc.h"
+#include "outq.h"
 #include "settings.h"
 #include "version.h"
 
@@ -40,11 +46,6 @@ typedef struct {
 	uint16_t ID;
 	uint16_t Size;
 } Header_t;
-
-typedef struct {
-	uint8_t  Padding[2];
-	uint16_t ID;
-} Footer_t;
 
 typedef struct {
 	Header_t Header;
@@ -138,37 +139,79 @@ static uint16_t gUART_WriteIndex;
 static uint16_t gUART_CommandSize;   // payload length of the command in UART_Command
 static bool     bIsEncrypted = true;
 
+static uint16_t gLastDma;            // DMA write position at the last look
+static uint32_t gLastRxMs;           // when it last moved
+
+uint32_t gRxMs;                      // when the command in UART_Command was seen complete
+uint16_t gRxUs;
+
+// Outgoing frames are built here: id, length, body, CRC, footer.
+static uint8_t  gTx[4 + UART_BODY_MAX + 4];
+
+// Send the frame header, then the payload in gTx[0 .. len) with its CRC and
+// footer. Legacy replies carry FF FF instead of a CRC, v2 frames a real
+// CRC-16/XMODEM. Obfuscation, when on, covers the payload and CRC.
+static void SendHeader(uint16_t len)
+{
+	const uint8_t h[4] = { 0xAB, 0xCD, (uint8_t)len, (uint8_t)(len >> 8) };
+	UART_Send(h, sizeof(h));
+}
+
+static void SendPayload(uint16_t len, bool realCrc)
+{
+	const uint16_t crc = realCrc ? CRC_Calculate(gTx, len) : 0xFFFF;
+	gTx[len + 0] = (uint8_t)crc;
+	gTx[len + 1] = (uint8_t)(crc >> 8);
+	if (bIsEncrypted)
+		for (unsigned int i = 0; i < len + 2u; i++)
+			gTx[i] ^= Obfuscation[i % 16];
+	gTx[len + 2] = 0xDC;
+	gTx[len + 3] = 0xBA;
+	UART_Send(gTx, len + 4u);
+	OUTQ_Kick();
+}
+
 static void SendReply(void *pReply, uint16_t Size)
 {
-	Header_t Header;
-	Footer_t Footer;
+	memcpy(gTx, pReply, Size);
+	SendHeader(Size);
+	SendPayload(Size, false);
+}
 
-	if (bIsEncrypted)
-	{
-		uint8_t     *pBytes = (uint8_t *)pReply;
-		unsigned int i;
-		for (i = 0; i < Size; i++)
-			pBytes[i] ^= Obfuscation[i % 16];
-	}
+uint8_t *UART_FrameBody(void)
+{
+	return gTx + 4;
+}
 
-	Header.ID = 0xCDAB;
-	Header.Size = Size;
-	UART_Send(&Header, sizeof(Header));
-	UART_Send(pReply, Size);
+static void SetId(uint16_t id, uint16_t n)
+{
+	put16(gTx, id);
+	put16(gTx + 2, n);
+}
 
-	if (bIsEncrypted)
-	{
-		Footer.Padding[0] = Obfuscation[(Size + 0) % 16] ^ 0xFF;
-		Footer.Padding[1] = Obfuscation[(Size + 1) % 16] ^ 0xFF;
-	}
-	else
-	{
-		Footer.Padding[0] = 0xFF;
-		Footer.Padding[1] = 0xFF;
-	}
-	Footer.ID = 0xBADC;
+void UART_SendFrameBody(uint16_t id, uint16_t n)
+{
+	SetId(id, n);
+	SendHeader(n + 4);
+	SendPayload(n + 4, true);
+}
 
-	UART_Send(&Footer, sizeof(Footer));
+// For frames that carry the time their first byte left: the header goes
+// out first, and the time is taken just before it. Exact if nothing was
+// queued ahead of it.
+bool UART_SendStampedHeader(uint16_t n, uint32_t *ms, uint16_t *us)
+{
+	const bool exact = OUTQ_Idle();
+	CLOCK_Now(ms, us);
+	SendHeader(n + 4);
+	OUTQ_Kick();
+	return exact;
+}
+
+void UART_SendStampedBody(uint16_t id, uint16_t n)
+{
+	SetId(id, n);
+	SendPayload(n + 4, true);
 }
 
 static void SendVersion(void)
@@ -179,7 +222,10 @@ static void SendVersion(void)
 	Reply.Header.ID = 0x0515;
 	Reply.Header.Size = sizeof(Reply.Data);
 	strncpy(Reply.Data.Version, Version, sizeof(Reply.Data.Version) - 1);
-	// No AES key, lock screen or challenge in this firmware: all zero.
+	// No AES key or lock screen. The challenge, which tools read only when
+	// the AES flag is set, carries the v2 marker (protocol v2, 3).
+	Reply.Data.Challenge[0] = V2_MAGIC;
+	Reply.Data.Challenge[1] = V2_PROTOCOL_VERSION;
 
 	SendReply(&Reply, sizeof(Reply));
 }
@@ -247,8 +293,9 @@ static void CMD_051D(const uint8_t *pBuffer, const uint16_t CommandSize)
 	for (unsigned int i = 0; i < (pCmd->Size / 8); i++)
 		EEPROM_WriteBuffer(pCmd->Offset + (i * 8U), &pCmd->Data[i * 8U]);
 
-	// apply it once the host has gone quiet (APP_TimeSlice500ms)
+	// apply it once the host has gone quiet (APP_TimeSlice10ms)
 	gReloadSettingsAfterSerial = true;
+	gReloadQuietMs             = SERIAL_RELOAD_QUIET_MS;
 
 	SendReply(&Reply, sizeof(Reply));
 }
@@ -328,102 +375,118 @@ static void CMD_0602_WriteBK4819Reg(const uint8_t *pBuffer)
 	BK4819_WriteRegister(cmd->reg, cmd->value);
 }
 
+static uint16_t Ahead(uint16_t from, uint16_t to)
+{
+	return (to + sizeof(UART_DMA_Buffer) - from) % sizeof(UART_DMA_Buffer);
+}
+
+// Find the next complete frame in the DMA ring and copy its payload to
+// UART_Command. Resynchronises by dropping only the AB of anything that
+// cannot be a frame (bad second byte, oversize, bad footer), and of a
+// frame still incomplete after UART_GAP_MS without new bytes (truncated,
+// for example by PTT pulling the shared line low mid-frame).
 bool UART_IsCommandAvailable(void)
 {
-	uint16_t Index;
-	uint16_t TailIndex;
-	uint16_t Size;
-	uint16_t CRC;
-	uint16_t CommandLength;
-	uint16_t DmaLength = DMA_CH0->ST & 0xFFFU;
+	const uint16_t DmaLength = DMA_CH0->ST & 0xFFFU;
+
+	if (DmaLength != gLastDma) {
+		gLastDma  = DmaLength;
+		gLastRxMs = g_ms;
+	}
+	const bool stale = (uint32_t)(g_ms - gLastRxMs) > UART_GAP_MS;
 
 	while (1)
 	{
-		if (gUART_WriteIndex == DmaLength)
-			return false;
-
 		while (gUART_WriteIndex != DmaLength && UART_DMA_Buffer[gUART_WriteIndex] != 0xABU)
 			gUART_WriteIndex = DMA_INDEX(gUART_WriteIndex, 1);
 
 		if (gUART_WriteIndex == DmaLength)
 			return false;
 
-		if (gUART_WriteIndex < DmaLength)
-			CommandLength = DmaLength - gUART_WriteIndex;
+		const uint16_t CommandLength = Ahead(gUART_WriteIndex, DmaLength);
+		uint16_t       Size          = 0;
+		bool           bad           = false;
+		bool           complete      = false;
+
+		if (CommandLength >= 2 && UART_DMA_Buffer[DMA_INDEX(gUART_WriteIndex, 1)] != 0xCD)
+			bad = true;
+		else if (CommandLength >= 4) {
+			const uint16_t Index = DMA_INDEX(gUART_WriteIndex, 2);
+			Size = (UART_DMA_Buffer[DMA_INDEX(Index, 1)] << 8) | UART_DMA_Buffer[Index];
+			if ((Size + 8u) > sizeof(UART_DMA_Buffer)) {
+				gCounters[CNT_FRAMES_DROPPED]++;
+				bad = true;
+			}
+			else if (CommandLength >= Size + 8u) {
+				const uint16_t TailIndex = DMA_INDEX(Index, Size + 4);
+				if (UART_DMA_Buffer[TailIndex] != 0xDC || UART_DMA_Buffer[DMA_INDEX(TailIndex, 1)] != 0xBA) {
+					gCounters[CNT_FRAMES_BAD]++;
+					bad = true;
+				}
+				else
+					complete = true;
+			}
+		}
+
+		if (!complete) {
+			if (!bad && !stale)
+				return false;               // wait for the rest
+			if (!bad)
+				gCounters[CNT_FRAMES_BAD]++;  // truncated
+			gUART_WriteIndex = DMA_INDEX(gUART_WriteIndex, 1);
+			continue;
+		}
+
+		uint16_t Index     = DMA_INDEX(gUART_WriteIndex, 4);
+		uint16_t TailIndex = DMA_INDEX(Index, Size + 2);
+
+		if (TailIndex < Index)
+		{
+			const uint16_t ChunkSize = sizeof(UART_DMA_Buffer) - Index;
+			memcpy(UART_Command.Buffer, UART_DMA_Buffer + Index, ChunkSize);
+			memcpy(UART_Command.Buffer + ChunkSize, UART_DMA_Buffer, TailIndex);
+		}
 		else
-			CommandLength = (DmaLength + sizeof(UART_DMA_Buffer)) - gUART_WriteIndex;
+			memcpy(UART_Command.Buffer, UART_DMA_Buffer + Index, TailIndex - Index);
 
-		if (CommandLength < 8)
-			return 0;
+		TailIndex = DMA_INDEX(TailIndex, 2);
+		if (TailIndex < gUART_WriteIndex)
+		{
+			memset(UART_DMA_Buffer + gUART_WriteIndex, 0, sizeof(UART_DMA_Buffer) - gUART_WriteIndex);
+			memset(UART_DMA_Buffer, 0, TailIndex);
+		}
+		else
+			memset(UART_DMA_Buffer + gUART_WriteIndex, 0, TailIndex - gUART_WriteIndex);
 
-		if (UART_DMA_Buffer[DMA_INDEX(gUART_WriteIndex, 1)] == 0xCD)
-			break;
+		gUART_WriteIndex = TailIndex;
+		gUART_CommandSize = Size;
 
-		gUART_WriteIndex = DMA_INDEX(gUART_WriteIndex, 1);
+		if (UART_Command.Header.ID == 0x0514)
+			bIsEncrypted = false;
+
+		if (UART_Command.Header.ID == 0x6902)
+			bIsEncrypted = true;
+
+		if (bIsEncrypted)
+		{
+			unsigned int i;
+			for (i = 0; i < (Size + 2u); i++)
+				UART_Command.Buffer[i] ^= Obfuscation[i % 16];
+		}
+
+		const uint16_t CRC = UART_Command.Buffer[Size] | (UART_Command.Buffer[Size + 1] << 8);
+
+		if (CRC_Calculate(UART_Command.Buffer, Size) != CRC) {
+			gCounters[CNT_FRAMES_BAD]++;
+			continue;
+		}
+
+		CLOCK_Now(&gRxMs, &gRxUs);
+		return true;
 	}
-
-	Index = DMA_INDEX(gUART_WriteIndex, 2);
-	Size  = (UART_DMA_Buffer[DMA_INDEX(Index, 1)] << 8) | UART_DMA_Buffer[Index];
-
-	if ((Size + 8u) > sizeof(UART_DMA_Buffer))
-	{
-		gUART_WriteIndex = DmaLength;
-		return false;
-	}
-
-	if (CommandLength < (Size + 8))
-		return false;
-
-	Index     = DMA_INDEX(Index, 2);
-	TailIndex = DMA_INDEX(Index, Size + 2);
-
-	if (UART_DMA_Buffer[TailIndex] != 0xDC || UART_DMA_Buffer[DMA_INDEX(TailIndex, 1)] != 0xBA)
-	{
-		gUART_WriteIndex = DmaLength;
-		return false;
-	}
-
-	if (TailIndex < Index)
-	{
-		const uint16_t ChunkSize = sizeof(UART_DMA_Buffer) - Index;
-		memcpy(UART_Command.Buffer, UART_DMA_Buffer + Index, ChunkSize);
-		memcpy(UART_Command.Buffer + ChunkSize, UART_DMA_Buffer, TailIndex);
-	}
-	else
-		memcpy(UART_Command.Buffer, UART_DMA_Buffer + Index, TailIndex - Index);
-
-	TailIndex = DMA_INDEX(TailIndex, 2);
-	if (TailIndex < gUART_WriteIndex)
-	{
-		memset(UART_DMA_Buffer + gUART_WriteIndex, 0, sizeof(UART_DMA_Buffer) - gUART_WriteIndex);
-		memset(UART_DMA_Buffer, 0, TailIndex);
-	}
-	else
-		memset(UART_DMA_Buffer + gUART_WriteIndex, 0, TailIndex - gUART_WriteIndex);
-
-	gUART_WriteIndex = TailIndex;
-	gUART_CommandSize = Size;
-
-	if (UART_Command.Header.ID == 0x0514)
-		bIsEncrypted = false;
-
-	if (UART_Command.Header.ID == 0x6902)
-		bIsEncrypted = true;
-
-	if (bIsEncrypted)
-	{
-		unsigned int i;
-		for (i = 0; i < (Size + 2u); i++)
-			UART_Command.Buffer[i] ^= Obfuscation[i % 16];
-	}
-	
-	CRC = UART_Command.Buffer[Size] | (UART_Command.Buffer[Size + 1] << 8);
-
-	return (CRC_Calculate(UART_Command.Buffer, Size) != CRC) ? false : true;
 }
 
 // Stop transmitting before a reboot: PA off, red LED off, BK4819 off.
-// (No delays here: this runs with interrupts disabled.)
 static void DeKey(void)
 {
 	BK4819_SetupPowerAmplifier(0, 0);
@@ -434,14 +497,24 @@ static void DeKey(void)
 
 void UART_HandleCommand(void)
 {
-	// Every valid frame, whatever it asks for, holds PTT off (and ends any
-	// transmission) for SERIAL_PTT_LOCK_500ms: the UART line shares a
-	// contact with PTT on the K1 connector.
-	gSerialConfigCountDown_500ms = SERIAL_PTT_LOCK_500ms;
+	// Every valid frame, whatever it asks for, starts the serial PTT lock
+	// and ends any transmission: the UART line shares a contact with PTT on
+	// the K1 connector (protocol v2, 5.3).
+	APP_OnSerialFrame();
+	gCounters[CNT_FRAMES_OK]++;
 
-	switch (UART_Command.Header.ID)
+	const uint16_t id = UART_Command.Header.ID;
+
+	if ((id & 0xFF00u) == 0x5000u) {
+		// the tag, if there is one, is the first body byte
+		V2_Handle(id, UART_Command.Buffer + 4, UART_Command.Header.Size, gUART_CommandSize);
+		return;
+	}
+
+	switch (id)
 	{
 		case 0x0514:
+			EVT_ResetSubscription();
 			CMD_0514(UART_Command.Buffer);
 			break;
 	
@@ -462,6 +535,7 @@ void UART_HandleCommand(void)
 			break;
 	
 		case 0x052F:
+			EVT_ResetSubscription();
 			CMD_052F(UART_Command.Buffer);
 			break;
 	
@@ -480,4 +554,21 @@ void UART_HandleCommand(void)
 				CMD_0602_WriteBK4819Reg(UART_Command.Buffer);
 			break;
 	}
+}
+
+#ifdef HOST_TEST
+// the host tests reboot the radio without reloading this file
+void UART_HostReset(void)
+{
+	bIsEncrypted     = true;
+	gUART_WriteIndex = DMA_CH0->ST & 0xFFFU;
+	gLastDma         = gUART_WriteIndex;
+}
+#endif
+
+// Every complete frame, on every pass of the main loop.
+void UART_Poll(void)
+{
+	while (UART_IsCommandAvailable())
+		UART_HandleCommand();
 }

@@ -106,6 +106,8 @@ void FUNCTION_Init(void) {}
 void FUNCTION_Select(FUNCTION_Type_t f) { gCurrentFunction = f; }
 uint16_t gBatteryCalibration[6];
 uint8_t  gBatteryDisplayLevel = 5;
+void MON_AfterRxSetup(void) {}
+void APP_TxRefusedAtKeyUp(uint8_t reason) { (void)reason; }
 
 // ----------------------------------------------------------------- tests --
 

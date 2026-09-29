@@ -20,6 +20,7 @@
 #include "driver/bk4819.h"
 #include "driver/st7565.h"
 #include "functions.h"
+#include "app/monitor.h"
 #include "misc.h"
 #include "radio.h"
 #include "ui/ui.h"
@@ -47,6 +48,7 @@ static void FUNCTION_Transmit(void)
 	// Key up first; the screen and status line are redrawn afterwards by
 	// the 10 ms slice (upstream redrew the whole screen before key-up).
 	RADIO_SetTxParameters();
+	MON_TxStarted();          // RF ready: TX_START (protocol v2)
 
 	// turn the RED LED on
 	BK4819_ToggleGpioOut(BK4819_GPIO5_PIN1_RED, true);

@@ -47,3 +47,17 @@ void SYSTICK_DelayUs(uint32_t Delay)
 		Previous = Current;
 	} while (elapsed_ticks < ticks);
 }
+
+// The event clock (protocol v2, 9.3): g_ms from the SysTick handler and
+// the sub-millisecond part from the counter, which runs down from 47999.
+void CLOCK_Now(uint32_t *ms, uint16_t *us)
+{
+	uint32_t m, v;
+	do {
+		m = g_ms;
+		v = SysTick->VAL;
+	} while (m != g_ms);
+	v = (SysTick->LOAD - v) / 48u;
+	*ms = m;
+	*us = (v > 999u) ? 999u : (uint16_t)v;
+}

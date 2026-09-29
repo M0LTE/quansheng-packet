@@ -19,6 +19,7 @@
 #include "bsp/dp32g030/syscon.h"
 #include "bsp/dp32g030/uart.h"
 #include "driver/uart.h"
+#include "outq.h"
 
 static bool UART_IsLogEnabled;
 uint8_t UART_DMA_Buffer[256];
@@ -84,16 +85,26 @@ void UART_Init(void)
 	UART1->CTRL |= UART_CTRL_UARTEN_BITS_ENABLE;
 }
 
+// Queued, not sent here: the SysTick handler drains the queue (outq.h).
+// Waits only if the queue is full.
 void UART_Send(const void *pBuffer, uint32_t Size)
 {
-	const uint8_t *pData = (const uint8_t *)pBuffer;
-	uint32_t i;
+	OUTQ_PutWait(pBuffer, (uint16_t)Size);
+}
 
-	for (i = 0; i < Size; i++) {
-		UART1->TDR = pData[i];
-		while ((UART1->IF & UART_IF_TXFIFO_FULL_MASK) != UART_IF_TXFIFO_FULL_BITS_NOT_SET) {
-		}
-	}
+bool UART_TxReady(void)
+{
+	return (UART1->IF & UART_IF_TXFIFO_FULL_MASK) == UART_IF_TXFIFO_FULL_BITS_NOT_SET;
+}
+
+void UART_TxPut(uint8_t b)
+{
+	UART1->TDR = b;
+}
+
+bool UART_TxEmpty(void)
+{
+	return (UART1->IF & UART_IF_TXFIFO_EMPTY_MASK) != UART_IF_TXFIFO_EMPTY_BITS_NOT_SET;
 }
 
 void UART_LogSend(const void *pBuffer, uint32_t Size)

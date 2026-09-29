@@ -26,6 +26,8 @@
 #include "version.h"
 
 #include "app/app.h"
+#include "app/uart.h"
+#include "app/v2.h"
 #include "bsp/dp32g030/gpio.h"
 #include "bsp/dp32g030/syscon.h"
 
@@ -83,6 +85,9 @@ void Main(void)
 
 	BATTERY_GetReadings(false);
 
+	V2_Init();
+	APP_Init();
+
 	// wait for user to release all buttons before moving on
 	if (!GPIO_CheckBit(&GPIOC->DATA, GPIOC_PIN_PTT) || KEYBOARD_Poll() != KEY_INVALID)
 	{	// keys are pressed
@@ -137,9 +142,10 @@ void Main(void)
 	}
 
 	while (true) {
-		if (!gReducedService)   // as upstream: no PTT at critical battery
-			APP_CheckPtt();
+		UART_Poll();            // every complete frame, on every pass
+		APP_CheckPtt();         // never keys at critical battery (reduced service)
 		APP_Update();
+		APP_Service();
 
 		if (gNextTimeslice) {
 

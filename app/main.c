@@ -31,6 +31,7 @@
 
 #include "app/app.h"
 #include "app/main.h"
+#include "app/monitor.h"
 #include "driver/bk4819.h"
 #include "frequencies.h"
 #include "functions.h"
@@ -264,7 +265,7 @@ void MAIN_Key_PTT(bool bKeyPressed)
 	{	// PTT released
 		if (gCurrentFunction == FUNCTION_TRANSMIT) {
 			// we are transmitting .. stop
-			APP_EndTransmission();
+			APP_EndTransmission(TXEND_RELEASE);
 			FUNCTION_Select(FUNCTION_FOREGROUND);
 			RADIO_SetVfoState(VFO_STATE_NORMAL);
 

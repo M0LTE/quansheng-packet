@@ -31,7 +31,9 @@
 // keyed, and on every tick once a release has started. PTT_ReleaseMs
 // counting ticks release.
 //
-// The serial PTT lock (SerialConfigInProgress) forces the released state.
+// The debounced press is computed even while the serial PTT lock runs
+// (protocol v2, 5.3); what the lock does to a press is decided in the main
+// loop (pttarb.h), from the lock remaining at the press edge recorded here.
 
 #ifndef PTT_H
 #define PTT_H
@@ -56,23 +58,35 @@ typedef struct {
 // One 1 ms tick of the debouncer.
 //   lowWholeWindow: the line was low for all of PTT_WINDOW_US
 //   releaseTick:    (keyed) this tick counts towards release
-bool PTT_Debounce(volatile PttDebounce_t *d, bool lowWholeWindow, bool releaseTick, bool serialLock,
+bool PTT_Debounce(volatile PttDebounce_t *d, bool lowWholeWindow, bool releaseTick,
                   uint8_t pressMs, uint8_t releaseMs);
 
 // True if lineLow() returns want for every read until elapsedUs() reaches
 // us; returns false at the first read that differs.
 bool PTT_LevelFor(bool (*lineLow)(void), uint32_t (*elapsedUs)(void), bool wantLow, uint32_t us);
 
+typedef struct {
+	bool     pressed;      // debounced state
+	bool     candidate;    // not pressed, but ticks are counting towards a press
+	uint8_t  pressCount;   // incremented at every press edge
+	uint16_t lockAtPress;  // serial PTT lock remaining at the press edge, ms
+	uint32_t tPress;       // first tick counted towards the latest press
+	uint32_t tPressEdge;   // tick at which the latest press was confirmed
+	uint32_t tRelease;     // first tick counted towards the latest release
+} PttState_t;
+
 // Called from SystickHandler every 1 ms.
 void PTT_Tick(void);
 bool PTT_IsPressed(void);
+void PTT_GetState(PttState_t *s);   // consistent snapshot for the main loop
 
 #ifdef PTT_HOST_TEST
 // hardware hooks the host tests provide
 bool     PTT_HwLineLow(void);
 uint32_t PTT_HwTicks(void);       // a 48 MHz down-counter like SysTick->VAL
 uint32_t PTT_HwPeriod(void);      // its reload period
-bool     PTT_HwSerialLock(void);
+uint16_t PTT_HwLock(void);        // serial PTT lock remaining, ms
+uint32_t PTT_HwNow(void);         // the ms clock
 uint8_t  PTT_HwPressMs(void);
 uint8_t  PTT_HwReleaseMs(void);
 void     PTT_HostReset(void);

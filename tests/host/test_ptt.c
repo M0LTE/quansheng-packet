@@ -15,8 +15,8 @@
 
 // Host tests of ptt.c, built with PTT_HOST_TEST: the real PTT_Tick runs
 // against a simulated PTT/UART line and a simulated 48 MHz SysTick.
-// Covers press and release timing, glitch and spike rejection, the serial
-// lock, UART streams (zero and random bytes, every start phase) never
+// Covers press and release timing, glitch and spike rejection, the press
+// computed during the serial lock with its edge times, UART streams (zero and random bytes, every start phase) never
 // keying, and UART traffic right after a release.
 
 #include <stdio.h>
@@ -38,7 +38,7 @@ static double   spike_start;
 static uint8_t  stream[4096];
 static unsigned stream_len;
 static double   stream_start;
-static bool     lock;
+static uint16_t lock_ms;
 static uint8_t  press_ms = PTT_PRESS_DEFAULT_MS, release_ms = PTT_RELEASE_DEFAULT_MS;
 
 static bool level_low_at(double t)
@@ -63,7 +63,8 @@ static bool level_low_at(double t)
 bool     PTT_HwLineLow(void)    { const bool l = level_low_at(t_us); t_us += 0.25; return l; }
 uint32_t PTT_HwTicks(void)      { return 47999u - (uint32_t)((uint64_t)(t_us * 48.0) % 48000u); }
 uint32_t PTT_HwPeriod(void)     { return 48000u; }
-bool     PTT_HwSerialLock(void) { return lock; }
+uint16_t PTT_HwLock(void)       { return lock_ms; }
+uint32_t PTT_HwNow(void)        { return (uint32_t)(t_us / 1000.0); }
 uint8_t  PTT_HwPressMs(void)    { return press_ms; }
 uint8_t  PTT_HwReleaseMs(void)  { return release_ms; }
 
@@ -77,7 +78,7 @@ static bool tick(void)
 	return PTT_IsPressed();
 }
 
-static void reset(void) { PTT_HostReset(); t_us = 0; lock = false; }
+static void reset(void) { PTT_HostReset(); t_us = 0; lock_ms = 0; }
 
 // ------------------------------------------------------------------ tests
 
@@ -120,17 +121,52 @@ static void test_glitches_and_spikes(void)
 	}
 }
 
-static void test_serial_lock(void)
+// v2 (5.3): the lock no longer forces the released state; the press is
+// computed as always, and its edge records the lock remaining and the
+// first tick that counted, for the main loop's lock rules (pttarb.c).
+static void test_press_during_lock(void)
 {
-	reset(); mode = 0;
-	for (unsigned i = 0; i < PTT_PRESS_DEFAULT_MS; i++) tick();
-	CHECK(PTT_IsPressed());
-	lock = true;
-	CHECK(!tick());                                         // the lock releases at once
-	for (int i = 0; i < 50; i++) CHECK(!tick());            // and blocks pressing
-	lock = false;
+	PttState_t st;
+
+	reset(); mode = 1;
+	for (int i = 0; i < 3; i++) tick();
+	PTT_GetState(&st);
+	const uint8_t count0 = st.pressCount;
+
+	lock_ms = 17; mode = 0;
+	const uint32_t first = PTT_HwNow();
 	for (unsigned i = 1; i < PTT_PRESS_DEFAULT_MS; i++) CHECK(!tick());
-	CHECK(tick());                                          // held after the lock: a press
+	PTT_GetState(&st);
+	CHECK(st.candidate && !st.pressed);
+	const uint32_t edge = PTT_HwNow();
+	CHECK(tick());                                          // pressed although the lock runs
+	PTT_GetState(&st);
+	CHECK(st.pressed && !st.candidate);
+	CHECK(st.pressCount == (uint8_t)(count0 + 1));
+	CHECK(st.lockAtPress == 17);
+	CHECK(st.tPress == first);                              // first tick counted
+	CHECK(st.tPressEdge == edge);
+	CHECK(st.tPressEdge - st.tPress == PTT_PRESS_DEFAULT_MS - 1);
+
+	lock_ms = 500;                                          // a frame arrives: still pressed
+	for (int i = 0; i < 20; i++) CHECK(tick());
+
+	mode = 1;
+	const uint32_t rel = PTT_HwNow();
+	for (unsigned i = 1; i < PTT_RELEASE_DEFAULT_MS; i++) CHECK(tick());
+	CHECK(!tick());
+	PTT_GetState(&st);
+	CHECK(st.tRelease == rel);
+	CHECK(st.pressCount == (uint8_t)(count0 + 1));
+
+	// an interrupted candidate press restarts the first-tick time
+	mode = 0; tick(); tick();
+	mode = 1; tick();
+	mode = 0;
+	const uint32_t first2 = PTT_HwNow();
+	for (unsigned i = 0; i < PTT_PRESS_DEFAULT_MS; i++) tick();
+	PTT_GetState(&st);
+	CHECK(st.pressed && st.tPress == first2 && st.lockAtPress == 500);
 }
 
 static int run_stream(uint8_t pms)
@@ -195,7 +231,7 @@ int main(void)
 {
 	test_press_release_timing();
 	test_glitches_and_spikes();
-	test_serial_lock();
+	test_press_during_lock();
 	test_uart_never_keys();
 	test_uart_after_release();
 	if (failures) {

@@ -35,7 +35,9 @@ bool              gMonitor = false;           // true opens the squelch
 
 ChannelAttributes_t gMR_ChannelAttributes[FREQ_CHANNEL_LAST + 1];
 
-volatile uint8_t  gSerialConfigCountDown_500ms;
+volatile uint32_t g_ms;
+volatile uint16_t gSerialLockMs;
+volatile uint16_t gReloadQuietMs;
 bool              gReloadSettingsAfterSerial;
 volatile bool     gNextTimeslice_500ms;
 volatile uint16_t gTxTimerCountdown_500ms;
@@ -51,7 +53,6 @@ uint8_t           gBatteryVoltageIndex;
 
 uint16_t          gMenuCountdown;
 bool              gPttWasReleased;
-bool              gPttWasPressed;
 uint8_t           gKeypadLocked;
 bool              gFlagReconfigureVfos;
 uint8_t           gVfoConfigureMode;

@@ -71,6 +71,12 @@ typedef struct VFO_Info_t
 extern VFO_Info_t    *gVfo;
 extern VfoState_t     gVfoState;
 
+extern uint8_t        gSqlRaw[6];
+extern bool           gSqlRawActive;
+extern uint8_t        gAgcFix;
+extern bool           gAfcOn;
+extern uint32_t       gTxCarrierOffMs;
+
 bool     RADIO_CheckValidChannel(uint16_t channel);
 uint8_t  RADIO_FindNextChannel(uint8_t ChNum, int8_t Direction);
 void     RADIO_ConfigureChannel(void);
@@ -80,7 +86,10 @@ void     RADIO_SetRxAudio(void);
 void     RADIO_ApplyRegOverrides(uint8_t phase);
 void     RADIO_SetTxParameters(void);
 void     RADIO_SetVfoState(VfoState_t State);
+uint8_t  RADIO_TxBar(void);
 void     RADIO_PrepareTX(void);
+// app.c: RADIO_PrepareTX refused a key-up the PTT rules had allowed
+void     APP_TxRefusedAtKeyUp(uint8_t reason);
 void     RADIO_SendEndOfTransmission(void);
 
 #endif

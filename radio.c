@@ -25,11 +25,20 @@
 #include "helper/battery.h"
 #include "misc.h"
 #include "packet.h"
+#include "pttarb.h"
 #include "radio.h"
 #include "settings.h"
+#include "app/monitor.h"
 
 VFO_Info_t    *gVfo = &gEeprom.Vfo;
 VfoState_t     gVfoState;
+
+// RAM-only diagnostics set over the v2 protocol (docs/protocol-v2.md 7)
+uint8_t        gSqlRaw[6];          // RSSI open/close, noise open/close, glitch open/close
+bool           gSqlRawActive;
+uint8_t        gAgcFix = 0xFF;      // 0xFF automatic, else REG_7E<14:12> fixed
+bool           gAfcOn  = true;
+uint32_t       gTxCarrierOffMs;     // g_ms when the carrier went off
 
 bool RADIO_CheckValidChannel(uint16_t channel)
 {
@@ -216,6 +225,16 @@ void RADIO_ConfigureSquelchAndOutputPower(VFO_Info_t *pInfo)
 		pInfo->SquelchCloseNoiseThresh  = (noise_close  > 127) ? 127 : noise_close;
 	}
 
+	// SQL_RAW (protocol v2) replaces the table values until SQUELCH is set
+	if (gSqlRawActive) {
+		pInfo->SquelchOpenRSSIThresh    = gSqlRaw[0];
+		pInfo->SquelchCloseRSSIThresh   = gSqlRaw[1];
+		pInfo->SquelchOpenNoiseThresh   = gSqlRaw[2];
+		pInfo->SquelchCloseNoiseThresh  = gSqlRaw[3];
+		pInfo->SquelchOpenGlitchThresh  = gSqlRaw[4];
+		pInfo->SquelchCloseGlitchThresh = gSqlRaw[5];
+	}
+
 	// *******************************
 	// output power, from the calibration tables
 
@@ -242,12 +261,10 @@ void RADIO_SetRxAudio(void)
 		((gEeprom.RX_DAC_GAIN & PKT_RX_DAC_GAIN_MAX) << 0));
 }
 
-// The register override table (settings.h), last word on the registers for
-// this phase.
-void RADIO_ApplyRegOverrides(uint8_t phase)
+static void ApplyTable(const RegOverride_t *t, uint8_t n, uint8_t phase)
 {
-	for (unsigned int i = 0; i < gRegOverrideCount; i++) {
-		const RegOverride_t *o = &gRegOverrides[i];
+	for (unsigned int i = 0; i < n; i++) {
+		const RegOverride_t *o = &t[i];
 		if (!(o->phase & phase))
 			continue;
 		uint16_t v = (BK4819_ReadRegister(o->reg) & o->andMask) | o->orValue;
@@ -255,6 +272,14 @@ void RADIO_ApplyRegOverrides(uint8_t phase)
 			v = (v & ~PKT_REG_40_DEV_MASK) | PKT_DEVIATION_MAX;
 		BK4819_WriteRegister(o->reg, v);
 	}
+}
+
+// The register override tables (settings.h), last word on the registers
+// for this phase: the EEPROM table, then the RAM trial table.
+void RADIO_ApplyRegOverrides(uint8_t phase)
+{
+	ApplyTable(gRegOverrides, gRegOverrideCount, phase);
+	ApplyTable(gRegOverridesRam, gRegOverrideRamCount, phase);
 }
 
 // Set the chip up to receive on gVfo. Called at power-on, after every
@@ -309,6 +334,8 @@ void RADIO_SetupRegisters(bool switchToForeground)
 	// and only reset it when the modulation changed, so receive ran with a
 	// frozen AGC. Always return to automatic AGC here.
 	BK4819_SetAGC(true);
+	if (gAgcFix <= 7)   // AGC_FIX diagnostic (protocol v2)
+		BK4819_WriteRegister(BK4819_REG_7E, (BK4819_ReadRegister(BK4819_REG_7E) & ~0xF000u) | PKT_REG_7E_AGC_FIX | ((uint16_t)gAgcFix << 12));
 
 	// enable/disable BK4819 selected interrupts
 	BK4819_WriteRegister(BK4819_REG_3F, BK4819_REG_3F_SQUELCH_FOUND | BK4819_REG_3F_SQUELCH_LOST);
@@ -319,6 +346,8 @@ void RADIO_SetupRegisters(bool switchToForeground)
 
 	if (switchToForeground)
 		FUNCTION_Select(FUNCTION_FOREGROUND);
+
+	MON_AfterRxSetup();   // a running level tone survives the set-up
 }
 
 void RADIO_SetTxParameters(void)
@@ -360,26 +389,37 @@ void RADIO_SetVfoState(VfoState_t State)
 	gUpdateDisplay = true;
 }
 
+// Why a transmission is not allowed now (TXR_*), or TXR_NONE.
+uint8_t RADIO_TxBar(void)
+{
+	if (gReducedService)
+		return TXR_REDUCED_SERVICE;
+	if (TX_freq_check(gVfo->Frequency) != 0)
+		return TXR_TX_BAND;
+	if (gBatteryDisplayLevel == 0)
+		return TXR_BATTERY_EMPTY;
+	if (gBatteryDisplayLevel > 6)      // over voltage (above about 8.9 V)
+		return TXR_OVER_VOLTAGE;
+	return TXR_NONE;
+}
+
 void RADIO_PrepareTX(void)
 {
-	VfoState_t State = VFO_STATE_NORMAL;  // default to OK to TX
+	uint8_t bar = RADIO_TxBar();
+	if (bar == TXR_NONE && SerialConfigInProgress())
+		bar = TXR_LOCK;   // the caller checked; a frame came in between
 
-	if (TX_freq_check(gVfo->Frequency) != 0) {
-		// TX frequency not allowed
-		State = VFO_STATE_TX_DISABLE;
-	} else if (SerialConfigInProgress()) {
-		// config upload/download in progress
-		State = VFO_STATE_TX_DISABLE;
-	} else if (gBatteryDisplayLevel == 0) {
-		State = VFO_STATE_BAT_LOW;
-	} else if (gBatteryDisplayLevel > 6) {
-		// over voltage (above about 8.9 V)
-		State = VFO_STATE_VOLTAGE_HIGH;
-	}
-
-	if (State != VFO_STATE_NORMAL) {
+	if (bar != TXR_NONE) {
 		// TX not allowed
-		RADIO_SetVfoState(State);
+		static const VfoState_t state[] = {
+			[TXR_LOCK]            = VFO_STATE_TX_DISABLE,
+			[TXR_TX_BAND]         = VFO_STATE_TX_DISABLE,
+			[TXR_BATTERY_EMPTY]   = VFO_STATE_BAT_LOW,
+			[TXR_OVER_VOLTAGE]    = VFO_STATE_VOLTAGE_HIGH,
+			[TXR_REDUCED_SERVICE] = VFO_STATE_BAT_LOW,
+		};
+		RADIO_SetVfoState(state[bar]);
+		APP_TxRefusedAtKeyUp(bar);
 		return;
 	}
 
@@ -400,6 +440,7 @@ void RADIO_SendEndOfTransmission(void)
 	// and take the chip out of TX at once (REG_30 still held the TX enables
 	// until RADIO_SetupRegisters reached the receiver turn-on)
 	BK4819_WriteRegister(BK4819_REG_30, 0);
+	gTxCarrierOffMs = g_ms;
 
 	RADIO_SetupRegisters(false);
 }

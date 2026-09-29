@@ -19,8 +19,11 @@
 #include <string.h>
 
 #include "app/app.h"
+#include "app/events.h"
 #include "app/main.h"
 #include "app/menu.h"
+#include "app/monitor.h"
+#include "app/params.h"
 #include "app/uart.h"
 #include "ARMCM0.h"
 #include "audio.h"
@@ -38,6 +41,7 @@
 #include "misc.h"
 #include "packet.h"
 #include "ptt.h"
+#include "pttarb.h"
 #include "radio.h"
 #include "settings.h"
 #include "ui/battery.h"
@@ -50,6 +54,10 @@
 static bool flagSaveVfo;
 static bool flagSaveSettings;
 static bool flagSaveChannel;
+
+static PttArb_t gArb;           // what the PTT line may do (pttarb.h)
+static bool     gBusyAtPress;
+static uint32_t gTxReleaseMs;   // first tick of the release that ends the transmission
 
 static void ProcessKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld);
 
@@ -113,11 +121,12 @@ void APP_StartListening(FUNCTION_Type_t function)
 	RADIO_SetRxAudio();
 
 	BK4819_SetAF(BK4819_AF_FM);                  // flat FM demodulator output
-	BK4819_SetRegValue(afcDisableRegSpec, 0);    // enable AFC
+	BK4819_SetRegValue(afcDisableRegSpec, !gAfcOn);   // AFC on unless the AFC diagnostic says off
 	BK4819_WriteRegister(BK4819_REG_3D, PKT_REG_3D_RX);
 
 	// the squelch-open writes above would undo RX overrides of REG_47/48
 	RADIO_ApplyRegOverrides(REG_OVERRIDE_RX);
+	MON_AfterRxSetup();                          // and a running level tone
 
 	FUNCTION_Select(function);
 
@@ -167,11 +176,12 @@ static void CheckRadioInterrupts(void)
 	}
 }
 
-void APP_EndTransmission(void)
+void APP_EndTransmission(uint8_t reason)
 {
 	// back to RX mode
 	gTxTimerCountdown_500ms = 0;
 	RADIO_SendEndOfTransmission();
+	MON_TxEnded(reason, gTxReleaseMs);
 
 	if (gMonitor) {
 		 //turn the monitor back on
@@ -179,18 +189,55 @@ void APP_EndTransmission(void)
 	}
 }
 
+// A valid frame from the host (protocol v2, 5.3 rule 1): the serial PTT
+// lock starts, and any transmission ends before the command runs, so no
+// command ever acts on a transmitting radio. PTT must then be released
+// before the next transmission.
+void APP_OnSerialFrame(void)
+{
+	gSerialLockMs = gV2.SERIAL_LOCK_MS;
+
+	if (gCurrentFunction == FUNCTION_TRANSMIT) {
+		APP_EndTransmission(TXEND_SERIAL);
+		FUNCTION_Select(FUNCTION_FOREGROUND);
+		RADIO_SetVfoState(VFO_STATE_TIMEOUT);
+	}
+
+	PTTARB_Latch(&gArb);
+	gPttIsPressed = false;
+}
+
+uint8_t APP_PttArbState(void)
+{
+	return gArb.state;
+}
+
+bool APP_PersistAllowed(void)
+{
+	PttState_t p;
+	PTT_GetState(&p);
+	return gCurrentFunction != FUNCTION_TRANSMIT && !p.pressed && !p.candidate && gArb.state == ARB_IDLE;
+}
+
+void APP_TxRefusedAtKeyUp(uint8_t reason)
+{
+	MON_TxRefused(gArb.tPress, reason, (reason == TXR_LOCK) ? gSerialLockMs : 0);
+	PTTARB_Latch(&gArb);
+	gPttIsPressed = false;
+}
+
 void APP_Update(void)
 {
-	if (gCurrentFunction == FUNCTION_TRANSMIT && (gTxTimeoutReached || SerialConfigInProgress()))
-	{	// transmitter timed out or must de-key
+	if (gCurrentFunction == FUNCTION_TRANSMIT && gTxTimeoutReached)
+	{	// transmitter timed out
 		gTxTimeoutReached = false;
 
-		APP_EndTransmission();
+		APP_EndTransmission(TXEND_TIMEOUT);
 		FUNCTION_Select(FUNCTION_FOREGROUND);
 
 		// PTT must be released before the next transmission
-		if (gPttIsPressed)
-			gPttWasPressed = true;
+		PTTARB_Latch(&gArb);
+		gPttIsPressed = false;
 
 		RADIO_SetVfoState(VFO_STATE_TIMEOUT);
 
@@ -202,6 +249,22 @@ void APP_Update(void)
 
 	if (gCurrentFunction != FUNCTION_TRANSMIT)
 		HandleFunction_fn_table[gCurrentFunction]();
+}
+
+// The protocol's own work, on every pass of the main loop: busy, streams
+// and heartbeats, event delivery, and queued EEPROM writes.
+void APP_Service(void)
+{
+	MON_Service();
+	EVT_Service(MON_Deferred(), g_ms);
+	PARAMS_PersistService(APP_PersistAllowed());
+}
+
+void APP_Init(void)
+{
+	PttState_t p;
+	PTT_GetState(&p);
+	PTTARB_Init(&gArb, p.pressCount);
 }
 
 // called every 10ms
@@ -275,24 +338,56 @@ static void CheckKeys(void)
 }
 
 // Called on every pass of the main loop: acts on the PTT state the 1 ms
-// SysTick debouncer (ptt.c) keeps, without waiting for the 10 ms slice.
+// SysTick debouncer (ptt.c) keeps, without waiting for the 10 ms slice,
+// under the serial PTT lock rules (pttarb.h).
 void APP_CheckPtt(void)
 {
-	const bool pressed = PTT_IsPressed();
+	PttState_t  p;
+	PttArbIn_t  in;
+	PttArbOut_t out;
 
-	if (pressed == gPttIsPressed)
-		return;
+	PTT_GetState(&p);
+	if (p.pressCount != gArb.seen)
+		gBusyAtPress = MON_Busy();
 
-	gPttIsPressed = pressed;
-	boot_counter_10ms = 0;
+	in.pressed     = p.pressed;
+	in.pressCount  = p.pressCount;
+	in.lockAtPress = p.lockAtPress;
+	in.tPress      = p.tPress;
+	in.tPressEdge  = p.tPressEdge;
+	in.lockNow     = gSerialLockMs;
+	in.now         = g_ms;
+	in.bar         = RADIO_TxBar();
+	PTTARB_Step(&gArb, &in, &out);
 
-	if (pressed) {
-		ProcessKey(KEY_PTT, true, false);
-	}
-	else {
-		ProcessKey(KEY_PTT, false, false);
-		if (gKeyReading1 != KEY_INVALID)
-			gPttWasReleased = true;
+	switch (out.action) {
+		case ARB_KEY:
+			boot_counter_10ms = 0;
+			gPttIsPressed = true;
+			TONE_Stop(TONE_END_PTT);          // before key-up
+			MON_ForceClose(CD_CAUSE_TX);
+			MON_KeyInfo(out.tPress, out.lockDelay, out.late, gBusyAtPress);
+			ProcessKey(KEY_PTT, true, false);
+			break;
+
+		case ARB_UNKEY:
+			gPttIsPressed = false;
+			gTxReleaseMs  = p.tRelease;
+			ProcessKey(KEY_PTT, false, false);
+			if (gKeyReading1 != KEY_INVALID)
+				gPttWasReleased = true;
+			break;
+
+		case ARB_REFUSE:
+			boot_counter_10ms = 0;
+			MON_TxRefused(out.tPress, out.reason, out.detail);
+			RADIO_SetVfoState(out.reason == TXR_OVER_VOLTAGE ? VFO_STATE_VOLTAGE_HIGH :
+			                  (out.reason == TXR_BATTERY_EMPTY || out.reason == TXR_REDUCED_SERVICE) ? VFO_STATE_BAT_LOW :
+			                  VFO_STATE_TX_DISABLE);
+			break;
+
+		default:
+			break;
 	}
 }
 
@@ -300,14 +395,29 @@ void APP_TimeSlice10ms(void)
 {
 	gNextTimeslice = false;
 
-	if (UART_IsCommandAvailable()) {
-		__disable_irq();
-		UART_HandleCommand();
-		__enable_irq();
-	}
-
 	if (gReducedService)
 		return;
+
+	if (gReloadSettingsAfterSerial && gReloadQuietMs == 0 && gCurrentFunction != FUNCTION_TRANSMIT)
+	{	// EEPROM was written over UART and the host has been quiet for
+		// SERIAL_RELOAD_QUIET_MS: use the new settings and channel data
+		gReloadSettingsAfterSerial = false;
+		MON_Retune();
+		SETTINGS_InitEEPROM();
+		SETTINGS_LoadCalibration();
+		gSqlRawActive  = false;
+		RADIO_ConfigureChannel();
+		RADIO_SetupRegisters(true);
+		gMonitor       = false;
+		// an open menu item would otherwise store its old value on MENU
+		gIsInSubMenu   = false;
+		if (gScreenToDisplay == DISPLAY_MENU)
+			MENU_ShowCurrentSetting();
+		gUpdateStatus  = true;
+		gUpdateDisplay = true;
+		PARAMS_RefreshStored();
+		PARAMS_Changed(PSRC_RELOAD);
+	}
 
 	CheckRadioInterrupts();
 
@@ -391,21 +501,8 @@ void APP_TimeSlice500ms(void)
 	if ((gBatteryCheckCounter & 3) == 0)
 		gUpdateStatus = true;
 
-	if (gReloadSettingsAfterSerial && !SerialConfigInProgress() && gCurrentFunction != FUNCTION_TRANSMIT)
-	{	// EEPROM was written over UART: use the new settings and channel data
-		gReloadSettingsAfterSerial = false;
-		SETTINGS_InitEEPROM();
-		SETTINGS_LoadCalibration();
-		RADIO_ConfigureChannel();
-		RADIO_SetupRegisters(true);
-		gMonitor       = false;
-		// an open menu item would otherwise store its old value on MENU
-		gIsInSubMenu   = false;
-		if (gScreenToDisplay == DISPLAY_MENU)
-			MENU_ShowCurrentSetting();
-		gUpdateStatus  = true;
-		gUpdateDisplay = true;
-	}
+	MON_Slice500ms();
+	PARAMS_Changed(PSRC_KEYPAD);   // the operator changed something on the radio
 
 	if (!gPttIsPressed && gVFOStateResumeCountdown_500ms > 0 && --gVFOStateResumeCountdown_500ms == 0)
 		RADIO_SetVfoState(VFO_STATE_NORMAL);
@@ -500,17 +597,9 @@ static void ProcessKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 		}
 	}
 
+	// (a PTT that must be released first never gets here: pttarb.h)
 	bool bFlag = false;
-	if (Key == KEY_PTT) {
-		if (gPttWasPressed) {
-			bFlag = bKeyHeld;
-			if (!bKeyPressed) {
-				bFlag          = true;
-				gPttWasPressed = false;
-			}
-		}
-	}
-	else if (gPttWasReleased) {
+	if (Key != KEY_PTT && gPttWasReleased) {
 		if (bKeyHeld)
 			bFlag = true;
 		if (!bKeyPressed) {
