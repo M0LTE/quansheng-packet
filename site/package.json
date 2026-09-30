@@ -1,0 +1,10 @@
+{
+  "name": "quansheng-packet-site",
+  "private": true,
+  "description": "Browser setup site for the UV-K5 packet firmware and the packet AIOC firmware. Static files, no build step.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "serve": "python3 -m http.server 8000"
+  }
+}
