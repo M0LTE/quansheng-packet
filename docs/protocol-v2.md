@@ -287,7 +287,7 @@ Offset estimate (host clock minus radio clock), with `t0` the host write time, `
 
 ### 6.5 GET_PARAMS (0x5004)
 
-Request: `u8 flags` (bit 0 STORED: return the stored EEPROM value, or the default a blank would load, instead of the live one), then zero or more `u8 param_id` (none = all supported). Reply: `u8 flags`, then `(u8 id, value)` records in request order, each value in the size the parameter table gives. With STORED, RAM-only parameters are omitted, also when asked for by id. An unknown or repeated id gives `BAD_PARAM` (detail = id). STORED values for FREQ_HZ, POWER and BANDWIDTH are those of the operating-channel block (0x1D58), or what a power-on would take when it is not in use (7).
+Request: `u8 flags` (bit 0 STORED: return the stored EEPROM value, or the default a blank would load, instead of the live one), then zero or more `u8 param_id` (none = all supported). Reply: `u8 flags`, then `(u8 id, value)` records in request order, each value in the size the parameter table gives. With STORED, RAM-only parameters are omitted, also when asked for by id. An unknown or repeated id gives `BAD_PARAM` (detail = id). STORED values for FREQ_HZ, POWER and BANDWIDTH are those of the operating-channel block (0x1D58), or what a power-on would take when it is not in use (7). STORED always reflects the EEPROM as it is now, whoever wrote it: keypad and menu saves, SET_PARAMS and SAVE_PARAMS persistence, and legacy EEPROM writes.
 
 ### 6.6 SET_PARAMS (0x5005)
 
@@ -647,5 +647,6 @@ Points settled by the implementation, beyond the amendments above:
 - PARAMS_CHANGED with source 0 (keypad or menu) comes from comparing every parameter with its last reported value every 500 ms, so it follows anything the operator changes, up to 0.5 s late.
 - The event deferral also covers a press that is still being debounced, and resumes 2 ms after the last millisecond in which PTT was asserted or the radio transmitted.
 - EEPROM persistence (6.6) is also deferred while the PTT rules have a key-up pending.
+- The stored view (GET_PARAMS STORED, GET_STATUS flags2 bit 0, SAVE_PARAMS SAVE) is a copy of the EEPROM settings, re-read on the first request after any EEPROM block was written, from any source, and never during a transmission. Until 2026-09-30 (`f988b24` and earlier) it missed keypad and menu saves and could report a value the radio no longer had stored.
 - Known limits: a keypad or menu save stores the live value of everything in the block it writes, so a value a host set in RAM in the same block (a deviation trial, say) is persisted with it; and legacy 0x0602 still writes any BK4819 register, REG_30, REG_33 and REG_36 included, which can put out RF outside the transmit state machine (no TX timeout, a PTT release does not stop it): tools must not use it for that.
 - Golden vectors from the firmware code for the C# client and simulator: `tests/vectors/protocol-v2.json` (format in `tests/vectors/README.md`), regenerated and compared by `tests/host/run.sh`.

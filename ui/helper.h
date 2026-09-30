@@ -28,6 +28,10 @@ void UI_DisplayFrequency(const char *string, uint8_t X, uint8_t Y, bool center);
 
 void UI_DisplayPopup(const char *string);
 
+// TX power as shown: nominal watts (the PA bias comes from the factory
+// calibration, the output is not measured), indexed by OUTPUT_POWER_*
+extern const char gPowerNames[3][6];
+
 
 void UI_DisplayClear();
 

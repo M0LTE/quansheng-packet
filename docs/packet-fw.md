@@ -46,8 +46,10 @@ CTCSS/DCS went because packet needs no tone squelch, and dropping it removes the
 
 - One VFO, simplex (TX frequency = RX frequency), no squelch: receive audio is always open, and the speaker amplifier (the K1 audio out) always on in receive. The chip's squelch result is kept only as a carrier detector for the protocol's busy events and the green LED ("RX" on the display); it never mutes anything.
 - One operating frequency, with its power, bandwidth and step, stored in this firmware's own settings (0x1D58); frequency entry on the keypad and up/down stepping. No memory channels, no band slots, no CHIRP compatibility (see "Operating channel" under Settings).
-- Power (low, mid, high from the factory calibration), bandwidth (wide, narrow), TX timeout, battery monitoring (TX refused below about 6.3 V and above about 8.9 V, as upstream), backlight, key lock.
-- Display: frequency, TX/RX, RSSI in dBm and S-units, and the settings in use.
+- Power (low, mid, high from the factory calibration, shown as `~0.5W`, `~2W` and `~5W`), bandwidth (wide, narrow), TX timeout, battery monitoring (TX refused below about 6.3 V and above about 8.9 V, as upstream), backlight, key lock.
+- Display: frequency, TX/RX, RSSI in dBm and S-units, and the settings in use (for example `~5W WIDE TOT30`).
+
+**The watts are nominal, not measured.** The screen and the menu show the usual UV-K5 figures for the three power levels, the same on VHF and UHF, with a tilde because nothing measures them. What the radio really puts out depends on its factory PA calibration (0x1ED0 up), which varies from radio to radio: the bench K5's VHF high row is 105, 116 and 123 across 137 to 174 MHz, against 135 in most dumps, so at 145 MHz its high (about 110) is barely above its mid (105) and likely less than 5 W. Measure a radio's output before relying on the figure.
 - UART: the upstream EEPROM protocol and the BK4819 register commands, plus the serial control protocol v2 (`docs/protocol-v2.md`): identification, status, events (busy, bursts, TX timing, heartbeats), parameters, register access and overrides, a level tone.
 
 ## The audio path
@@ -112,7 +114,7 @@ There are no memory channels or band slots, and the upstream channel layout (CHI
 | Address | Setting | Range | Default |
 |---|---|---|---|
 | 0x1D58 | frequency, u32 LE, 10 Hz units | receivable (inside the band table; 350 to 400 MHz only if enabled) | 144.800 MHz |
-| 0x1D5C | power | 0 low, 1 mid, 2 high | 0 |
+| 0x1D5C | power | 0 low, 1 mid, 2 high (shown as ~0.5W, ~2W, ~5W) | 0 |
 | 0x1D5D | bandwidth | 0 wide, 1 narrow | 0 |
 | 0x1D5E | step, index into the step table | 0 to 23 | 12.5 kHz |
 | 0x1D5F | reserved, 0xFF | | |

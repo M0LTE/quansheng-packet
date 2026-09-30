@@ -27,6 +27,10 @@
 	#define ARRAY_SIZE(arr) (sizeof(arr)/sizeof((arr)[0]))
 #endif
 
+// Nominal UV-K5 output for the low, mid and high calibration rows, the
+// same on VHF and UHF; the tilde says it is not a measurement.
+const char gPowerNames[3][6] = { "~0.5W", "~2W", "~5W" };
+
 void UI_PrintStringBuffer(const char *pString, uint8_t * buffer, uint32_t char_width, const uint8_t *font)
 {
 	const size_t Length = strlen(pString);

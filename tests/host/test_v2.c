@@ -900,6 +900,97 @@ static void test_persist(void)
 	CHECK(eeprom_writes_in_cal == 0);
 }
 
+// Keypad and menu saves (SETTINGS_SaveOperating and SETTINGS_SaveSettings,
+// called from app.c after MENU_AcceptSetting, the keypad frequency entry,
+// UP/DOWN and F 6) show in GET_PARAMS STORED at once. Found on the bench:
+// W/N set to wide in the menu, 0x1D5D was 0, live was wide, but STORED
+// still said narrow.
+static const uint8_t *stored4(uint8_t tag)
+{
+	static const uint8_t r[5] = { 1, P_FREQ_HZ, P_POWER, P_BANDWIDTH, P_DEV_WIDE };
+	const Frame_t *f = v2(V2_GET_PARAMS, tag, r, 5);
+	CHECK(status(f) == V2_OK && f->body_len == 4 + 1 + 5 + 2 + 2 + 3);
+	const uint8_t *o = rb(f);
+	CHECK(o[1] == P_FREQ_HZ && o[6] == P_POWER && o[8] == P_BANDWIDTH && o[10] == P_DEV_WIDE);
+	return o;   // freq o+2, power o[7], bandwidth o[9], wide deviation o+11
+}
+
+static bool live_differs(uint8_t tag)
+{
+	return rb(v2(V2_GET_STATUS, tag, NULL, 0))[10] & 0x01;
+}
+
+static void test_stored_follows_local_saves(void)
+{
+	// the first menu save, over a blank block: the stored view takes it
+	boot_plain();
+	const uint8_t *o = stored4(0x70);
+	CHECK(get32(o + 2) == 144800000u && o[7] == 0 && o[9] == 0 && get16(o + 11) == 0x0856);
+	gEeprom.DEVIATION_WIDE = 0x0800;                 // menu DevW
+	SETTINGS_SaveSettings();
+	CHECK(eeprom[0x1D00] == 1 && get16(&eeprom[0x1D04]) == 0x0800);
+	o = stored4(0x71);
+	CHECK(get16(o + 11) == 0x0800);
+	CHECK(!live_differs(0x72));
+
+	// W/N narrow, then wide again (the bench case), each a menu save
+	gVfo->CHANNEL_BANDWIDTH = BANDWIDTH_NARROW;
+	SETTINGS_SaveOperating();
+	CHECK(eeprom[0x1D5D] == 1);
+	CHECK(stored4(0x73)[9] == 1);
+	gVfo->CHANNEL_BANDWIDTH = BANDWIDTH_WIDE;
+	SETTINGS_SaveOperating();
+	CHECK(eeprom[0x1D5D] == 0);
+	CHECK(stored4(0x74)[9] == 0);
+	CHECK(!live_differs(0x75));
+
+	// power (menu TxPwr or F 6)
+	gVfo->OUTPUT_POWER = OUTPUT_POWER_HIGH;
+	SETTINGS_SaveOperating();
+	CHECK(stored4(0x76)[7] == 2);
+
+	// frequency (keypad entry or UP/DOWN)
+	gVfo->Frequency = 14510000;
+	SETTINGS_SaveOperating();
+	o = stored4(0x77);
+	CHECK(get32(o + 2) == 145100000u && o[7] == 2 && o[9] == 0 && get16(o + 11) == 0x0800);
+	CHECK(!live_differs(0x78));
+
+	// another 0x1D00-block setting, over a valid block
+	gEeprom.MIC_GAIN = 7;                            // menu MicG
+	SETTINGS_SaveSettings();
+	{
+		const uint8_t r[2] = { 1, P_MIC_GAIN };
+		const Frame_t *f = v2(V2_GET_PARAMS, 0x79, r, 2);
+		CHECK(status(f) == V2_OK && rb(f)[1] == P_MIC_GAIN && rb(f)[2] == 7);
+	}
+
+	// cheap: with nothing written since, a stored read reads no EEPROM
+	int reads = eeprom_reads;
+	stored4(0x7A);
+	live_differs(0x7B);
+	CHECK(eeprom_reads == reads);
+
+	// never re-read during a transmission; re-read after it
+	gVfo->OUTPUT_POWER = OUTPUT_POWER_MID;
+	SETTINGS_SaveOperating();
+	gCurrentFunction = FUNCTION_TRANSMIT;
+	reads = eeprom_reads;
+	uint8_t p = 0xEE;
+	CHECK(PARAMS_Get(P_POWER, true, &p) == 1 && p == 2);   // the view as it was
+	PARAMS_LiveDiffers();
+	CHECK(eeprom_reads == reads);
+	gCurrentFunction = FUNCTION_FOREGROUND;
+	CHECK(stored4(0x7C)[7] == 1);
+	CHECK(eeprom_reads > reads);
+
+	// and after a reboot, what the view said
+	host_boot_keep_eeprom();
+	CHECK(gVfo->Frequency == 14510000 && gVfo->OUTPUT_POWER == 1 && gVfo->CHANNEL_BANDWIDTH == 0);
+	CHECK(gEeprom.DEVIATION_WIDE == 0x0800 && gEeprom.MIC_GAIN == 7);
+	CHECK(eeprom_writes_in_cal == 0);
+}
+
 static void test_time_sync(void)
 {
 	boot_plain();
@@ -1161,6 +1252,7 @@ int main(int argc, char **argv)
 	test_ephemeral();
 	test_params();
 	test_persist();
+	test_stored_follows_local_saves();
 	test_time_sync();
 	test_registers();
 	test_overrides();

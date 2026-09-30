@@ -33,6 +33,7 @@ extern int failures;
 
 extern uint8_t  eeprom[0x2000];
 extern int      eeprom_writes_in_cal;
+extern int      eeprom_reads;       // EEPROM read transactions
 extern uint16_t regs[128];
 extern int      reg_writes[128];
 extern bool     pa_enabled;
