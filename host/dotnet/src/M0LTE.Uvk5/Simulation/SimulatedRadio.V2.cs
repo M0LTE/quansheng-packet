@@ -374,7 +374,9 @@ public sealed partial class SimulatedRadio
             sources = 0;
         }
 
-        StoreEvent(0, new WireWriter().U8(busy ? 1 : 0).U8(sources).U8((int)cause).U16(rssi).U8(noise).U8(glitch).ToArray());
+        // stamped with the edge time, as the burst report's open time is: reading the clock again
+        // here could cross a millisecond boundary
+        StoreEvent(0, new WireWriter().U8(busy ? 1 : 0).U8(sources).U8((int)cause).U16(rssi).U8(noise).U8(glitch).ToArray(), now);
         if (busy)
         {
             Counter(10);
