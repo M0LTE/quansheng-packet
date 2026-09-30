@@ -621,6 +621,12 @@ uint8_t PARAMS_Set(uint8_t flags, const uint8_t *rec, uint16_t n, uint8_t *detai
 		else if (val[id] != Live(id))
 			changed |= BIT(id);
 	}
+	// at critical battery the receiver stays off: nothing that sets it up
+	const uint32_t rx = PARAMS_RETUNE | BIT(P_RX_GAIN) | BIT(P_RX_DAC_GAIN) | BIT(P_AFC);
+	if (gReducedService && (changed & rx) && !(flags & SETP_DRY_RUN)) {
+		*detail = Lowest(changed & rx);
+		return V2_STATE;
+	}
 	*detail = 0;
 
 	out[0] = (txOk ? SETR_TX_ALLOWED : 0) | (persist ? SETR_PERSIST : 0) | ((changed & PARAMS_RETUNE) ? SETR_RETUNED : 0);
@@ -673,7 +679,7 @@ uint8_t PARAMS_Save(uint8_t op, uint32_t *mask)
 		return V2_RANGE;
 
 	// REVERT: reload as at power-on, RAM-only settings dropped
-	if (gJobs)
+	if (gJobs || gReducedService)
 		return V2_STATE;
 	uint32_t before[P_LAST + 1];
 	Snapshot(before);

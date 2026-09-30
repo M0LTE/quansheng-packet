@@ -10,7 +10,11 @@ set -e
 cd "$(dirname "$0")/../.."
 out="${TMPDIR:-/tmp}/k5-packet-fw-host-test"
 CFLAGS="-std=c2x -O2 -Wall -Wextra -Werror -fshort-enums -I ."
-PROTO="-DHOST_TEST -I tests/host -I external/CMSIS_5/Device/ARM/ARMCM0/Include -include tests/host/uart_shim.h"
+# the protocol tests also run under the address and undefined-behaviour
+# sanitizers (misaligned access included), where the compiler has them
+SAN="-fsanitize=address,undefined -fno-sanitize-recover=all"
+echo 'int main(void){return 0;}' | gcc $SAN -x c -o /dev/null - 2>/dev/null || SAN=""
+PROTO="$SAN -DHOST_TEST -I tests/host -I external/CMSIS_5/Device/ARM/ARMCM0/Include -include tests/host/uart_shim.h"
 PROTO_SRC="tests/host/harness.c app/uart.c app/v2.c app/events.c app/params.c app/monitor.c outq.c settings.c radio.c frequencies.c misc.c driver/eeprom.c"
 
 gcc $CFLAGS -o "$out" \

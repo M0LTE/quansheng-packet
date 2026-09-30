@@ -674,6 +674,17 @@ static void test_params(void)
 	v2(V2_SET_PARAMS, 0x56, s, n);
 	CHECK(!gSqlRawActive);
 
+	// at critical battery nothing may set the receiver up
+	gReducedService = true;
+	n = 0; s[n++] = 0; s[n++] = P_MIC_GAIN; s[n++] = 11; s[n++] = P_SQUELCH; s[n++] = 4;
+	f = v2(V2_SET_PARAMS, 0x58, s, n);
+	CHECK(status(f) == V2_STATE && rb(f)[0] == P_SQUELCH && gEeprom.MIC_GAIN == 20);
+	n = 0; s[n++] = 0; s[n++] = P_MIC_GAIN; s[n++] = 11;
+	CHECK(status(v2(V2_SET_PARAMS, 0x59, s, n)) == V2_OK && gEeprom.MIC_GAIN == 11);
+	uint8_t op = 1;
+	CHECK(status(v2(V2_SAVE_PARAMS, 0x5A, &op, 1)) == V2_STATE);
+	gReducedService = false;
+
 	// PERSIST needs the settings block
 	n = 0; s[n++] = SETP_PERSIST; s[n++] = P_MIC_GAIN; s[n++] = 10;
 	f = v2(V2_SET_PARAMS, 0x57, s, n);

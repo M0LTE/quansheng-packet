@@ -14,6 +14,7 @@
  *     limitations under the License.
  */
 
+#include <assert.h>
 #include <string.h>
 
 #include "ARMCM0.h"
@@ -124,15 +125,21 @@ static const uint8_t Obfuscation[16] =
 	0x16, 0x6C, 0x14, 0xE6, 0x2E, 0x91, 0x0D, 0x40, 0x21, 0x35, 0xD5, 0x40, 0x13, 0x03, 0xE9, 0x80
 };
 
+// The legacy handlers cast this buffer to structs holding a u32 at offset
+// 4 or 8, and the Cortex-M0 faults on an unaligned word load, so it must be
+// word aligned. (Before v2 the linker happened to place it so.)
 static union
 {
-	uint8_t Buffer[256];
+	uint32_t Align;
+	uint8_t  Buffer[256];
 	struct
 	{
 		Header_t Header;
 		uint8_t Data[252];
 	};
 } UART_Command;
+
+static_assert(_Alignof(UART_Command) >= 4, "UART_Command must be word aligned");
 
 static uint32_t Timestamp;
 static uint16_t gUART_WriteIndex;

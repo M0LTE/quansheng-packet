@@ -296,6 +296,8 @@ static uint16_t ListOverrides(uint8_t *o, const RegOverride_t *t, uint8_t count)
 
 static void Resetup(void)
 {
+	if (gReducedService)
+		return;           // the receiver stays off at critical battery
 	MON_Retune();
 	RADIO_SetupRegisters(true);
 }
@@ -331,7 +333,7 @@ static uint8_t RegOverride(const uint8_t *r, uint16_t n, uint8_t *o, uint16_t *l
 				rx |= e[0] & REG_OVERRIDE_RX;
 			}
 			OVR_SetExpiry(seconds, keyups);
-			if (rx && gCurrentFunction != FUNCTION_TRANSMIT)
+			if (rx && gCurrentFunction != FUNCTION_TRANSMIT && !gReducedService)
 				RADIO_ApplyRegOverrides(REG_OVERRIDE_RX);
 			break;
 		}
