@@ -394,14 +394,35 @@ function usbCancelled(e) {
   return e?.name === 'NotFoundError' && /No device selected/i.test(e.message);
 }
 
-function usbErrorText(e) {
+const hex4 = (n) => (n ?? 0).toString(16).padStart(4, '0');
+const osName = (() => {
+  const p = (navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || '').toLowerCase();
+  if (p.includes('win')) return 'windows';
+  if (p.includes('linux') || p.includes('x11')) return p.includes('android') ? 'other' : 'linux';
+  if (p.includes('mac')) return 'mac';
+  return 'other';
+})();
+// Show only the driver/permission note for this computer's OS (both if unsure).
+if (osName === 'linux') $('windows-note').hidden = true;
+if (osName === 'windows') $('linux-note').hidden = true;
+if (osName === 'mac') { $('windows-note').hidden = true; $('linux-note').hidden = true; }
+
+/** A USB error in plain words, naming the device it was about. */
+function usbErrorText(e, dev) {
+  const which = dev ? `"${dev.productName || 'USB device'}" (USB ID ${hex4(dev.vendorId)}:${hex4(dev.productId)})` : 'the device';
   if (/user gesture/i.test(e?.message || '')) {
     return 'The browser did not count that as a click (this can happen if a device picker was still open). Press the button again.';
   }
   if (e?.name === 'SecurityError' || e?.name === 'NotAllowedError' || /Access denied/i.test(e?.message)) {
-    return 'The browser was not allowed to use the device. On Windows it needs the WinUSB driver (the Zadig note above); on Linux, the udev rule (below); or another program has it open.';
+    const fix =
+      osName === 'linux'
+        ? 'On Linux this needs the udev rule in the "Linux only" box above (named 70-aioc.rules, then unplug and replug the AIOC). If the rule is in place, check no other program (a soundmodem, dfu-util) has the AIOC open.'
+        : osName === 'windows'
+          ? 'On Windows this needs the WinUSB driver for it (the Zadig box above), or another program has it open.'
+          : 'Another program may have it open: close it and try again.';
+    return `The browser was not allowed to open ${which}. ${fix}`;
   }
-  return errText(e);
+  return `${errText(e)} (${which})`;
 }
 
 $('aioc-detach').addEventListener('click', async () => {
@@ -422,7 +443,7 @@ $('aioc-detach').addEventListener('click', async () => {
       if (known.length === 1) connectBootloader(known[0]);
     }, 2500);
   } catch (e) {
-    show($('aioc-status'), usbErrorText(e), 'error');
+    show($('aioc-status'), usbErrorText(e, dev), 'error');
   }
 });
 
@@ -441,7 +462,7 @@ async function connectBootloader(dev) {
     show($('aioc-status'), `Connected to the AIOC's bootloader (${size}).${aiocFw ? ` Ready to flash ${aiocFw.label} (${aiocFw.detail}).` : ''} Save a backup first if you like.`, 'ok');
   } catch (e) {
     dfu = null;
-    show($('aioc-status'), usbErrorText(e), 'error');
+    show($('aioc-status'), usbErrorText(e, dev), 'error');
   }
   aiocButtons();
 }
@@ -533,7 +554,7 @@ $('eq-check').addEventListener('click', async () => {
   } catch (e) {
     show(
       $('eq-status'),
-      `Could not read the AIOC: ${errText(e)}. On Linux this needs the udev rule in step 2; elsewhere, unplug and replug the AIOC and try again.`,
+      `Could not read the AIOC: ${errText(e)}. On Linux this needs the udev rule in the Linux only box in step 2; elsewhere, unplug and replug the AIOC and try again.`,
       'error',
     );
   } finally {

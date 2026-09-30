@@ -97,7 +97,7 @@ export function serialErrorText(e) {
   if (e?.name === 'NetworkError' || /Failed to open/i.test(t)) {
     return (
       'Could not open the port. Close any other program using it (CHIRP, a soundmodem, Direwolf, k5ctl) and try again. ' +
-      'On Linux your user may need to be in the dialout group.'
+      'On Linux, add the udev rule from the "Linux only" box in step 2 (it covers the serial port too), or add your user to the dialout group and log in again.'
     );
   }
   if (e?.name === 'SecurityError') return 'The browser blocked access to serial ports on this page.';

@@ -83,7 +83,18 @@
 <section id="step2" class="card step">
   <h2><span class="num">2</span> Flash the AIOC</h2>
   <p>The packet AIOC firmware adds a transmit equaliser that makes a UV-K5's audio flat, which the radio firmware's default deviation expects. Flashing it <b>resets the AIOC's settings to the defaults</b>: PTT from the CM108 (HID) interface, and from the serial port with DTR high and RTS low. To go back to the stock AIOC firmware and settings, use the <a href="https://g1lro.github.io/aioc-toolkit/" target="_blank" rel="noopener">AIOC toolkit</a>'s flasher (the Flash Firmware tab).</p>
-  <div class="note">
+  <div class="note" id="linux-note">
+    <p><b>Linux only, once per computer:</b> the browser needs permission to open the AIOC, which shows up as two USB devices here (the AIOC itself, 1209:7388, and after the switch its bootloader, STM32 BOOTLOADER, 0483:df11). Run this in a terminal, then unplug and replug the AIOC:</p>
+    <pre>sudo tee /etc/udev/rules.d/70-aioc.rules &gt;/dev/null &lt;&lt;'RULES'
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="7388", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="df11", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="7388", TAG+="uaccess"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="7388", TAG+="uaccess"
+RULES
+sudo udevadm control --reload-rules &amp;&amp; sudo udevadm trigger</pre>
+    <p>The file name must start with a number below 73 (70 here): later rules are too late to grant access, so a rule named 99-something silently does nothing.</p>
+  </div>
+  <div class="note" id="windows-note">
     <p><b>Windows only, once per computer:</b> open <a href="https://zadig.akeo.ie/" target="_blank" rel="noopener">Zadig</a>, choose <b>Options, List All Devices</b>, pick <b>AIOC DFU Runtime (Interface 6)</b> (USB ID 1209 7388 06), check the driver on the right is <b>WinUSB</b>, and click <b>Install Driver</b>.</p>
     <p class="small">If the picker then shows no "STM32 BOOTLOADER" after the switch, do the same in Zadig for it.</p>
     <p class="small">Mac, Linux and ChromeOS need nothing extra (Linux: see the permissions note below).</p>
@@ -102,13 +113,6 @@
   </div>
   <div id="aioc-status" class="status" role="status" aria-live="polite"></div>
   <progress id="aioc-progress" max="1" value="0" hidden></progress>
-  <details>
-    <summary>Linux permissions</summary>
-    <p>The browser needs permission to use the AIOC's USB and HID devices. Save this as <code>/etc/udev/rules.d/99-aioc.rules</code>, then unplug and replug the AIOC:</p>
-    <pre>SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="7388", TAG+="uaccess"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="7388", TAG+="uaccess"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="df11", TAG+="uaccess"</pre>
-  </details>
   <details>
     <summary>Use a file from your computer (or restore a backup)</summary>
     <p>A full AIOC image or a backup saved here. The page checks it looks like AIOC firmware.</p>
