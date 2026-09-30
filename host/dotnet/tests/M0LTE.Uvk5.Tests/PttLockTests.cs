@@ -82,15 +82,15 @@ public class PttLockTests
         var time = new FakeTimeProvider();
         await using var rig = await Rig.StartAsync(time: time, simOptions: new SimulatedRadioOptions { DeferralResumeDelay = TimeSpan.Zero });
         await rig.Radio.SubscribeAsync(new EventSubscription { Events = RadioEvents.TxStart | RadioEvents.TxEnd }, Ct);
-        var events = new List<RadioEvent>();
-        rig.Radio.EventReceived += (_, e) => events.Add(e);
+        var events = new System.Collections.Concurrent.ConcurrentQueue<RadioEvent>();   // raised on the reader thread
+        rig.Radio.EventReceived += (_, e) => events.Enqueue(e);
         time.Advance(TimeSpan.FromMilliseconds(8));
         rig.Sim.PressPtt();                       // 12 ms of lock left: a late key
         Assert.Empty(rig.Sim.Transmissions);
         time.Advance(TimeSpan.FromMilliseconds(12));
         Assert.True(Assert.Single(rig.Sim.Transmissions).LateKey);
         rig.Sim.ReleasePtt();
-        await Rig.Until(() => events.OfType<TxEndEvent>().Any());
+        await Rig.Until(() => events.OfType<TxStartEvent>().Any() && events.OfType<TxEndEvent>().Any());
         var start = events.OfType<TxStartEvent>().Single();
         Assert.True(start.LateKey);
         Assert.Equal(12, start.LockDelay.TotalMilliseconds);
