@@ -6,6 +6,10 @@
     <RootNamespace>K5Ctl</RootNamespace>
     <IsPackable>false</IsPackable>
     <IsAotCompatible>true</IsAotCompatible>
+    <!-- dotnet publish -c Release -r <rid>, on that platform: one native executable (NativeAOT,
+         self-contained). Serial port access also needs libSystem.IO.Ports.Native.so beside it. -->
+    <PublishAot>true</PublishAot>
+    <PublishReferencesDocumentationFiles>false</PublishReferencesDocumentationFiles>
   </PropertyGroup>
 
   <ItemGroup>

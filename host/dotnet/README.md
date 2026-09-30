@@ -182,7 +182,7 @@ k5ctl -p /dev/ttyACM0 flash firmware.packed.bin                 # dry run
 k5ctl --sim v2 watch --seconds 10                               # no radio needed
 ```
 
-`K5_PORT` can stand in for `-p`. `-v` traces every frame. A NativeAOT build: `dotnet publish host/dotnet/tools/k5ctl -c Release -r linux-arm64 -p:PublishAot=true`.
+`K5_PORT` can stand in for `-p`. `-v` traces every frame. A native build (NativeAOT, self-contained, about 3.4 MB): `dotnet publish host/dotnet/tools/k5ctl -c Release -r linux-x64`, run on the platform you are building for (NativeAOT does not cross-compile; use `linux-arm64` on a Pi). Keep `libSystem.IO.Ports.Native.so` from the publish folder beside `k5ctl`: serial ports need it, `--sim` does not.
 
 ## Building and testing
 
