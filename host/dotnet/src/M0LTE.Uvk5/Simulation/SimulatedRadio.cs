@@ -1056,7 +1056,6 @@ public sealed partial class SimulatedRadio : IDisposable
 
     private void EndTx(TxEndReason reason)
     {
-        _transmitting = false;
         Cancel(ref _txTimeoutTimer);
         uint now = NowMs();
         uint releaseMs = now;
@@ -1066,9 +1065,12 @@ public sealed partial class SimulatedRadio : IDisposable
         _transmissions[^1] = last with { EndedAtMs = off, EndReason = reason };
         if (_options.Firmware == FirmwareKind.PacketV2)
         {
+            // Stored while still counted as transmitting, so it is held with DEFERRED and goes out
+            // after the release, as the firmware does.
             StoreEvent(3, new WireWriter().U32(_txStartMs).U32(releaseMs).U32(rxReady).U8((int)reason).U16(0xFFFF).U16(0xFFFF).U16(0).ToArray(), atMs: off);
         }
 
+        _transmitting = false;
         UpdateBusy(BusyCause.None);
     }
 

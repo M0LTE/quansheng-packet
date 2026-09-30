@@ -193,7 +193,7 @@ public class PttLockTests
 
         Assert.Equal(TxEndReason.Released, end.Reason);
         Assert.True(start.IsDeferred);        // held while PTT was down
-        Assert.False(end.IsDeferred);         // generated after the release
+        Assert.True(end.IsDeferred);          // as the firmware's vector: both go after the release
     }
 
     [Fact]
