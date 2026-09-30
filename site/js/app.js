@@ -12,11 +12,14 @@ import { SerialSession, serialErrorText } from './serial.js';
 import { detachToBootloader, DfuseDevice, AIOC_RUNTIME, STM32_BOOTLOADER, AIOC_FLASH_START, AIOC_FLASH_SIZE, checkAiocImage } from './dfu.js';
 import { AIOC_HID, readEqState } from './aioc-hid.js';
 import { LevelMeter, levelVerdict, barFraction } from './level-meter.js';
+import { MessageLog, issueUrl } from './report.js';
 
 const $ = (id) => document.getElementById(id);
+const messageLog = new MessageLog();
 function show(el, text, level = '') {
   el.textContent = text;
   el.className = `status ${level}`;
+  messageLog.add(el.id || 'page', level, text);
 }
 const errText = (e) => e?.message || String(e);
 let busyCount = 0; // flashes in progress, for the leave-page warning
@@ -354,6 +357,7 @@ async function checkNewFirmware({ auto = false } = {}) {
         await sleep(1000);
       }
     }
+    k5.lastVersion = h.version;
     const want = radioFw.image.version.replace(/^\*/, '');
     if (h.version === want) {
       show($('k5-status'), `The radio runs ${h.version}${h.pkt2 ? ` (protocol ${h.protocolText})` : ''}. Step 1 is done.`, 'ok');
@@ -851,3 +855,16 @@ if (!LevelMeter.supported()) $('meter-toggle').disabled = true;
 window.addEventListener('pagehide', () => meter.stop());
 
 loadFiles();
+
+// ------------------------------------------------------------------ report a problem
+$('report').addEventListener('click', (ev) => {
+  const uaPlatform = navigator.userAgentData?.platform || navigator.platform || '';
+  ev.currentTarget.href = issueUrl({
+    userAgent: navigator.userAgent,
+    platform: uaPlatform,
+    support,
+    versions: { radio: radioFw?.label, aioc: aiocFw?.label },
+    radio: k5?.lastVersion || '',
+    log: messageLog.lines(),
+  });
+});
