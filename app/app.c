@@ -313,7 +313,7 @@ void APP_TimeSlice10ms(void)
 			MENU_ShowCurrentSetting();
 		gUpdateStatus  = true;
 		gUpdateDisplay = true;
-		PARAMS_RefreshStored();
+		PARAMS_RefreshStored();   // the 350 MHz band setting decides which frequency counts as stored
 		PARAMS_Changed(PSRC_RELOAD);
 	}
 

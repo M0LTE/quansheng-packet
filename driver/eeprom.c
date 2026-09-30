@@ -48,6 +48,7 @@ bool EEPROM_IsWritable(uint16_t Address)
 }
 
 uint32_t gEepromBlocksWritten;
+bool     gEepromChanged;
 
 void EEPROM_WriteBuffer(uint16_t Address, const void *pBuffer)
 {
@@ -68,6 +69,7 @@ void EEPROM_WriteBuffer(uint16_t Address, const void *pBuffer)
 	I2C_WriteBuffer(pBuffer, 8);
 	I2C_Stop();
 	gEepromBlocksWritten++;
+	gEepromChanged = true;
 
 	// give the EEPROM time to burn the data in (apparently takes 5ms)
 	SYSTEM_DelayMs(8);

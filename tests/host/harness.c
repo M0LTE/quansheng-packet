@@ -68,9 +68,12 @@ int I2C_Write(uint8_t Data)
 	return 0;
 }
 
+int eeprom_reads;
+
 int I2C_ReadBuffer(void *pBuffer, uint8_t Size)
 {
 	uint8_t *p = pBuffer;
+	eeprom_reads++;
 	for (unsigned i = 0; i < Size; i++) p[i] = eeprom[i2c_addr++ & 0x1FFF];
 	return 0;
 }

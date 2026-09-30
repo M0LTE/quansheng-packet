@@ -26,6 +26,12 @@
 
 extern uint32_t gEepromBlocksWritten;   // 8-byte blocks actually written
 
+// Set on every block actually written, whoever wrote it (keypad, menu,
+// protocol, legacy UART). The one place that caches EEPROM contents, the
+// protocol's stored parameter view (app/params.c), clears it when it
+// re-reads, so no save path has to remember to tell it.
+extern bool gEepromChanged;
+
 bool EEPROM_IsWritable(uint16_t Address);
 void EEPROM_ReadBuffer(uint16_t Address, void *pBuffer, uint8_t Size);
 void EEPROM_WriteBuffer(uint16_t Address, const void *pBuffer);

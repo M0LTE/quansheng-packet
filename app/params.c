@@ -24,6 +24,7 @@
 #include "driver/bk4819.h"
 #include "driver/eeprom.h"
 #include "frequencies.h"
+#include "functions.h"
 #include "misc.h"
 #include "packet.h"
 #include "ptt.h"
@@ -51,7 +52,7 @@ static struct {
 	EEPROM_Config_t e;
 	V2_Config_t     v;
 	VFO_Info_t      vfo;
-} gStored;                            // what a power-on would load
+} gStored;                            // what a power-on would load (StoredView)
 
 static uint32_t gLast[P_LAST + 1];    // values at the last PARAMS_Changed
 
@@ -119,14 +120,30 @@ static uint32_t Live(uint8_t id)
 	return Value(id, &gEeprom, &gV2, gVfo);
 }
 
+// gStored follows every EEPROM write, from any source: the driver flags
+// each block it actually writes (gEepromChanged), and the view is re-read
+// here, the next time it is asked for. So a keypad or menu save needs no
+// call of its own, a save of several blocks is re-read once, and nothing
+// is read unless a host asks. Never during a transmission (nothing is
+// written then either, and every command frame ends one first): the view
+// stays as it was and is re-read after.
+static void StoredView(void)
+{
+	if (gEepromChanged && gCurrentFunction != FUNCTION_TRANSMIT)
+		PARAMS_RefreshStored();
+}
+
 static uint32_t Stored(uint8_t id)
 {
+	StoredView();
 	return Value(id, &gStored.e, &gStored.v, &gStored.vfo);
 }
 
 uint8_t PARAMS_Get(uint8_t id, bool stored, uint8_t *out)
 {
 	const uint8_t size = PARAMS_Size(id);
+	if (stored)
+		StoredView();
 	if (id == P_BUSY_SQL_RAW)
 		SqlRaw(stored ? &gStored.vfo : gVfo, out);
 	else {
@@ -140,6 +157,8 @@ uint8_t PARAMS_Get(uint8_t id, bool stored, uint8_t *out)
 void PARAMS_RefreshStored(void)
 {
 	uint8_t d[16], t[8];
+
+	gEepromChanged = false;
 
 	EEPROM_ReadBuffer(SETTINGS_PKT_BLOCK, d, 16);
 	const bool valid = d[0] == SETTINGS_PKT_VERSION;
@@ -496,7 +515,6 @@ done:
 		gPSub  = false;
 		if (gSettingsBlockValid)
 			gV2.valid = ReadByte(SETTINGS_V2_BLOCK) == SETTINGS_V2_VERSION;
-		PARAMS_RefreshStored();
 	}
 }
 
