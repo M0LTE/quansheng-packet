@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>k5ctl</AssemblyName>
+    <RootNamespace>K5Ctl</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/M0LTE.Uvk5/M0LTE.Uvk5.csproj" />
+  </ItemGroup>
+
+</Project>

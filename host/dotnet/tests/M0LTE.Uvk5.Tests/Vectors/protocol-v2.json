@@ -1,0 +1,322 @@
+{
+  "format": "packet-fw protocol v2 golden vectors, version 1",
+  "spec": "docs/protocol-v2.md",
+  "generator": "tests/host/test_v2.c on the real firmware code",
+  "firmware_version_string": "PKTFW test",
+  "vectors": [
+    {
+      "name": "hello_obfuscated",
+      "state": "fresh boot (obfuscated, the power-on mode); legacy hello 0x0514, session 0x12345678, obfuscated (raw id 02 69)",
+      "request_mode": "obfuscated",
+      "request": "ABCD0800026910E656C7395204A8DCBA",
+      "response_mode": "obfuscated",
+      "response": "ABCD2800036930E67EDA59067615A1256077E980166C14E62E910D40717E81721301E980166C14E62E910D40DECADCBA",
+      "frames": [
+        { "id": "0x0515", "crc": "FFFF", "body": "504B544657207465737400000000000000000000504B5432000200000000000000000000" }
+      ]
+    },
+    {
+      "name": "hello_plain",
+      "state": "after hello_obfuscated; legacy hello 0x0514 with raw id bytes 14 05, which switches the radio to plain mode",
+      "request_mode": "plain",
+      "request": "ABCD08001405040078563412259DDCBA",
+      "response_mode": "plain",
+      "response": "ABCD280015052400504B544657207465737400000000000000000000504B5432000200000000000000000000FFFFDCBA",
+      "frames": [
+        { "id": "0x0515", "crc": "FFFF", "body": "504B544657207465737400000000000000000000504B5432000200000000000000000000" }
+      ]
+    },
+    {
+      "name": "get_info",
+      "state": "fresh boot on a blank EEPROM (factory calibration only), plain mode after a hello; lock 20 ms",
+      "request_mode": "plain",
+      "request": "ABCD050000500100012A52DCBA",
+      "response_mode": "plain",
+      "response": "ABCD300080502C00010014000002504B544657207465737400000000000007070000FEFFFF01FF1F0000781414001E0008000005D726DCBA",
+      "frames": [
+        { "id": "0x5080", "crc": "real", "body": "010014000002504B544657207465737400000000000007070000FEFFFF01FF1F0000781414001E0008000005" }
+      ]
+    },
+    {
+      "name": "get_info_obfuscated",
+      "state": "as get_info, but obfuscated mode (after an obfuscated hello)",
+      "request_mode": "obfuscated",
+      "request": "ABCD0500163C15E62CD86FDCBA",
+      "response_mode": "obfuscated",
+      "response": "ABCD3000963C38E62C9119402137850B4745BEA0620967922E910D402135D2471303177FE96DEBF92E9175543535CB401B03E985F582DCBA",
+      "frames": [
+        { "id": "0x5080", "crc": "real", "body": "020014000002504B544657207465737400000000000007070000FEFFFF01FF1F0000781414001E0008000005" }
+      ]
+    },
+    {
+      "name": "unknown_command",
+      "state": "any state; 0x500D is not defined",
+      "request_mode": "plain",
+      "request": "ABCD05000D500100079613DCBA",
+      "response_mode": "plain",
+      "response": "ABCD09008D500500070114000081DDDCBA",
+      "frames": [
+        { "id": "0x508D", "crc": "real", "body": "0701140000" }
+      ]
+    },
+    {
+      "name": "bad_length",
+      "state": "GET_PARAMS with a 121-byte body (tag included): over the 120-byte limit",
+      "request_mode": "plain",
+      "request": "ABCD7D00045079000B0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000006543DCBA",
+      "response_mode": "plain",
+      "response": "ABCD0900845005000B02140000AA0FDCBA",
+      "frames": [
+        { "id": "0x5084", "crc": "real", "body": "0B02140000" }
+      ]
+    },
+    {
+      "name": "get_status",
+      "state": "fresh boot, blank EEPROM; REG_67=0x0123 REG_65=0x2F49 REG_63=0x005B REG_7E=0xB7C0; battery 7.80 V level 5; clock 1000 ms",
+      "request_mode": "plain",
+      "request": "ABCD050001500100106BFADCBA",
+      "response_mode": "plain",
+      "response": "ABCD2A008150260010001400E80300000079A10800180000000156082301495B8305781E1400FFFFE8030000CA1EE062DCBA",
+      "frames": [
+        { "id": "0x5081", "crc": "real", "body": "10001400E80300000079A10800180000000156082301495B8305781E1400FFFFE8030000CA1E" }
+      ]
+    },
+    {
+      "name": "subscribe",
+      "state": "fresh boot; SUBSCRIBE mask CD|RX_BURST, no heartbeat, no stream; ring empty",
+      "request_mode": "plain",
+      "request": "ABCD0F0002500B0033030000000000000000001C52DCBA",
+      "response_mode": "plain",
+      "response": "ABCD100082500C003300140000000000E8030000E007DCBA",
+      "frames": [
+        { "id": "0x5082", "crc": "real", "body": "3300140000000000E8030000" }
+      ]
+    },
+    {
+      "name": "event_cd_open",
+      "state": "event, no request: squelch opened at t=1031 ms; REG_67=200 REG_65=0x0010 REG_63=0x0020; first stored event after SUBSCRIBE",
+      "request_mode": "plain",
+      "request": "",
+      "response_mode": "plain",
+      "response": "ABCD1200C0500E0000000704000010010101C8001020E589DCBA",
+      "frames": [
+        { "id": "0x50C0", "crc": "real", "body": "00000704000010010101C8001020" }
+      ]
+    },
+    {
+      "name": "event_cd_close_and_rx_burst",
+      "state": "events, no request: the squelch closed 16 ms after opening; RSSI samples 200, 220, 180, 210 at 5 ms; AF amplitude 0x400, 0x400, 0x400, 0x600",
+      "request_mode": "plain",
+      "request": "",
+      "response_mode": "plain",
+      "response": "ABCD1200C0500E0001001704000010000001D2001020194BDCBAABCD2800C15024000200170400001007040000100000000400CA00DC00B40010102020800400060303FF7F01BA6CDCBA",
+      "frames": [
+        { "id": "0x50C0", "crc": "real", "body": "01001704000010000001D2001020" },
+        { "id": "0x50C1", "crc": "real", "body": "0200170400001007040000100000000400CA00DC00B40010102020800400060303FF7F01" }
+      ]
+    },
+    {
+      "name": "event_tx_start_and_end",
+      "state": "events, no request: a late key (12 ms lock delay, busy at the press), 100 ms of TX, released; both sent after the release with DEFERRED",
+      "request_mode": "plain",
+      "request": "",
+      "response_mode": "plain",
+      "response": "ABCD1A00C250160005000B04000002060400000079A108000056080C0003974CDCBAABCD1E00C3501A0006006F040000020B0400006A0400006F04000000970097000A00E198DCBA",
+      "frames": [
+        { "id": "0x50C2", "crc": "real", "body": "05000B04000002060400000079A108000056080C0003" },
+        { "id": "0x50C3", "crc": "real", "body": "06006F040000020B0400006A0400006F04000000970097000A00" }
+      ]
+    },
+    {
+      "name": "event_tx_refused",
+      "state": "event, no request: a press refused with 1234 ms of lock left (reason 1 LOCK)",
+      "request_mode": "plain",
+      "request": "",
+      "response_mode": "plain",
+      "response": "ABCD1200C4500E00070072040000106E04000001D2047146DCBA",
+      "frames": [
+        { "id": "0x50C4", "crc": "real", "body": "070072040000106E04000001D204" }
+      ]
+    },
+    {
+      "name": "event_replay",
+      "state": "six TX_REFUSED events stored and sent (seq 0 to 5); EVENT_REPLAY from seq 2 re-sends four with REPLAY, then the reply",
+      "request_mode": "plain",
+      "request": "ABCD07000B500300210200FD02DCBA",
+      "response_mode": "plain",
+      "response": "ABCD1200C4500E0002000104000011EA030000020000A6CEDCBAABCD1200C4500E0003000104000011EB030000020000A60DDCBAABCD1200C4500E0004000104000011EC030000020000E464DCBAABCD1200C4500E0005000104000011ED030000020000E4A7DCBAABCD0F008B500B002100140002000400000600A447DCBA",
+      "frames": [
+        { "id": "0x50C4", "crc": "real", "body": "02000104000011EA030000020000" },
+        { "id": "0x50C4", "crc": "real", "body": "03000104000011EB030000020000" },
+        { "id": "0x50C4", "crc": "real", "body": "04000104000011EC030000020000" },
+        { "id": "0x50C4", "crc": "real", "body": "05000104000011ED030000020000" },
+        { "id": "0x508B", "crc": "real", "body": "2100140002000400000600" }
+      ]
+    },
+    {
+      "name": "event_heartbeat",
+      "state": "event, no request: SUBSCRIBE HEARTBEAT|RSSI_STREAM, heartbeat 100 ms; first heartbeat 100 ms later, 250 us into the ms, queue empty; idle, RSSI 0x77, battery 7.80 V, lock 0",
+      "request_mode": "plain",
+      "request": "",
+      "response_mode": "plain",
+      "response": "ABCD1700C650130000004C04000018FA0010007700781EFFFF00002562DCBA",
+      "frames": [
+        { "id": "0x50C6", "crc": "real", "body": "00004C04000018FA0010007700781EFFFF0000" }
+      ]
+    },
+    {
+      "name": "event_rssi_stream",
+      "state": "event, no request: RSSI stream every 10 ms in batches of 3; RSSI 0x77, noise 0x49, glitch 0x5B",
+      "request_mode": "plain",
+      "request": "",
+      "response_mode": "plain",
+      "response": "ABCD1900C5501500000057040000180A037700495B7700495B7700495BA3C2DCBA",
+      "frames": [
+        { "id": "0x50C5", "crc": "real", "body": "000057040000180A037700495B7700495B7700495B" }
+      ]
+    },
+    {
+      "name": "get_params_all",
+      "state": "fresh boot, blank EEPROM (RX gain from the factory byte 0x1F8E = 45); GET_PARAMS flags 0, no ids: every parameter, live",
+      "request_mode": "plain",
+      "request": "ABCD060004500200400037F3DCBA",
+      "response_mode": "plain",
+      "response": "ABCD4600845042004000140000010079A10802000300045608055607061F0701082D090F0A1E0B050C050D010E020F14001001116E0012680013141420407F40804015FF160117031800A5E2DCBA",
+      "frames": [
+        { "id": "0x5084", "crc": "real", "body": "4000140000010079A10802000300045608055607061F0701082D090F0A1E0B050C050D010E020F14001001116E0012680013141420407F40804015FF160117031800" }
+      ]
+    },
+    {
+      "name": "get_params_stored",
+      "state": "fresh boot, blank EEPROM; GET_PARAMS flags 1 (STORED) for SQL_RAW, SQUELCH, RX_GAIN: SQL_RAW is RAM-only and omitted",
+      "request_mode": "plain",
+      "request": "ABCD09000450050041011407089D64DCBA",
+      "response_mode": "plain",
+      "response": "ABCD0D008450090041001400010701082DB7D2DCBA",
+      "frames": [
+        { "id": "0x5084", "crc": "real", "body": "41001400010701082D" }
+      ]
+    },
+    {
+      "name": "set_params",
+      "state": "fresh boot; SET_PARAMS flags 0: FREQ_HZ 433.5 MHz, SQUELCH 3, DEV_WIDE 0x0800 (RAM)",
+      "request_mode": "plain",
+      "request": "ABCD100005500C0044000160AFD61907030400088951DCBA",
+      "response_mode": "plain",
+      "response": "ABCD130085500F0044001400050160AFD61907030400081D08DCBA",
+      "frames": [
+        { "id": "0x5085", "crc": "real", "body": "44001400050160AFD6190703040008" }
+      ]
+    },
+    {
+      "name": "set_params_range",
+      "state": "after set_params: SQUELCH 5 with MIC_GAIN 32 (out of range): RANGE, detail 0x06, nothing applied",
+      "request_mode": "plain",
+      "request": "ABCD0A0005500600460007050620749DDCBA",
+      "response_mode": "plain",
+      "response": "ABCD0900855005004604140006C493DCBA",
+      "frames": [
+        { "id": "0x5085", "crc": "real", "body": "4604140006" }
+      ]
+    },
+    {
+      "name": "save_params_revert",
+      "state": "settings block valid with MIC_GAIN 12 stored; RAM MIC_GAIN 30 and AFC 0; SAVE_PARAMS op 1 (REVERT)",
+      "request_mode": "plain",
+      "request": "ABCD060006500200670127F7DCBA",
+      "response_mode": "plain",
+      "response": "ABCD0C0086500800670028004000400086EBDCBA",
+      "frames": [
+        { "id": "0x5086", "crc": "real", "body": "6700280040004000" }
+      ]
+    },
+    {
+      "name": "event_boot",
+      "state": "event, no request, obfuscated (power-on mode): BOOT at power-on with CD|BOOT persisted as the default mask",
+      "request_mode": "obfuscated",
+      "request": "",
+      "response_mode": "obfuscated",
+      "response": "ABCD0E00DA3C1EE62E91E5432135C54011036470DCBA",
+      "frames": [
+        { "id": "0x50CC", "crc": "real", "body": "0000E803000010000200" }
+      ]
+    },
+    {
+      "name": "time_sync",
+      "state": "clock 1000 ms and 321 us when the request completed and the reply started; output queue empty (exact)",
+      "request_mode": "plain",
+      "request": "ABCD0D00035009007001020304050607080582DCBA",
+      "response_mode": "plain",
+      "response": "ABCD1D0083501900700014000102030405060708E80300004101E80300004101014210DCBA",
+      "frames": [
+        { "id": "0x5083", "crc": "real", "body": "700014000102030405060708E80300004101E8030000410101" }
+      ]
+    },
+    {
+      "name": "reg_read",
+      "state": "registers hold 0x1000 + address; REG_READ 0x5C, 4 registers, flags 0 (0x5F not read, returns 0)",
+      "request_mode": "plain",
+      "request": "ABCD080008500400805C0400BFC8DCBA",
+      "response_mode": "plain",
+      "response": "ABCD120088500E00800014005C045C105D105E1000008B12DCBA",
+      "frames": [
+        { "id": "0x5088", "crc": "real", "body": "800014005C045C105D105E100000" }
+      ]
+    },
+    {
+      "name": "reg_write",
+      "state": "REG_WRITE two registers: REG_47 = 0x6240, REG_70 = 0x8000",
+      "request_mode": "plain",
+      "request": "ABCD0C00095008008502474062700080A1D8DCBA",
+      "response_mode": "plain",
+      "response": "ABCD0F0089500B0085001400024740627000804915DCBA",
+      "frames": [
+        { "id": "0x5089", "crc": "real", "body": "8500140002474062700080" }
+      ]
+    },
+    {
+      "name": "reg_override_add",
+      "state": "REG_OVERRIDE ADD one RX entry (REG_2B & 0xFFF8 | 0), expiry 2 s, no key-up bound",
+      "request_mode": "plain",
+      "request": "ABCD10000A500C00900102000001022BF8FF000014BADCBA",
+      "response_mode": "plain",
+      "response": "ABCD13008A500F0090001400010200FF022BF8FF000000AA29DCBA",
+      "frames": [
+        { "id": "0x508A", "crc": "real", "body": "90001400010200FF022BF8FF000000" }
+      ]
+    },
+    {
+      "name": "level_tone_raw",
+      "state": "LEVEL_TONE 1000 Hz, mode 1 (raw), gain code 64, 500 ms",
+      "request_mode": "plain",
+      "request": "ABCD0C0007500800A0E803014000F401469BDCBA",
+      "response_mode": "plain",
+      "response": "ABCD0B0087500700A0001400405428DFC5DCBA",
+      "frames": [
+        { "id": "0x5087", "crc": "real", "body": "A0001400405428" }
+      ]
+    },
+    {
+      "name": "level_tone_uncalibrated",
+      "state": "LEVEL_TONE mode 0 (deviation) 3000 Hz without the calibration byte 0x1D6F: UNSUPPORTED",
+      "request_mode": "plain",
+      "request": "ABCD0C0007500800A9E80300B80BE8033DE4DCBA",
+      "response_mode": "plain",
+      "response": "ABCD090087500500A908140000A224DCBA",
+      "frames": [
+        { "id": "0x5087", "crc": "real", "body": "A908140000" }
+      ]
+    },
+    {
+      "name": "get_counters",
+      "state": "after a plain hello, GET_INFO and an unknown 0x5011: frames 4, non-OK replies 1",
+      "request_mode": "plain",
+      "request": "ABCD06000C500200B000B4EDDCBA",
+      "response_mode": "plain",
+      "response": "ABCD41008C503D00B00014000E0400000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000CF53DCBA",
+      "frames": [
+        { "id": "0x508C", "crc": "real", "body": "B00014000E0400000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000" }
+      ]
+    }
+  ]
+}
