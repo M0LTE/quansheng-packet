@@ -11,3 +11,6 @@ compile_commands.json
 k5_eeprom.raw
 .claude/
 /.build-options
+
+# setup site: firmware files the Pages workflow downloads
+/site/files/
