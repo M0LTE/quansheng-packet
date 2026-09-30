@@ -81,7 +81,7 @@ label.small { display: inline-flex; gap: .35rem; align-items: center; color: var
 
 .note { padding: .7rem .9rem; border-radius: 7px; background: var(--code); margin: 0 0 1rem; }
 .status:empty { display: none; }
-.status { padding: .7rem .9rem; border-radius: 7px; margin: .6rem 0; background: var(--code); white-space: pre-line; }
+.status { padding: .7rem .9rem; border-radius: 7px; margin: .6rem 0; background: var(--code); white-space: pre-line; overflow-wrap: anywhere; }
 .ok { background: var(--ok-bg); color: var(--ok); }
 .warn { background: var(--warn-bg); color: var(--warn); }
 .error { background: var(--err-bg); color: var(--err); }

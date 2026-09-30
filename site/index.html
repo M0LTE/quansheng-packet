@@ -33,16 +33,28 @@
 <section id="step1" class="card step">
   <h2><span class="num">1</span> Flash the radio</h2>
   <p>This puts the packet firmware on the radio. The first time you flash it over other firmware, it starts factory-fresh (144.800 MHz, low power, wide). Later updates keep your settings. The radio's factory calibration is always kept.</p>
+  <h3>Back up your radio (recommended)</h3>
+  <p>This saves the radio's memory to a file: its settings and its factory calibration, which is unique to this radio. The packet firmware never changes the calibration, but keep the file safe in case you go back to the stock firmware.</p>
   <ol>
-    <li>Switch the radio <b>off</b> and plug the AIOC into the radio and the computer.</li>
+    <li>Plug the AIOC into the radio and the computer, and switch the radio on <b>normally</b> (not in flash mode).</li>
+    <li>Press <b>Back up</b> and pick the AIOC's serial port ("All-In-One-Cable" or similar). It takes a few seconds, then your browser saves the file.</li>
+  </ol>
+  <div class="actions">
+    <button id="bk-start">Back up</button>
+    <label class="small"><input type="checkbox" id="k5-showall"> My cable is not an AIOC (show all serial ports)</label>
+  </div>
+  <div id="bk-status" class="status" role="status" aria-live="polite"></div>
+  <progress id="bk-progress" max="1" value="0" hidden></progress>
+  <h3>Flash</h3>
+  <ol>
+    <li>Switch the radio <b>off</b>, with the AIOC plugged into the radio and the computer.</li>
     <li><b>Hold PTT</b> while you switch the radio on. The torch LED lights and the screen stays blank: this is flash mode. Let go of PTT.</li>
-    <li>Press <b>Connect</b> and pick the AIOC's serial port ("All-In-One-Cable" or similar).</li>
+    <li>Press <b>Connect</b>. If the page asks for a port, pick the AIOC's ("All-In-One-Cable" or similar).</li>
   </ol>
   <div class="actions">
     <button id="k5-connect">Connect</button>
     <button id="k5-flash" disabled>Flash</button>
     <button id="k5-cancel" class="secondary" hidden>Cancel</button>
-    <label class="small"><input type="checkbox" id="k5-showall"> My cable is not an AIOC (show all serial ports)</label>
   </div>
   <div id="k5-status" class="status" role="status" aria-live="polite"></div>
   <progress id="k5-progress" max="1" value="0" hidden></progress>
@@ -58,7 +70,8 @@
   <details>
     <summary>If something goes wrong</summary>
     <ul>
-      <li><b>No answer from the radio:</b> push the plugs fully into the radio (they are stiff), check the torch LED is on, and try Connect again. The radio sits in flash mode until you switch it off.</li>
+      <li><b>The backup gets no answer:</b> the radio must be switched on normally, not in flash mode. Push the plugs fully into the radio and press Back up again.</li>
+      <li><b>No answer from the radio when flashing:</b> push the plugs fully into the radio (they are stiff), check the torch LED is on, and try Connect again. The radio sits in flash mode until you switch it off.</li>
       <li><b>Could not open the port:</b> close any other program using it (CHIRP, a soundmodem, Direwolf). On Linux, add yourself to the <code>dialout</code> group and log in again.</li>
       <li><b>Stopped part way:</b> nothing is lost. Put the radio back in flash mode and flash again; the bootloader cannot be overwritten.</li>
       <li><b>A different bootloader version:</b> the page only flashes radios with bootloader 2.00.06, the one this firmware is tested with, and refuses before sending anything.</li>
@@ -197,7 +210,7 @@ TXDELAY 5</pre>
   <ul>
     <li><a href="https://github.com/M0LTE/quansheng-packet" target="_blank" rel="noopener">quansheng-packet</a>: the radio firmware, its <a href="https://github.com/M0LTE/quansheng-packet/releases" target="_blank" rel="noopener">releases</a>, keys, menu and how it works.</li>
     <li><a href="https://github.com/M0LTE/aioc-packet" target="_blank" rel="noopener">aioc-packet</a>: the AIOC firmware and its <a href="https://github.com/M0LTE/aioc-packet/releases" target="_blank" rel="noopener">releases</a>.</li>
-    <li>Going back: flash the stock firmware (or another) the same way. This page's flashers take any file in the "Use a file" boxes, including an AIOC backup.</li>
+    <li>Going back: flash the stock firmware (or another) the same way, and keep your radio backup from step 1. This page's flashers take any file in the "Use a file" boxes, including an AIOC backup.</li>
   </ul>
   <p class="muted small">This page runs entirely in your browser. It talks to your radio and AIOC through the browser's serial, USB and HID permissions, which you grant one device at a time; nothing is sent anywhere else. Use at your own risk, as with any firmware.</p>
 </section>

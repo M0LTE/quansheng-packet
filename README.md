@@ -28,7 +28,7 @@ Newer models built on a different processor, such as the UV-K5 V3 and UV-K1, are
 
 ### Flash from your browser (Chrome or Edge)
 
-The [setup page](https://m0lte.github.io/quansheng-packet/) flashes the latest release with its own flasher, then checks the radio's version. Or use armel's UVTools:
+The [setup page](https://m0lte.github.io/quansheng-packet/) first saves a backup of the radio's memory (its settings and factory calibration), then flashes the latest release with its own flasher and checks the radio's version. Or use armel's UVTools:
 
 **[Flash the latest release from your browser](https://armel.github.io/uvtools/?firmwareURL=https://raw.githubusercontent.com/M0LTE/quansheng-packet/flash/latest/quansheng-packet.bin)**
 

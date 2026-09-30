@@ -102,7 +102,8 @@ function cstr(b) {
 }
 
 /**
- * The 0x0515 hello reply body: version char[16], then the PKT2 marker at 20 on v2 firmware.
+ * The 0x0515 hello reply body: version char[16], custom AES key u8, lock screen u8, 2 spare, then
+ * the PKT2 marker at 20 on v2 firmware.
  * kind: 'v2' (packet firmware, protocol v2), 'v1' (packet firmware without v2), 'other'.
  */
 export function parseHelloReply(body) {
@@ -111,7 +112,15 @@ export function parseHelloReply(body) {
   const pkt2 = body.length >= 26 && u32(body, 20) === PKT2_MAGIC;
   const protocol = pkt2 ? u16(body, 24) : 0;
   const kind = pkt2 ? 'v2' : version.startsWith('PKTFW') ? 'v1' : 'other';
-  return { version, pkt2, protocol, protocolText: pkt2 ? `${protocol >> 8}.${protocol & 0xff}` : '', kind };
+  return {
+    version,
+    pkt2,
+    protocol,
+    protocolText: pkt2 ? `${protocol >> 8}.${protocol & 0xff}` : '',
+    kind,
+    customAesKey: body[16] !== 0,
+    lockScreen: body[17] !== 0,
+  };
 }
 
 // ---------------------------------------------------------------- reply header

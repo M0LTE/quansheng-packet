@@ -1,9 +1,11 @@
 // In-page fakes for navigator.serial, navigator.usb, navigator.hid and navigator.mediaDevices, for
-// browser-e2e.js only: the radio (its bootloader, then the firmware answering protocol v2), the
+// browser-e2e.js only: the radio (stock firmware for the backup, its bootloader, then the
+// firmware answering protocol v2), the
 // AIOC runtime and bootloader over WebUSB, the AIOC HID settings interface with the k5-red
 // profile, and the AIOC's sound card input.
 import { encodeLegacyReply, encodePayload, buildPayload, FrameDecoder, fromHex } from '/site/js/k5frame.js';
 import { SimBootloader } from '/site/test/sim-bootloader.js';
+import { SimLegacyRadio } from '/site/test/sim-legacy-radio.js';
 import { FakeAiocRuntime, FakeStm32Bootloader } from '/site/test/fake-usb.js';
 
 const vectors = (await (await fetch('/tests/vectors/protocol-v2.json')).json()).vectors;
@@ -13,11 +15,19 @@ let push = null;
 const toHost = (bytes) => push && push(bytes);
 const log = (window.__simLog = []);
 
-// ---- radio: bootloader first, then the firmware after __powerCycle()
-let mode = 'boot';
-const boot = new SimBootloader({ beaconIntervalMs: 50 });
-boot.link = { receive: (f) => toHost(f) };
-window.__boot = boot;
+// ---- radio: stock firmware first, the bootloader after __intoFlashMode(), then the packet
+// firmware after __powerCycle()
+let mode = 'stock';
+const stock = new SimLegacyRadio({ flavour: 'stock', version: 'k5_2.01.26' });
+stock.link = { receive: (f) => toHost(f) };
+window.__stock = stock;
+let boot = null;
+window.__intoFlashMode = () => {
+  mode = 'boot';
+  boot = new SimBootloader({ beaconIntervalMs: 50 });
+  boot.link = { receive: (f) => toHost(f) };
+  window.__boot = boot;
+};
 const params = new Map([[1, 144800000], [2, 0], [3, 0], [4, 0x856], [5, 0x756]]);
 const dec = new FrameDecoder({ obfuscated: true, maxPayload: 248 });
 let hb = null;
@@ -139,7 +149,7 @@ const port = {
   async open(o) {
     window.__openedWith = o;
     this.readable = new ReadableStream({ start: (c) => (push = (b) => c.enqueue(b)) });
-    this.writable = new WritableStream({ write: (b) => (mode === 'boot' ? boot.fromHost(b) : firmware(b)) });
+    this.writable = new WritableStream({ write: (b) => (mode === 'stock' ? stock.fromHost(b) : mode === 'boot' ? boot.fromHost(b) : firmware(b)) });
   },
   async setSignals(s) {
     window.__signals = s;

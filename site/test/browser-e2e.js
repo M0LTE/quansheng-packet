@@ -4,7 +4,7 @@
 //   PLAYWRIGHT_CORE=/path/to/node_modules/playwright-core CHROME=/path/to/chrome node test/browser-e2e.js
 //
 // Needs site/files/ (the firmware files; see tools/build-manifest.js). Walks all four steps:
-// dry run, flash and check the radio, detach, backup, flash and check the AIOC, read the EQ,
+// back up the radio on stock firmware, dry run, flash and check the radio, detach, backup, flash and check the AIOC, read the EQ,
 // connect, refuse and save a channel, play the level tone and read the level meter, key the
 // radio with its own PTT (the page shows it and sends nothing meanwhile), a refused TX, disconnect.
 import { createRequire } from 'node:module';
@@ -52,9 +52,20 @@ async function waitText(id, re, ms = 20000) {
 await p.goto(`${base}/site/index.html`);
 await waitText('k5-flash', /v1\.0\.1/);
 console.log('1', await text('files-status'));
+const radioDl = p.waitForEvent('download');
+await p.click('#bk-start');
+const rd = await radioDl;
+console.log('1', await waitText('bk-status', /Backup saved/));
+const saved = new Uint8Array(readFileSync(await rd.path()));
+const eeprom = await p.evaluate(() => [Array.from(window.__stock.eeprom), window.__stock.unexpected, window.__stock.received.length]);
+const backupOk = rd.suggestedFilename() === `uvk5-eeprom-k5_2.01.26-${await p.evaluate(() => { const d = new Date(); return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`; })}.bin` &&
+  saved.length === 8192 && eeprom[0].every((x, i) => x === saved[i]) && eeprom[1].length === 0;
+console.log('  ', rd.suggestedFilename(), saved.length, 'bytes, matches the radio and no v2 sent:', backupOk, `(${eeprom[2]} frames)`);
+if (!backupOk) process.exitCode = 1;
+console.log('  opened with', JSON.stringify(await p.evaluate(() => [window.__openedWith, window.__signals])));
+await p.evaluate(() => window.__intoFlashMode());
 await p.click('#k5-connect');
 console.log('1', await waitText('k5-status', /compatible/));
-console.log('  opened with', JSON.stringify(await p.evaluate(() => [window.__openedWith, window.__signals])));
 await p.click('#k5-flash');
 console.log('1', await waitText('k5-status', /Flashed/, 60000));
 console.log('  sim done', await p.evaluate(() => [window.__boot.done, window.__boot.flashVersion, window.__boot.blocks.length]));

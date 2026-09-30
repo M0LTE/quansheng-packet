@@ -5,6 +5,7 @@ import { loadManifest, fetchVerified, sha256Hex } from './manifest.js';
 import { loadImage } from './k5image.js';
 import { FrameLink, K5CancelledError } from './k5link.js';
 import { flashRadio } from './k5flasher.js';
+import { backupEeprom } from './eeprom-backup.js';
 import { RadioClient, IN_FLASH_MODE } from './radio.js';
 import * as v2 from './v2.js';
 import { SerialSession, serialErrorText } from './serial.js';
@@ -31,7 +32,7 @@ window.addEventListener('beforeunload', (ev) => {
 const support = checkSupport();
 $('support').textContent = support.message;
 $('support').className = `note ${support.ok ? 'ok' : 'error'}`;
-if (!support.serial) ['k5-connect', 'radio-connect'].forEach((id) => ($(id).disabled = true));
+if (!support.serial) ['bk-start', 'k5-connect', 'radio-connect'].forEach((id) => ($(id).disabled = true));
 if (!support.usb) ['aioc-detach', 'aioc-connect'].forEach((id) => ($(id).disabled = true));
 if (!support.hid) $('eq-check').disabled = true;
 
@@ -165,10 +166,69 @@ serialUsers.flash = (e) => {
   if (!k5.abort) show($('k5-status'), 'The serial port closed (was the cable unplugged?). Press Connect to start again.', 'warn');
 };
 
-function k5Busy(on) {
+function k5Busy(on, { cancel = true } = {}) {
   $('k5-connect').disabled = on || !support.serial;
-  $('k5-cancel').hidden = !on;
+  $('bk-start').disabled = on || !support.serial;
+  $('k5-cancel').hidden = !on || !cancel;
 }
+
+/** Hands bytes to the browser as a download. */
+function saveFile(bytes, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+}
+
+// The backup: the radio's EEPROM, read with the radio switched on normally. It uses the same
+// serial session as flashing, left open, so Connect below carries on without a second port pick.
+$('bk-start').addEventListener('click', async () => {
+  stopRadio('The radio connection in step 3 was closed so step 1 could use the port.');
+  $('k5-after').hidden = true;
+  $('k5-flash').disabled = true;
+  let s;
+  try {
+    s = await getSerial('flash', $('k5-showall').checked);
+  } catch (e) {
+    const t = serialErrorText(e);
+    if (t) show($('bk-status'), t, 'error');
+    return;
+  }
+  if (!s) return;
+  k5.link = newLink(s);
+  k5.abort = new AbortController();
+  k5Busy(true, { cancel: false }); // a few seconds at most, and it changes nothing
+  const bar = $('bk-progress');
+  bar.hidden = false;
+  bar.value = 0;
+  show($('bk-status'), 'Talking to the radio...');
+  try {
+    const b = await backupEeprom(k5.link, {
+      signal: k5.abort.signal,
+      onProgress: (p) => {
+        bar.max = p.total;
+        bar.value = p.done;
+        if (p.stage === 'reread') show($('bk-status'), 'Two reads differed; reading that part again.', 'warn');
+        else show($('bk-status'), `Reading the radio's memory, twice to be sure: ${Math.round((100 * p.done) / p.total)}%`);
+      },
+    });
+    saveFile(b.data, b.filename);
+    show(
+      $('bk-status'),
+      `Backup saved as ${b.filename} (8 KB, read twice and checked). The radio runs ${b.version || 'firmware that gives no name'}.\n` +
+        `SHA-256: ${b.sha256}\n` +
+        'Keep this file safe. Now flash the radio below.',
+      'ok',
+    );
+  } catch (e) {
+    show($('bk-status'), `${errText(e)}${e instanceof K5CancelledError ? ' No backup was saved.' : ''}`, 'error');
+  } finally {
+    bar.hidden = true;
+    k5.abort = null;
+    k5Busy(false);
+  }
+});
 
 $('k5-connect').addEventListener('click', async () => {
   if (!radioFw) {
@@ -411,11 +471,7 @@ $('aioc-backup').addEventListener('click', async () => {
     const d = new Date();
     const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}-${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
     const name = `aioc-backup-${stamp}.bin`;
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([data], { type: 'application/octet-stream' }));
-    a.download = name;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    saveFile(data, name);
     backupSaved = true;
     show($('aioc-status'), `Backup saved as ${name} (128 KB: the firmware and the AIOC's stored settings). Flashing it back here restores this AIOC exactly.`, 'ok');
   } catch (e) {
