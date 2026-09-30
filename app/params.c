@@ -159,24 +159,26 @@ void PARAMS_RefreshStored(void)
 
 	gEepromChanged = false;
 
-	EEPROM_ReadBuffer(SETTINGS_PKT_BLOCK, d, 16);
-	const bool valid = d[0] == SETTINGS_PKT_VERSION;
-	EEPROM_ReadBuffer(SETTINGS_TIMING, t, 8);
-	if (!valid) {
-		memset(d, 0xFF, sizeof(d));
-		memset(t, 0xFF, sizeof(t));
+	const bool valid = SETTINGS_SignatureValid();
+	memset(d, 0xFF, sizeof(d));
+	memset(t, 0xFF, sizeof(t));
+	if (valid) {
+		EEPROM_ReadBuffer(SETTINGS_PKT_BLOCK, d, 16);
+		EEPROM_ReadBuffer(SETTINGS_TIMING, t, 8);
 	}
 	SETTINGS_Decode(d, t, &gStored.e);
 	if (gStored.e.RX_GAIN > PKT_RX_GAIN_MAX)
 		gStored.e.RX_GAIN = SETTINGS_FactoryRxGain();
-	EEPROM_ReadBuffer(SETTINGS_V2_BLOCK, d, 16);
+	if (valid)
+		EEPROM_ReadBuffer(SETTINGS_V2_BLOCK, d, 16);
 	SETTINGS_DecodeV2(d, valid, &gStored.v);
 
 	// the operating channel as a power-on would load it
-	EEPROM_ReadBuffer(SETTINGS_OPERATING, d, 8);
+	if (valid)
+		EEPROM_ReadBuffer(SETTINGS_OPERATING, d, 8);
 	memset(&gStored.vfo, 0, sizeof(gStored.vfo));
 	if (!valid || !SETTINGS_DecodeOperating(d, &gStored.vfo))
-		SETTINGS_ImportOldFrequency(&gStored.vfo);
+		SETTINGS_DefaultOperating(&gStored.vfo);
 }
 
 static void Snapshot(uint32_t *v)
@@ -420,13 +422,13 @@ void PARAMS_PersistService(bool allowed)
 
 	uint8_t  b[8];
 	uint16_t addr;
-	const bool blockValid = ReadByte(SETTINGS_PKT_BLOCK) == SETTINGS_PKT_VERSION;
+	const bool blockValid = SETTINGS_SignatureValid();
 	const bool v2Valid    = blockValid && ReadByte(SETTINGS_V2_BLOCK) == SETTINGS_V2_VERSION;
 
 	static const uint16_t kAddr[] = { 0x1D00, 0x1D08, SETTINGS_TIMING, SETTINGS_OPERATING, SETTINGS_V2_BLOCK + 8, SETTINGS_V2_BLOCK };
 	addr = kAddr[j];
 	if (!blockValid)
-		goto done;               // the settings block went away meanwhile
+		goto done;               // a host overwrote the signature meanwhile
 	EEPROM_ReadBuffer(addr, b, 8);
 	switch (j) {
 		case J_SET_A:

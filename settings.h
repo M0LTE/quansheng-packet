@@ -31,13 +31,36 @@ enum {
 	OUTPUT_POWER_HIGH
 };
 
-// Packet firmware settings block in EEPROM, in the old DTMF contacts area
-// (unused here). All 16 bytes are this firmware's own. Unless the first byte
-// is the layout version the whole block is ignored (defaults used), so data
-// left there by another firmware is never taken as settings; a single byte
-// that is out of range (0xFF when blank) means "use the default".
+// Default TX power for a factory-fresh radio: low (~0.5 W nominal). Kinder
+// to the PA and the battery on long packet bursts and on a first key-up
+// into an unknown antenna; F then 6, the menu or the protocol raise it.
+#define OUTPUT_POWER_DEFAULT      OUTPUT_POWER_LOW
+
+// This firmware's own EEPROM: the settings family, 0x1D00 to 0x1D6F (the
+// stock firmware's DTMF contacts area, unused here), in 8-byte blocks so
+// each is one UART write. Nothing outside it is ever read as settings, and
+// nothing another firmware saved is ever used: the family is trusted only
+// when the signature block at 0x1D10 holds the magic and this layout.
 //
-//   0x1D00  layout version (1)
+// Without it (first power-on after flashing over any other firmware, v1.0.0
+// of this one included, or a host that overwrote it) the radio loads every
+// default and writes the whole family with those defaults, the signature
+// last, before anything can transmit: it starts as a factory-fresh radio.
+// The factory calibration (0x1E00 up) is read, never written.
+//
+//   0x1D10  'P' 'K' 'F' 'W'
+//   0x1D14  layout version (2)
+//   0x1D15  reserved (0xFF, 3 bytes)
+#define SETTINGS_SIGNATURE        0x1D10u
+#define SETTINGS_LAYOUT           2u
+#define SETTINGS_FAMILY_START     0x1D00u
+#define SETTINGS_FAMILY_END       0x1D70u
+
+// Settings, 16 bytes at 0x1D00. A single byte that is out of range (0xFF
+// when blank) means "use the default".
+//
+//   0x1D00  reserved: was the layout version (1) until v1.0.0; ignored,
+//           written 0xFF
 //   0x1D01  busy detector level, 1 to 9 (default 1): which row of the
 //           factory squelch tables the chip's carrier detector uses. There
 //           is no squelch: it never mutes the audio. (Until 30 September
@@ -46,7 +69,8 @@ enum {
 //   0x1D03  reserved: was the mic gain (retired, ignored, written 0xFF)
 //   0x1D04  wide deviation, REG_40<11:0>, u16 little-endian, at most 0xA7F
 //   0x1D06  narrow deviation, REG_40<11:0>, u16 little-endian, at most 0xA7F
-//   0x1D08  RX AF gain 2, REG_48<9:4>, 0 to 63
+//   0x1D08  RX AF gain 2, REG_48<9:4>, 0 to 63 (default: the factory
+//           calibration at 0x1F8E)
 //   0x1D09  RX AF DAC gain, REG_48<3:0>, 0 to 15
 //   0x1D0A  backlight time, 0 (off) to 7 (always on)
 //   0x1D0B  reserved: was the battery type (retired, ignored, written 0xFF;
@@ -54,19 +78,15 @@ enum {
 //   0x1D0C  keypad lock, 0 or 1
 //   0x1D0D  reserved (0xFF)
 //
-// The radio reads this block at power-on, and again (with the channel
-// data) about 1 to 1.5 s after the last UART EEPROM write of a session.
+// The radio reads the family at power-on, and again about 1 s after the
+// last UART EEPROM write of a session.
 #define SETTINGS_PKT_BLOCK        0x1D00u
-#define SETTINGS_PKT_VERSION      1u
 
-// 0x1D10..0x1D4F is reserved: until 2026-09-30 it held a stored register
-// override table. Nothing reads or writes it any more; a radio that ran an
-// older build may still have entries there, so a future use needs its own
-// layout version byte.
+// 0x1D18..0x1D4F is reserved, 0xFF: until 2026-09-30 0x1D10..0x1D4F held a
+// stored register override table. The first power-on writes it blank.
 
-// Key-up and key-down timing, 8 bytes at 0x1D50,
-// used only with a valid settings block. One 8-byte UART
-// write changes all of it; the menu does not show it.
+// Key-up and key-down timing, 8 bytes at 0x1D50. One 8-byte UART write
+// changes all of it; the menu does not show it.
 //
 //   0x1D50  PTT press debounce, ms, 1 to 40 (default 5)
 //   0x1D51  PTT release debounce, ms, 2 to 40 (default 5)
@@ -75,24 +95,21 @@ enum {
 //   0x1D54  reserved (0xFF)
 #define SETTINGS_TIMING           0x1D50u
 
-// The operating channel, 8 bytes at 0x1D58 (after the timing), used only
-// with a valid settings block. There are no memory channels or band slots:
-// this is the one frequency the radio uses, with its power, bandwidth and
-// step, as the keypad, the menu or the protocol last stored them.
+// The operating channel, 8 bytes at 0x1D58 (after the timing). There are no
+// memory channels or band slots: this is the one frequency the radio uses,
+// with its power, bandwidth and step, as the keypad, the menu or the
+// protocol last stored them.
 //
 //   0x1D58  frequency, u32 little-endian, 10 Hz units; must be receivable
-//           (inside the band table), else the whole block is unused
+//           (inside the band table), else the whole block means the
+//           defaults: 144.800 MHz, low power, wide, 12.5 kHz step
 //   0x1D5C  power, 0 low, 1 mid, 2 high (default 0)
 //   0x1D5D  bandwidth, 0 wide, 1 narrow (default 0)
 //   0x1D5E  step, index into gStepFrequencyTable (default 12.5 kHz)
 //   0x1D5F  reserved (0xFF)
 //
-// When the block is unused (a radio coming from another firmware, or from
-// the channel-memory builds of this one), the frequency in use in the old
-// upstream layout (channel indices at 0x0E80 and the record they point at)
-// is taken once if it is receivable, else 144.800 MHz; with a valid
-// settings block it is then written here, and the old layout is never read
-// again.
+// Other firmwares' channel data (0x0000 up, the indices at 0x0E80) is never
+// read.
 #define SETTINGS_OPERATING        0x1D58u
 #define PA_DELAY_MAX_MS           20u
 #define PA_ENABLE_DELAY_MIN_MS    1u
@@ -121,9 +138,8 @@ extern RegOverride_t gRegOverridesRam[REG_OVERRIDE_MAX];
 extern uint8_t       gRegOverrideRamCount;
 
 // Protocol v2 settings, 16 bytes at 0x1D60 (docs/protocol-v2.md 7.1), used
-// only when the settings block above is valid and 0x1D60 holds its layout
-// version. A byte out of range means "default". The first menu save over
-// foreign data at 0x1D00 blanks it, with the timing and operating blocks.
+// when 0x1D60 also holds its own layout version (the first power-on writes
+// it). A byte out of range means "default".
 //
 //   0x1D60  layout version (1)
 //   0x1D61  serial PTT lock, 10 ms units, 0 to 150 (default 2 = 20 ms)
@@ -191,16 +207,20 @@ typedef struct {
 
 extern EEPROM_Config_t gEeprom;
 
+// Load the settings family; without a valid signature, load the defaults
+// and write the whole family with them (factory-fresh).
 void SETTINGS_InitEEPROM(void);
+bool SETTINGS_SignatureValid(void);                 // the family at 0x1D00 is ours
 // decoding shared by the power-on load and the protocol's stored reads;
 // Data and T are the 0x1D00 and 0x1D50 blocks, 0xFF-filled if not valid
 void SETTINGS_Decode(const uint8_t Data[16], const uint8_t T[8], EEPROM_Config_t *e);
 void SETTINGS_DecodeV2(const uint8_t b[16], bool valid, V2_Config_t *v);
 uint8_t SETTINGS_FactoryRxGain(void);
 void SETTINGS_LoadCalibration(void);
-void SETTINGS_SaveSettings(void);
+void SETTINGS_SaveSettings(void);                   // the 0x1D00 block
 void SETTINGS_SaveOperating(void);                  // gVfo's frequency, power, bandwidth, step
+void SETTINGS_WriteAll(void);                       // the whole family from RAM, signature last
 bool SETTINGS_DecodeOperating(const uint8_t b[8], VFO_Info_t *v);
-void SETTINGS_ImportOldFrequency(VFO_Info_t *v);    // read only: the old upstream layout
+void SETTINGS_DefaultOperating(VFO_Info_t *v);      // 144.800 MHz, low, wide, 12.5 kHz
 
 #endif

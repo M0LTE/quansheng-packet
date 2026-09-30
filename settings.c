@@ -104,38 +104,53 @@ uint8_t SETTINGS_FactoryRxGain(void)
 	return (g <= PKT_RX_GAIN_MAX) ? g : PKT_RX_GAIN_FALLBACK;
 }
 
+static const uint8_t kMagic[4] = { 'P', 'K', 'F', 'W' };
+
+bool SETTINGS_SignatureValid(void)
+{
+	uint8_t b[8];
+	EEPROM_ReadBuffer(SETTINGS_SIGNATURE, b, 8);
+	return memcmp(b, kMagic, sizeof(kMagic)) == 0 && b[4] == SETTINGS_LAYOUT;
+}
+
 void SETTINGS_InitEEPROM(void)
 {
 	uint8_t Data[16];
-
-	// Packet firmware settings (see settings.h)
-	EEPROM_ReadBuffer(SETTINGS_PKT_BLOCK, Data, 16);
-	const bool blockValid = Data[0] == SETTINGS_PKT_VERSION;
-	gSettingsBlockValid = blockValid;
-	if (!blockValid)
-		memset(Data, 0xFF, 16);   // blank, or left over from another firmware: all defaults
-
-	// 1D50..1D57: key-up and key-down timing
 	uint8_t T[8];
-	EEPROM_ReadBuffer(SETTINGS_TIMING, T, 8);
-	if (!blockValid)
-		memset(T, 0xFF, 8);
+
+	// Only our own family counts: without the signature (a radio coming
+	// from another firmware, or from v1.0.0 of this one) nothing is read
+	// and every setting is the default.
+	const bool ours = SETTINGS_SignatureValid();
+	memset(Data, 0xFF, sizeof(Data));
+	memset(T, 0xFF, sizeof(T));
+	if (ours) {
+		EEPROM_ReadBuffer(SETTINGS_PKT_BLOCK, Data, 16);
+		EEPROM_ReadBuffer(SETTINGS_TIMING, T, 8);   // 1D50..1D57: key-up and key-down timing
+	}
 	SETTINGS_Decode(Data, T, &gEeprom);
 	gEeprom.BACKLIGHT_MIN    = 0;
 	gEeprom.BACKLIGHT_MAX    = 10;
+	if (gEeprom.RX_GAIN > PKT_RX_GAIN_MAX)
+		gEeprom.RX_GAIN = SETTINGS_FactoryRxGain();   // the default: the factory calibration
 
 	// 1D60..1D6F: protocol v2 settings
-	EEPROM_ReadBuffer(SETTINGS_V2_BLOCK, Data, 16);
-	SETTINGS_DecodeV2(Data, blockValid, &gV2);
+	if (ours)
+		EEPROM_ReadBuffer(SETTINGS_V2_BLOCK, Data, 16);
+	SETTINGS_DecodeV2(Data, ours, &gV2);
 
 	// 1D58..1D5F: the operating channel
 	memset(&gEeprom.Vfo, 0, sizeof(gEeprom.Vfo));
-	EEPROM_ReadBuffer(SETTINGS_OPERATING, Data, 8);
-	if (!blockValid || !SETTINGS_DecodeOperating(Data, &gEeprom.Vfo)) {
-		SETTINGS_ImportOldFrequency(&gEeprom.Vfo);
-		if (blockValid)
-			SETTINGS_SaveOperating();   // once: the old layout is not read again
-	}
+	if (ours)
+		EEPROM_ReadBuffer(SETTINGS_OPERATING, Data, 8);
+	if (!ours || !SETTINGS_DecodeOperating(Data, &gEeprom.Vfo))
+		SETTINGS_DefaultOperating(&gEeprom.Vfo);
+
+	// Factory-fresh: store the defaults and sign the family, once. At
+	// power-on this runs before anything can transmit.
+	if (!ours)
+		SETTINGS_WriteAll();
+	gSettingsBlockValid = ours || SETTINGS_SignatureValid();
 }
 
 bool SETTINGS_DecodeOperating(const uint8_t b[8], VFO_Info_t *v)
@@ -144,44 +159,18 @@ bool SETTINGS_DecodeOperating(const uint8_t b[8], VFO_Info_t *v)
 	if (!FREQUENCY_IsReceivable(f))
 		return false;
 	v->Frequency         = f;
-	v->OUTPUT_POWER      = ByteOr(b[4], OUTPUT_POWER_HIGH, OUTPUT_POWER_LOW);
+	v->OUTPUT_POWER      = ByteOr(b[4], OUTPUT_POWER_HIGH, OUTPUT_POWER_DEFAULT);
 	v->CHANNEL_BANDWIDTH = ByteOr(b[5], BANDWIDTH_NARROW, BANDWIDTH_WIDE);
 	v->STEP_SETTING      = ByteOr(b[6], STEP_N_ELEM - 1, STEP_12_5kHz);
 	return true;
 }
 
-// The frequency the radio used in the upstream layout (the channel indices
-// at 0x0E80 and the memory channel or band slot record they point at), if
-// it is receivable; else 144.800 MHz. Nothing is written.
-void SETTINGS_ImportOldFrequency(VFO_Info_t *v)
+void SETTINGS_DefaultOperating(VFO_Info_t *v)
 {
-	uint8_t  d[8];
-	uint32_t f;
-	uint16_t base;
-
 	v->Frequency         = RADIO_DEFAULT_FREQUENCY;
-	v->OUTPUT_POWER      = OUTPUT_POWER_LOW;
+	v->OUTPUT_POWER      = OUTPUT_POWER_DEFAULT;
 	v->CHANNEL_BANDWIDTH = BANDWIDTH_WIDE;
 	v->STEP_SETTING      = STEP_12_5kHz;
-
-	EEPROM_ReadBuffer(0x0E80, d, 8);
-	if (d[0] <= 199)
-		base = d[0] * 16u;                        // memory channel
-	else if (d[0] <= 206)
-		base = 0x0C80 + (d[0] - 200) * 32u;       // band slot, VFO A
-	else
-		return;
-
-	EEPROM_ReadBuffer(base, &f, sizeof(f));
-	if (!FREQUENCY_IsReceivable(f))
-		return;
-	EEPROM_ReadBuffer(base + 8, d, 8);
-	v->Frequency = f;
-	if (d[4] != 0xFF) {
-		v->CHANNEL_BANDWIDTH = (d[4] >> 1) & 1u;
-		v->OUTPUT_POWER      = ByteOr((d[4] >> 2) & 3u, OUTPUT_POWER_HIGH, OUTPUT_POWER_LOW);
-	}
-	v->STEP_SETTING = ByteOr(d[6], STEP_N_ELEM - 1, STEP_12_5kHz);
 }
 
 void SETTINGS_LoadCalibration(void)
@@ -207,30 +196,14 @@ void SETTINGS_LoadCalibration(void)
 
 	gEeprom.BK4819_XTAL_FREQ_LOW = (Misc.BK4819_XtalFreqLow >= -1000 && Misc.BK4819_XtalFreqLow <= 1000) ? Misc.BK4819_XtalFreqLow : 0;
 
-	// The RX AF gain setting defaults to the factory volume calibration.
-	if (gEeprom.RX_GAIN > PKT_RX_GAIN_MAX)
-		gEeprom.RX_GAIN = (Misc.VOLUME_GAIN <= PKT_RX_GAIN_MAX) ? Misc.VOLUME_GAIN : PKT_RX_GAIN_FALLBACK;
-
 	BK4819_WriteRegister(BK4819_REG_3B, 22656 + gEeprom.BK4819_XTAL_FREQ_LOW);
 }
 
-void SETTINGS_SaveSettings(void)
+static void WriteSettingsBlock(void)
 {
 	uint8_t State[16];
 
-	// First save over data that is not ours: blank the timing, operating
-	// and v2 blocks too, so leftovers there never become settings.
-	EEPROM_ReadBuffer(SETTINGS_PKT_BLOCK, State, 1);
-	if (State[0] != SETTINGS_PKT_VERSION) {
-		memset(State, 0xFF, sizeof(State));
-		EEPROM_WriteBuffer(SETTINGS_TIMING, State);
-		EEPROM_WriteBuffer(SETTINGS_OPERATING, State);
-		EEPROM_WriteBuffer(SETTINGS_V2_BLOCK + 0, State);
-		EEPROM_WriteBuffer(SETTINGS_V2_BLOCK + 8, State);
-	}
-
-	memset(State, 0xFF, sizeof(State));
-	State[0]  = SETTINGS_PKT_VERSION;
+	memset(State, 0xFF, sizeof(State));   // 0x1D00, 0x1D03, 0x1D0B, 0x1D0D.. reserved
 	State[1]  = gEeprom.BUSY_LEVEL;
 	State[2]  = gEeprom.TX_TIMEOUT;
 	State[4]  = gEeprom.DEVIATION_WIDE & 0xFF;
@@ -243,19 +216,11 @@ void SETTINGS_SaveSettings(void)
 	State[12] = gEeprom.KEY_LOCK;
 	EEPROM_WriteBuffer(SETTINGS_PKT_BLOCK + 0, State + 0);
 	EEPROM_WriteBuffer(SETTINGS_PKT_BLOCK + 8, State + 8);
-	gSettingsBlockValid = true;
 }
 
-// Store the operating frequency, power, bandwidth and step. Over foreign
-// data at 0x1D00 the settings block is written first (with the settings in
-// use), as the first menu save does, so the operating channel counts.
-void SETTINGS_SaveOperating(void)
+static void WriteOperatingBlock(void)
 {
 	uint8_t b[8];
-
-	EEPROM_ReadBuffer(SETTINGS_PKT_BLOCK, b, 1);
-	if (b[0] != SETTINGS_PKT_VERSION)
-		SETTINGS_SaveSettings();
 
 	memset(b, 0xFF, sizeof(b));
 	memcpy(b, &gVfo->Frequency, 4);
@@ -263,4 +228,72 @@ void SETTINGS_SaveOperating(void)
 	b[5] = gVfo->CHANNEL_BANDWIDTH;
 	b[6] = gVfo->STEP_SETTING;
 	EEPROM_WriteBuffer(SETTINGS_OPERATING, b);
+}
+
+// Every block of the family from the values in RAM, the reserved area
+// blank, and the signature last, so a power cut part-way leaves the family
+// unsigned and the next power-on starts again.
+void SETTINGS_WriteAll(void)
+{
+	uint8_t b[16];
+
+	WriteSettingsBlock();
+
+	memset(b, 0xFF, sizeof(b));
+	for (uint16_t a = SETTINGS_SIGNATURE + 8; a < SETTINGS_TIMING; a += 8)
+		EEPROM_WriteBuffer(a, b);
+
+	memset(b, 0xFF, sizeof(b));
+	b[0] = gEeprom.PTT_PRESS_MS;
+	b[1] = gEeprom.PTT_RELEASE_MS;
+	b[2] = gEeprom.PA_ENABLE_DELAY_MS;
+	b[3] = gEeprom.PA_BIAS_DELAY_MS;
+	EEPROM_WriteBuffer(SETTINGS_TIMING, b);
+
+	WriteOperatingBlock();
+
+	memset(b, 0xFF, sizeof(b));
+	b[0]  = SETTINGS_V2_VERSION;
+	b[1]  = gV2.SERIAL_LOCK_MS / 10u;
+	b[2]  = gV2.BUSY_SOURCE;
+	b[3]  = gV2.BUSY_HANG_MS;
+	b[4]  = gV2.BUSY_RSSI_OPEN & 0xFF;
+	b[5]  = gV2.BUSY_RSSI_OPEN >> 8;
+	b[6]  = gV2.BUSY_RSSI_CLOSE & 0xFF;
+	b[7]  = gV2.BUSY_RSSI_CLOSE >> 8;
+	memcpy(b + 8, &gV2.DEFAULT_MASK, 4);
+	b[12] = gV2.DEFAULT_HEARTBEAT_MS & 0xFF;
+	b[13] = gV2.DEFAULT_HEARTBEAT_MS >> 8;
+	b[14] = gV2.DEFAULT_OPTIONS;
+	if (gV2.TONE_CAL)
+		b[15] = gV2.TONE_CAL;
+	EEPROM_WriteBuffer(SETTINGS_V2_BLOCK + 0, b + 0);
+	EEPROM_WriteBuffer(SETTINGS_V2_BLOCK + 8, b + 8);
+	gV2.valid = true;
+
+	memset(b, 0xFF, 8);
+	memcpy(b, kMagic, sizeof(kMagic));
+	b[4] = SETTINGS_LAYOUT;
+	EEPROM_WriteBuffer(SETTINGS_SIGNATURE, b);
+	gSettingsBlockValid = true;
+}
+
+// A save finds the family unsigned only if a host overwrote the signature
+// since the last load: then the whole family is written, so what the menu
+// or keypad just set sticks.
+void SETTINGS_SaveSettings(void)
+{
+	if (!SETTINGS_SignatureValid())
+		SETTINGS_WriteAll();
+	else
+		WriteSettingsBlock();
+}
+
+// Store the operating frequency, power, bandwidth and step.
+void SETTINGS_SaveOperating(void)
+{
+	if (!SETTINGS_SignatureValid())
+		SETTINGS_WriteAll();
+	else
+		WriteOperatingBlock();
 }

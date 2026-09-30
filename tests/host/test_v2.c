@@ -131,9 +131,9 @@ static void boot_plain(void)
 	reqObf = false;
 }
 
-static void valid_settings_block(void)
+// Power-on again with the EEPROM as it is, then a plain hello.
+static void reboot_plain(void)
 {
-	eeprom[SETTINGS_PKT_BLOCK] = SETTINGS_PKT_VERSION;
 	host_boot_keep_eeprom();
 	host_clear_out();
 	host_send_mode(0x0514, &session, 4, false);
@@ -210,8 +210,8 @@ static void test_framing(void)
 	CHECK(o[30] == 120 && o[31] >= 16);
 	CHECK(get16(o + 32) == 20 && o[34] == 30);
 	CHECK(o[35] == TX_BAND_POLICY_FIXED && o[36] == 0);   // fixed TX policy; byte 36 reserved
-	CHECK(o[37] == 0 && o[38] == 0 && o[39] == 5); // blank EEPROM: no settings block
-	vec("get_info", "fresh boot on a blank EEPROM (factory calibration only), plain mode after a hello; lock 20 ms");
+	CHECK(o[37] == SETTINGS_LAYOUT && o[38] == SETTINGS_V2_VERSION && o[39] == 5);   // signed at the first power-on
+	vec("get_info", "fresh boot on a blank EEPROM (factory calibration only; the first power-on writes and signs the default settings), plain mode after a hello; lock 20 ms");
 
 	// the same in obfuscated mode
 	host_clear_out();
@@ -305,7 +305,9 @@ static void test_subscribe_and_busy(void)
 	CHECK(status(subscribe(1, 0, 0, 10, 0, 0)) == V2_RANGE);
 	CHECK(status(subscribe(1, 0, 0, 10, 21, 0)) == V2_RANGE);
 	CHECK(status(subscribe(1, 0, 0, 0, 0, 1)) == V2_RANGE);
-	CHECK(status(subscribe(1, SUB_PERSIST, 0, 0, 0, 0)) == V2_EEPROM);   // no settings block
+	gSettingsBlockValid = false;                  // as if the signature could not be written
+	CHECK(status(subscribe(1, SUB_PERSIST, 0, 0, 0, 0)) == V2_EEPROM);
+	gSettingsBlockValid = true;
 
 	const Frame_t *f = subscribe((1u << EV_CD) | (1u << EV_RX_BURST), 0, 0, 0, 0, 0);
 	CHECK(f && f->id == 0x5082 && status(f) == V2_OK && f->body_len == 12);
@@ -682,7 +684,7 @@ static void test_params(void)
 	CHECK(gVfo->Band == BAND6_400MHz);
 	CHECK(regs[0x38] == (43350000 & 0xFFFF) && regs[0x39] == (43350000 >> 16));
 	CHECK(reg_writes[0x3F] - setups == 1);           // one RADIO_SetupRegisters (it writes REG_3F once)
-	CHECK(eeprom[SETTINGS_OPERATING] == 0xFF);        // RAM only: nothing written
+	CHECK(get32(&eeprom[SETTINGS_OPERATING]) == 14480000);   // RAM only: the stored default stays
 	vec("set_params", "fresh boot; SET_PARAMS flags 0: FREQ_HZ 433.5 MHz, SQUELCH 3, DEV_WIDE 0x0800 (RAM)");
 
 	// a PARAMS_CHANGED would go to a subscriber
@@ -772,20 +774,24 @@ static void test_params(void)
 	CHECK(status(v2(V2_SAVE_PARAMS, 0x5A, &op, 1)) == V2_STATE);
 	gReducedService = false;
 
-	// PERSIST needs the settings block
+	// PERSIST needs the signed settings family (always there after the
+	// first power-on, unless its write failed)
+	gSettingsBlockValid = false;
 	n = 0; s[n++] = SETP_PERSIST; s[n++] = P_TX_TIMEOUT_S; s[n++] = 20;
 	f = v2(V2_SET_PARAMS, 0x57, s, n);
 	CHECK(status(f) == V2_EEPROM && rb(f)[0] == P_TX_TIMEOUT_S);
+	gSettingsBlockValid = true;
 	CHECK(eeprom_writes_in_cal == 0);
 }
 
 static void test_persist(void)
 {
 	boot_plain();
-	memset(&eeprom[SETTINGS_V2_BLOCK + 8], 0x00, 8);    // leftovers behind a v2 block not in use
-	valid_settings_block();
+	eeprom[SETTINGS_V2_BLOCK] = 0xFF;                 // a v2 block not in use (a host wrote over it),
+	memset(&eeprom[SETTINGS_V2_BLOCK + 8], 0x00, 8);    // with leftovers behind it
+	reboot_plain();
 	const Frame_t *f = v2(V2_GET_INFO, 1, NULL, 0);
-	CHECK(rb(f)[37] == 1 && rb(f)[38] == 0);
+	CHECK(rb(f)[37] == SETTINGS_LAYOUT && rb(f)[38] == 0);
 
 	uint8_t s[32];
 	unsigned n = 0;
@@ -795,17 +801,17 @@ static void test_persist(void)
 	s[n++] = P_PTT_PRESS_MS; s[n++] = 3;
 	f = v2(V2_SET_PARAMS, 0x60, s, n);
 	CHECK(status(f) == V2_OK && (rb(f)[0] & SETR_PERSIST));
-	CHECK(eeprom[0x1D02] == 0xFF);                   // nothing yet: after the reply
+	CHECK(eeprom[0x1D02] == 4);                      // nothing yet (the default, 30 s): after the reply
 	CHECK(lockms(f) == 20);                          // this frame's lock is the old setting
 
 	// never during a transmission, nor while PTT is pressed
 	gCurrentFunction = FUNCTION_TRANSMIT;
 	host_advance(20);
-	CHECK(eeprom[0x1D02] == 0xFF && PARAMS_PersistPending());
+	CHECK(eeprom[0x1D02] == 4 && PARAMS_PersistPending());
 	gCurrentFunction = FUNCTION_FOREGROUND;
 	host_ptt.pressed = true;
 	host_advance(20);
-	CHECK(eeprom[0x1D02] == 0xFF);
+	CHECK(eeprom[0x1D02] == 4);
 	host_ptt.pressed = false;
 
 	// one block per pass
@@ -819,7 +825,7 @@ static void test_persist(void)
 	CHECK(eeprom[0x1D60] == 1 && eeprom[0x1D61] == 4);
 	for (unsigned a = 0x1D62; a < 0x1D70; a++)
 		CHECK(eeprom[a] == 0xFF);                    // a fresh v2 block is blanked, leftovers too
-	CHECK(eeprom[0x1D00] == 1 && eeprom[0x1D01] == 0xFF);    // others untouched
+	CHECK(eeprom[0x1D00] == 0xFF && eeprom[0x1D01] == 1);    // others untouched
 	CHECK(eeprom_writes_in_cal == 0);
 
 	// a legacy EEPROM write session drops queued v2 writes
@@ -928,13 +934,13 @@ static bool live_differs(uint8_t tag)
 
 static void test_stored_follows_local_saves(void)
 {
-	// the first menu save, over a blank block: the stored view takes it
+	// the first menu save, over the defaults of the first power-on: the stored view takes it
 	boot_plain();
 	const uint8_t *o = stored4(0x70);
 	CHECK(get32(o + 2) == 144800000u && o[7] == 0 && o[9] == 0 && get16(o + 11) == 0x0856);
 	gEeprom.DEVIATION_WIDE = 0x0800;                 // menu DevW
 	SETTINGS_SaveSettings();
-	CHECK(eeprom[0x1D00] == 1 && get16(&eeprom[0x1D04]) == 0x0800);
+	CHECK(eeprom[0x1D00] == 0xFF && get16(&eeprom[0x1D04]) == 0x0800);
 	o = stored4(0x71);
 	CHECK(get16(o + 11) == 0x0800);
 	CHECK(!live_differs(0x72));
@@ -1104,7 +1110,7 @@ static void test_overrides(void)
 
 	// COMMIT and CLEAR_EEPROM went with the stored table: UNSUPPORTED,
 	// detail 0, nothing written, the RAM table untouched
-	valid_settings_block();
+	reboot_plain();
 	f = v2(V2_REG_OVERRIDE, 0x94, r, 11);
 	CHECK(status(f) == V2_OK && gRegOverrideRamCount == 1);
 	uint8_t c[5] = { 3, 0, 0, 0, 0 };
@@ -1116,7 +1122,8 @@ static void test_overrides(void)
 	CHECK(status(f) == V2_UNSUPPORTED && rb(f)[0] == 0);
 	host_advance(20);
 	CHECK(gRegOverrideRamCount == 1 && !PARAMS_PersistPending());
-	for (unsigned a = 0x1D10; a < 0x1D50; a++)
+	CHECK(memcmp(&eeprom[SETTINGS_SIGNATURE], "PKFW", 4) == 0);
+	for (unsigned a = SETTINGS_SIGNATURE + 8; a < SETTINGS_TIMING; a++)
 		if (eeprom[a] != 0xFF) { CHECK(eeprom[a] == 0xFF); break; }
 	// LIST: the RAM table, then n_eeprom, always 0
 	c[0] = 0;
@@ -1225,7 +1232,7 @@ static void test_counters(void)
 static void test_calibration_guard_fuzz(void)
 {
 	boot_plain();
-	valid_settings_block();
+	reboot_plain();
 	srand(7);
 	uint8_t b[130];
 	for (int i = 0; i < 3000; i++) {
