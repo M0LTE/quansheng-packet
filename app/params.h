@@ -31,7 +31,7 @@ enum {
 	P_BANDWIDTH,
 	P_DEV_WIDE,
 	P_DEV_NARROW,
-	P_MIC_GAIN,
+	P_RETIRED_MIC_GAIN,    // 0x06: MIC_GAIN, gone (fixed at the maximum); replies UNSUPPORTED
 	P_RETIRED_SQUELCH,     // 0x07: SQUELCH, gone (no squelch); replies UNSUPPORTED
 	P_RX_GAIN,
 	P_RX_DAC_GAIN,
@@ -54,7 +54,10 @@ enum {
 	P_LAST = P_BUSY_SQL_LEVEL
 };
 
-#define PARAMS_SUPPORTED  (((1u << (P_LAST + 1)) - 1u) & ~1u & ~(1u << P_RETIRED_SQUELCH))
+// retired ids: GET_PARAMS and SET_PARAMS reply UNSUPPORTED with the id as detail
+#define PARAMS_RETIRED    ((1u << P_RETIRED_MIC_GAIN) | (1u << P_RETIRED_SQUELCH))
+#define PARAMS_SUPPORTED  (((1u << (P_LAST + 1)) - 1u) & ~1u & ~PARAMS_RETIRED)
+#define PARAMS_IS_RETIRED(id)  ((id) <= P_LAST && ((PARAMS_RETIRED >> (id)) & 1u))
 #define PARAMS_RAM_ONLY   ((1u << P_BUSY_SQL_RAW) | (1u << P_AGC_FIX) | (1u << P_AFC))
 
 // SET_PARAMS flags and result bits

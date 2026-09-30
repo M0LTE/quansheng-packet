@@ -180,9 +180,9 @@ static uint8_t GetParams(const uint8_t *r, uint16_t n, uint8_t *o, uint16_t *len
 
 	for (uint16_t i = 1; i < n; i++) {
 		const uint8_t id = r[i];
-		if (id == P_RETIRED_SQUELCH) {
+		if (PARAMS_IS_RETIRED(id)) {
 			*detail = id;
-			return V2_UNSUPPORTED;                // there is no squelch
+			return V2_UNSUPPORTED;                // no mic gain setting, no squelch
 		}
 		if (!PARAMS_Size(id) || ((ids >> id) & 1u)) {
 			*detail = id;

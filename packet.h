@@ -19,7 +19,7 @@
 // no pre-emphasis or de-emphasis, no TX or RX audio filters, no DC filters,
 // no mic AGC, no ALC, no compander. The fixed register values are named here
 // so later measurements can change them in one place. The values the bench
-// is expected to tune (mic gain, deviation, receive gains) are settings,
+// is expected to tune (deviation, receive gains) are settings,
 // stored in EEPROM (see settings.h) and editable in the menu or over UART.
 //
 // Register meanings come from the BK4819 vendor list and community notes and
@@ -30,11 +30,13 @@
 
 // REG_7D: mic sensitivity. <4:0> is the gain, nominally 0.5 dB per step
 // (0 to 31). Measured on the bench K5 (2026-09-28): the whole range moves
-// the deviation by only about 0.5 dB, so REG_40 sets the level. The upper
-// bits are the upstream value.
+// the deviation by only about 0.5 dB, so it is fixed at the maximum and
+// REG_40 (the deviation setting) sets the level. The upper bits are the
+// upstream value. (It was a setting until 2026-09-30: EEPROM 0x1D03, menu
+// MicG, v2 parameter 0x06; all retired.)
 #define PKT_REG_7D_BASE          0xE940u
-#define PKT_MIC_GAIN_MAX         31u
-#define PKT_MIC_GAIN_DEFAULT     31u
+#define PKT_MIC_GAIN             31u
+#define PKT_REG_7D               (PKT_REG_7D_BASE | PKT_MIC_GAIN)
 
 // REG_47 while transmitting: AF output muted, <0> = 1 bypasses all AF TX
 // filters. <14> is cleared, as upstream DIG does (undocumented).

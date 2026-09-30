@@ -27,6 +27,7 @@
 #include "helper/battery.h"
 #include "misc.h"
 #include "outq.h"
+#include "packet.h"
 #include "radio.h"
 #include "settings.h"
 
@@ -118,7 +119,7 @@ void BK4819_SetupSquelch(uint8_t a, uint8_t b, uint8_t c, uint8_t d, uint8_t e, 
 }
 void BK4819_PickRXFilterPathBasedOnFrequency(uint32_t f) { (void)f; }
 void BK4819_ToggleGpioOut(BK4819_GPIO_PIN_t Pin, bool bSet) { if (Pin == BK4819_GPIO1_PIN29_PA_ENABLE) pa_enabled = bSet; }
-void BK4819_PrepareDigitalTransmit(const uint8_t micGain, const uint16_t deviation) { regs[0x7D] = micGain; regs[0x40] = deviation; }
+void BK4819_PrepareDigitalTransmit(const uint16_t deviation) { regs[0x7D] = PKT_REG_7D; regs[0x40] = deviation; }
 void BK4819_ExitSubAu(void) {}
 void BK4819_SetAF(BK4819_AF_Type_t AF) { regs[0x47] = (6u << 12) | (AF << 8) | (1u << 6); }
 void BACKLIGHT_TurnOn(void) {}

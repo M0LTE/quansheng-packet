@@ -19,7 +19,7 @@
 //   lines 0-1  TX, or RX while a carrier is detected, and the frequency
 //   line  3    RSSI in dBm and S-units while receiving
 //   lines 4-6  the packet settings in use: power (nominal watts),
-//              bandwidth, TX timeout, mic gain, deviation, receive gains
+//              bandwidth, TX timeout, deviation, receive gains
 
 #include <string.h>
 
@@ -214,8 +214,7 @@ void UI_DisplayMain(void)
 		gTxTimeoutSeconds[gEeprom.TX_TIMEOUT]);
 	UI_PrintStringSmallNormal(String, 2, 0, 4);
 
-	sprintf(String, "MIC%u DEV%u",
-		gEeprom.MIC_GAIN,
+	sprintf(String, "DEV 0x%03X",
 		narrow ? gEeprom.DEVIATION_NARROW : gEeprom.DEVIATION_WIDE);
 	UI_PrintStringSmallNormal(String, 2, 0, 5);
 

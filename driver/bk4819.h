@@ -74,7 +74,7 @@ void     BK4819_PickRXFilterPathBasedOnFrequency(uint32_t Frequency);
 void     BK4819_DisableDTMF(void);
 void     BK4819_ExitTxMute(void);
 void     BK4819_Sleep(void);
-void     BK4819_PrepareDigitalTransmit(const uint8_t micGain, const uint16_t deviation);
+void     BK4819_PrepareDigitalTransmit(const uint16_t deviation);
 void     BK4819_TxOn(void);
 void     BK4819_ExitSubAu(void);
 

@@ -71,7 +71,6 @@ static int32_t MaxValue(uint8_t item)
 		case MENU_STEP:   return STEP_N_ELEM - 1;
 		case MENU_TXP:    return 2;
 		case MENU_W_N:    return 1;
-		case MENU_MIC:    return 31;
 		case MENU_DEVW:
 		case MENU_DEVN:   return 0xA7F;
 		case MENU_RXG:    return 63;

@@ -55,7 +55,7 @@ enum {
 //           is no squelch: it never mutes the audio. (Until 30 September
 //           2026 this byte was the squelch level; 0 now means 1.)
 //   0x1D02  TX timeout, index into gTxTimeoutSeconds
-//   0x1D03  mic gain, REG_7D<4:0>, 0 to 31
+//   0x1D03  reserved: was the mic gain (retired, ignored, written 0xFF)
 //   0x1D04  wide deviation, REG_40<11:0>, u16 little-endian, at most 0xA7F
 //   0x1D06  narrow deviation, REG_40<11:0>, u16 little-endian, at most 0xA7F
 //   0x1D08  RX AF gain 2, REG_48<9:4>, 0 to 63
@@ -190,7 +190,6 @@ extern const uint8_t gTxTimeoutSeconds[7];
 typedef struct {
 	uint8_t               BUSY_LEVEL;         // busy detector level, 1 to 9
 	uint8_t               TX_TIMEOUT;
-	uint8_t               MIC_GAIN;
 	uint16_t              DEVIATION_WIDE;
 	uint16_t              DEVIATION_NARROW;
 	uint8_t               RX_GAIN;

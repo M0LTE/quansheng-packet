@@ -33,7 +33,6 @@ const char gMenuNames[MENU_N_ITEMS][7] =
 	[MENU_STEP]   = "Step",
 	[MENU_TXP]    = "TxPwr",
 	[MENU_W_N]    = "W/N",
-	[MENU_MIC]    = "MicG",
 	[MENU_DEVW]   = "DevW",
 	[MENU_DEVN]   = "DevN",
 	[MENU_RXG]    = "RxG",
@@ -100,11 +99,6 @@ void UI_DisplayMenu(void)
 
 		case MENU_W_N:
 			strcpy(String, gSubMenuSelection ? "NARROW" : "WIDE");
-			break;
-
-		case MENU_MIC:
-			sprintf(String, "%d", (int)gSubMenuSelection);
-			sprintf(Hint, "+%d.%ddB", (int)gSubMenuSelection / 2, ((int)gSubMenuSelection % 2) * 5);
 			break;
 
 		case MENU_DEVW:

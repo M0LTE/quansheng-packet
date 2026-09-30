@@ -87,7 +87,6 @@ void SETTINGS_Decode(const uint8_t Data[16], const uint8_t T[8], EEPROM_Config_t
 	const uint16_t devNarrow = Data[6] | (Data[7] << 8);
 	e->BUSY_LEVEL       = ByteOr(Data[1], 9, 1) ? ByteOr(Data[1], 9, 1) : 1;
 	e->TX_TIMEOUT       = ByteOr(Data[2], ARRAY_SIZE(gTxTimeoutSeconds) - 1, TX_TIMEOUT_DEFAULT_INDEX);
-	e->MIC_GAIN         = ByteOr(Data[3], PKT_MIC_GAIN_MAX, PKT_MIC_GAIN_DEFAULT);
 	e->DEVIATION_WIDE   = (devWide   <= PKT_DEVIATION_MAX) ? devWide   : PKT_DEVIATION_WIDE_DEFAULT;
 	e->DEVIATION_NARROW = (devNarrow <= PKT_DEVIATION_MAX) ? devNarrow : PKT_DEVIATION_NARROW_DEFAULT;
 	e->RX_GAIN          = Data[8];   // checked in SETTINGS_LoadCalibration
@@ -282,7 +281,6 @@ void SETTINGS_SaveSettings(void)
 	State[0]  = SETTINGS_PKT_VERSION;
 	State[1]  = gEeprom.BUSY_LEVEL;
 	State[2]  = gEeprom.TX_TIMEOUT;
-	State[3]  = gEeprom.MIC_GAIN;
 	State[4]  = gEeprom.DEVIATION_WIDE & 0xFF;
 	State[5]  = gEeprom.DEVIATION_WIDE >> 8;
 	State[6]  = gEeprom.DEVIATION_NARROW & 0xFF;

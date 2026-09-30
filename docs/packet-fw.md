@@ -58,7 +58,7 @@ Always the upstream DIG path: no pre-emphasis or de-emphasis, no TX or RX audio 
 
 | Register | Value | Where |
 |---|---|---|
-| REG_7D | `0xE940` or mic gain | settings (mic gain); on the bench the whole 0 to 31 range moves deviation by only about 0.5 dB |
+| REG_7D | `0xE95F`: mic gain 31, the maximum | `PKT_REG_7D`; not a setting, because on the bench the whole 0 to 31 range moved the deviation by only about 0.5 dB |
 | REG_40 | top 3 bits from the chip, bit 12, deviation | settings (wide and narrow deviation); logarithmic, see below |
 | REG_48 | `11<<12`, gain 1 0 dB, gain 2, DAC gain | settings (RX gain, RX DAC gain) |
 | REG_47 (TX) | `0x2041`: AF muted, TX filters bypassed | `PKT_REG_47_TX` |
@@ -78,7 +78,7 @@ Stored in a 16-byte block at EEPROM `0x1D00` (the old DTMF contacts area). The b
 | 0x1D00 | layout version | 1 | |
 | 0x1D01 | busy detector level: the row of the factory squelch tables the chip's carrier detector uses (not a squelch; v2 parameter BUSY_SQL_LEVEL, not in the menu); was the squelch level, and 0 now means 1 | 1 to 9 | 1 |
 | 0x1D02 | TX timeout | 0 to 6 = 5, 10, 15, 20, 30, 60, 120 s | 4 (30 s) |
-| 0x1D03 | mic gain, REG_7D<4:0> | 0 to 31 | 31 |
+| 0x1D03 | reserved: was the mic gain (retired 2026-09-30); ignored, written 0xFF | | |
 | 0x1D04 | wide deviation, REG_40<11:0>, u16 LE | 0 to 0xA7F | 0x856 (about 3 kHz at 0 dBFS with the bench AIOC EQ) |
 | 0x1D06 | narrow deviation, REG_40<11:0>, u16 LE | 0 to 0xA7F | 0x756 (half the wide deviation) |
 | 0x1D08 | RX AF gain 2, REG_48<9:4>, 0.5 dB steps | 0 to 63 | factory calibration (0x1F8E) |
@@ -123,7 +123,7 @@ If the frequency there is not receivable (a blank block, or a radio coming from 
 
 Other EEPROM the firmware reads: S-meter levels at `0x0EA0`, TX band limits at `0x0F40` (no menu). Calibration (`0x1E00` up) is read only.
 
-The same settings are in the menu (MENU, then UP/DOWN, MENU to edit and again to store, EXIT to cancel): Step, TxPwr, W/N, MicG, DevW, DevN, RxG, RxDAC, TxTOut, BackLt, BatTyp, plus the battery voltage and the version.
+The same settings are in the menu (MENU, then UP/DOWN, MENU to edit and again to store, EXIT to cancel): Step, TxPwr, W/N, DevW, DevN, RxG, RxDAC, TxTOut, BackLt, BatTyp, plus the battery voltage and the version.
 
 Keys on the main screen: digits enter a frequency, UP/DOWN step, F then 6 cycles power, F held locks the keypad. The side keys have no function (there is no squelch to open).
 
@@ -186,7 +186,7 @@ Timing settings, 8 bytes at `0x1D50` (one UART write; not in the menu; used only
 ## Fixes
 
 - **AGC.** Upstream DIG sets REG_7E bit 15 (AGC fix) at every key-up and never cleared it, so after the first transmission receive ran at a fixed AGC index (the maximum). It is now cleared on every return to receive. Receive levels measured on upstream DIG after any transmission were taken with the AGC frozen, so expect them to change.
-- **Deviation.** Upstream DIG wrote REG_40 = 0x383 wide and 0x4D6 narrow, so wide was 2.8 dB below narrow. Both are now settings, clamped below the wrap at 0xB00, with bench-measured defaults for a TNC at 0 dBFS: 0x856 wide and 0x756 narrow (half) for the bench AIOC with its TX EQ, 0x762 and 0x662 for a stock AIOC, and mic gain 31. The top 3 bits are read from the chip after its reset, not before.
+- **Deviation.** Upstream DIG wrote REG_40 = 0x383 wide and 0x4D6 narrow, so wide was 2.8 dB below narrow. Both are now settings, clamped below the wrap at 0xB00, with bench-measured defaults for a TNC at 0 dBFS: 0x856 wide and 0x756 narrow (half) for the bench AIOC with its TX EQ, 0x762 and 0x662 for a stock AIOC, with the mic gain fixed at 31. The top 3 bits are read from the chip after its reset, not before.
 - **Calibration.** Upstream wrote a build-options byte to 0x1FF0 on every boot and could save battery calibration from the menu. This firmware never writes 0x1E00 and up (checked in the EEPROM driver and in the UART handler).
 - **TX timeout** returns to receive at once, and the next transmission needs PTT released first. It has 0.5 s resolution.
 - **Nothing is saved during a transmission.** Saves postponed while UP/DOWN was held, menu changes and the receiver set-up that follows them wait until TX ends; EXIT held does not turn the monitor off mid-transmission.

@@ -94,9 +94,8 @@ void BK4819_SetFrequency(uint32_t f) { regs[0x38] = f & 0xFFFF; regs[0x39] = f >
 void BK4819_SetupSquelch(uint8_t a, uint8_t b, uint8_t c, uint8_t d, uint8_t e, uint8_t f) { (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; }
 void BK4819_PickRXFilterPathBasedOnFrequency(uint32_t f) { (void)f; }
 void BK4819_ToggleGpioOut(BK4819_GPIO_PIN_t Pin, bool bSet) { (void)Pin; (void)bSet; }
-static uint8_t  tx_mic;
 static uint16_t tx_dev;
-void BK4819_PrepareDigitalTransmit(const uint8_t micGain, const uint16_t deviation) { tx_mic = micGain; tx_dev = deviation; regs[0x7E] |= PKT_REG_7E_AGC_FIX; }
+void BK4819_PrepareDigitalTransmit(const uint16_t deviation) { tx_dev = deviation; regs[0x7E] |= PKT_REG_7E_AGC_FIX; }
 void BK4819_ExitSubAu(void) {}
 
 // ------------------------------------------------------- other app stubs --
@@ -152,30 +151,27 @@ static void test_settings_defaults_and_roundtrip(void)
 
 	CHECK(gEeprom.BUSY_LEVEL == 1);
 	CHECK(gTxTimeoutSeconds[gEeprom.TX_TIMEOUT] == 30);
-	CHECK(gEeprom.MIC_GAIN == PKT_MIC_GAIN_DEFAULT);
 	CHECK(gEeprom.DEVIATION_WIDE == 0x856);
 	CHECK(gEeprom.DEVIATION_NARROW == 0x756);
-	CHECK(gEeprom.MIC_GAIN == 31);
 	CHECK(gEeprom.RX_GAIN == 50);
 	CHECK(gEeprom.RX_DAC_GAIN == PKT_RX_DAC_GAIN_DEFAULT);
 	CHECK(gEeprom.Vfo.Frequency == RADIO_DEFAULT_FREQUENCY);
 
 	gEeprom.BUSY_LEVEL       = 7;
 	gEeprom.TX_TIMEOUT       = 1;
-	gEeprom.MIC_GAIN         = 31;
 	gEeprom.DEVIATION_WIDE   = 0x0A7F;
 	gEeprom.DEVIATION_NARROW = 0x0123;
 	gEeprom.RX_GAIN          = 63;
 	gEeprom.RX_DAC_GAIN      = 0;
 	SETTINGS_SaveSettings();
 	CHECK(eeprom[SETTINGS_PKT_BLOCK] == SETTINGS_PKT_VERSION);
+	CHECK(eeprom[SETTINGS_PKT_BLOCK + 3] == 0xFF);      // reserved: the retired mic gain
 
 	memset(&gEeprom.BUSY_LEVEL, 0x55, 8);
 	SETTINGS_InitEEPROM();
 	SETTINGS_LoadCalibration();
 	CHECK(gEeprom.BUSY_LEVEL == 7);
 	CHECK(gTxTimeoutSeconds[gEeprom.TX_TIMEOUT] == 10);
-	CHECK(gEeprom.MIC_GAIN == 31);
 	CHECK(gEeprom.DEVIATION_WIDE == 0x0A7F);
 	CHECK(gEeprom.DEVIATION_NARROW == 0x0123);
 	CHECK(gEeprom.RX_GAIN == 63);
@@ -185,7 +181,7 @@ static void test_settings_defaults_and_roundtrip(void)
 	eeprom[SETTINGS_PKT_BLOCK] = 0x41;
 	SETTINGS_InitEEPROM();
 	CHECK(gEeprom.BUSY_LEVEL == 1);
-	CHECK(gEeprom.MIC_GAIN == PKT_MIC_GAIN_DEFAULT);
+	CHECK(gEeprom.DEVIATION_WIDE == PKT_DEVIATION_WIDE_DEFAULT);
 	eeprom[SETTINGS_PKT_BLOCK] = SETTINGS_PKT_VERSION;
 
 	// an old squelch 0 (open) is not a detector level: the default
@@ -195,12 +191,10 @@ static void test_settings_defaults_and_roundtrip(void)
 	eeprom[SETTINGS_PKT_BLOCK + 1] = 7;
 
 	// out of range bytes fall back to the defaults
-	eeprom[SETTINGS_PKT_BLOCK + 3] = 32;
 	eeprom[SETTINGS_PKT_BLOCK + 4] = 0x80;   // wide deviation 0xA80: past the clamp
 	eeprom[SETTINGS_PKT_BLOCK + 5] = 0x0A;
 	eeprom[SETTINGS_PKT_BLOCK + 7] = 0x10;   // narrow deviation 0x1023
 	SETTINGS_InitEEPROM();
-	CHECK(gEeprom.MIC_GAIN == PKT_MIC_GAIN_DEFAULT);
 	CHECK(gEeprom.DEVIATION_WIDE == PKT_DEVIATION_WIDE_DEFAULT);
 	CHECK(gEeprom.DEVIATION_NARROW == PKT_DEVIATION_NARROW_DEFAULT);
 }
@@ -382,9 +376,10 @@ static void test_tx_rx_registers(void)
 {
 	memset(eeprom, 0xFF, sizeof(eeprom));
 	memset(regs, 0, sizeof(regs));
+	eeprom[SETTINGS_PKT_BLOCK]     = SETTINGS_PKT_VERSION;
+	eeprom[SETTINGS_PKT_BLOCK + 3] = 7;       // a mic gain from an older build: ignored
 	SETTINGS_InitEEPROM();
 	SETTINGS_LoadCalibration();
-	gEeprom.MIC_GAIN = 7;
 	gEeprom.DEVIATION_WIDE = 0x600;
 	gEeprom.DEVIATION_NARROW = 0x300;
 	gEeprom.RX_GAIN = 40;
@@ -393,7 +388,7 @@ static void test_tx_rx_registers(void)
 
 	regs[0x31] = 0xFFFF;
 	RADIO_SetupRegisters(true);
-	CHECK(regs[0x7D] == (PKT_REG_7D_BASE | 7));
+	CHECK(regs[0x7D] == (PKT_REG_7D_BASE | 31));    // mic gain fixed at the maximum
 	CHECK(regs[0x48] == (PKT_REG_48_BASE | (40u << 4) | 9u));
 	CHECK((regs[0x31] & PKT_REG_31_OFF_MASK) == 0);
 	CHECK(regs[0x3F] == 0);                      // no squelch interrupts: a detector only
@@ -402,7 +397,7 @@ static void test_tx_rx_registers(void)
 
 	gVfo->CHANNEL_BANDWIDTH = BANDWIDTH_WIDE;
 	RADIO_SetTxParameters();
-	CHECK(tx_mic == 7 && tx_dev == 0x600);
+	CHECK(tx_dev == 0x600);
 	CHECK(regs[0x7E] & PKT_REG_7E_AGC_FIX);
 	RADIO_SetupRegisters(false);            // back to receive
 	CHECK((regs[0x7E] & PKT_REG_7E_AGC_FIX) == 0);

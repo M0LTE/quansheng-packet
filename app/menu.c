@@ -39,7 +39,6 @@ static bool MENU_GetLimits(uint8_t menu_id, int32_t *pMin, int32_t *pMax)
 		case MENU_STEP:   *pMax = STEP_N_ELEM - 1;                     break;
 		case MENU_TXP:    *pMax = OUTPUT_POWER_HIGH;                   break;
 		case MENU_W_N:    *pMax = BANDWIDTH_NARROW;                    break;
-		case MENU_MIC:    *pMax = PKT_MIC_GAIN_MAX;                    break;
 		case MENU_DEVW:
 		case MENU_DEVN:   *pMax = PKT_DEVIATION_MAX;                   break;
 		case MENU_RXG:    *pMax = PKT_RX_GAIN_MAX;                     break;
@@ -85,7 +84,6 @@ void MENU_AcceptSetting(void)
 			return;
 
 		// radio wide
-		case MENU_MIC:    gEeprom.MIC_GAIN         = gSubMenuSelection; break;
 		case MENU_DEVW:   gEeprom.DEVIATION_WIDE   = gSubMenuSelection; break;
 		case MENU_DEVN:   gEeprom.DEVIATION_NARROW = gSubMenuSelection; break;
 		case MENU_RXG:    gEeprom.RX_GAIN          = gSubMenuSelection; break;
@@ -111,7 +109,6 @@ void MENU_ShowCurrentSetting(void)
 		case MENU_STEP:   gSubMenuSelection = FREQUENCY_GetSortedIdxFromStepIdx(gVfo->STEP_SETTING); break;
 		case MENU_TXP:    gSubMenuSelection = gVfo->OUTPUT_POWER;       break;
 		case MENU_W_N:    gSubMenuSelection = gVfo->CHANNEL_BANDWIDTH;  break;
-		case MENU_MIC:    gSubMenuSelection = gEeprom.MIC_GAIN;         break;
 		case MENU_DEVW:   gSubMenuSelection = gEeprom.DEVIATION_WIDE;   break;
 		case MENU_DEVN:   gSubMenuSelection = gEeprom.DEVIATION_NARROW; break;
 		case MENU_RXG:    gSubMenuSelection = gEeprom.RX_GAIN;          break;

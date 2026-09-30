@@ -205,7 +205,7 @@ static void test_framing(void)
 	CHECK(get16(o) == 0x0200);
 	CHECK(memcmp(o + 2, "PKTFW test\0\0\0\0\0\0", 16) == 0);
 	CHECK(get32(o + 18) == (CAP_LIVE_TX | CAP_RSSI_BUSY | CAP_TONE_RAW | CAP_RAM_OVERRIDES | CAP_PERSISTENCE | CAP_EXACT_TIME_SYNC));
-	CHECK(get32(o + 22) == 0x03FFFF7Eu);            // 0x01 to 0x19, not 0x07 (no squelch)
+	CHECK(get32(o + 22) == 0x03FFFF3Eu);            // 0x01 to 0x19, not 0x06 or 0x07 (retired)
 	CHECK(get32(o + 26) == 0x1FFFu);
 	CHECK(o[30] == 120 && o[31] >= 16);
 	CHECK(get16(o + 32) == 20 && o[34] == 30);
@@ -632,7 +632,7 @@ static void test_params(void)
 	// GET_PARAMS, all live
 	uint8_t r[64] = { 0 };
 	const Frame_t *f = v2(V2_GET_PARAMS, 0x40, r, 1);
-	CHECK(f && status(f) == V2_OK && f->body_len == 4 + 1 + 24 + 37);
+	CHECK(f && status(f) == V2_OK && f->body_len == 4 + 1 + 23 + 36);
 	const uint8_t *o = rb(f);
 	CHECK(o[0] == 0 && o[1] == P_FREQ_HZ && get32(o + 2) == 144800000u);
 	CHECK(o[6] == P_POWER && o[7] == 0 && o[8] == P_BANDWIDTH && o[9] == 0);
@@ -648,18 +648,23 @@ static void test_params(void)
 	r[0] = 0; r[1] = 0x1A;
 	f = v2(V2_GET_PARAMS, 0x42, r, 2);
 	CHECK(status(f) == V2_BAD_PARAM && rb(f)[0] == 0x1A);
-	r[1] = 6; r[2] = 6;
+	r[1] = P_RX_GAIN; r[2] = P_RX_GAIN;
 	CHECK(status(v2(V2_GET_PARAMS, 0x43, r, 3)) == V2_BAD_PARAM);
-	// 0x07, SQUELCH, is gone: UNSUPPORTED, in GET_PARAMS and SET_PARAMS
-	r[1] = P_MIC_GAIN; r[2] = 0x07;
-	f = v2(V2_GET_PARAMS, 0x44, r, 3);
+	// 0x06, MIC_GAIN, and 0x07, SQUELCH, are gone: UNSUPPORTED, in
+	// GET_PARAMS and SET_PARAMS, with the first retired id as detail
+	r[1] = P_RX_GAIN; r[2] = 0x07; r[3] = 0x06;
+	f = v2(V2_GET_PARAMS, 0x44, r, 4);
 	CHECK(status(f) == V2_UNSUPPORTED && rb(f)[0] == 0x07);
-	vec("get_params_squelch_retired", "any state; GET_PARAMS for MIC_GAIN and 0x07 (SQUELCH, retired): UNSUPPORTED, detail 0x07");
-	{
-		const uint8_t sq[3] = { 0, 0x07, 0 };
+	r[1] = 0x06; r[2] = 0x07;
+	f = v2(V2_GET_PARAMS, 0x44, r, 3);
+	CHECK(status(f) == V2_UNSUPPORTED && rb(f)[0] == 0x06);
+	vec("get_params_retired", "any state; GET_PARAMS for 0x06 (MIC_GAIN, retired) and 0x07 (SQUELCH, retired): UNSUPPORTED, detail 0x06");
+	for (uint8_t id = 0x06; id <= 0x07; id++) {
+		const uint8_t sq[3] = { 0, id, 31 };
 		f = v2(V2_SET_PARAMS, 0x45, sq, 3);
-		CHECK(status(f) == V2_UNSUPPORTED && rb(f)[0] == 0x07);
+		CHECK(status(f) == V2_UNSUPPORTED && rb(f)[0] == id);
 	}
+	CHECK(!(PARAMS_SUPPORTED & ((1u << 0x06) | (1u << 0x07))));
 
 	// SET_PARAMS: applied together, read back, receiver set up once
 	uint8_t s[64];
@@ -682,21 +687,21 @@ static void test_params(void)
 
 	// a PARAMS_CHANGED would go to a subscriber
 	subscribe(1u << EV_PARAMS_CHANGED, 0, 0, 0, 0, 0);
-	s[0] = 0; s[1] = P_MIC_GAIN; s[2] = 20;
+	s[0] = 0; s[1] = P_TX_TIMEOUT_S; s[2] = 60;
 	f = v2(V2_SET_PARAMS, 0x45, s, 3);
 	host_advance(1);
 	const Frame_t *e;
-	CHECK(events(EV_PARAMS_CHANGED, &e) == 1 && e->body[7] == PSRC_SERIAL && get32(e->body + 8) == (1u << P_MIC_GAIN));
+	CHECK(events(EV_PARAMS_CHANGED, &e) == 1 && e->body[7] == PSRC_SERIAL && get32(e->body + 8) == (1u << P_TX_TIMEOUT_S));
 
 	// atomic: one bad record and nothing changes
 	n = 0;
 	s[n++] = 0;
 	s[n++] = P_BUSY_SQL_LEVEL; s[n++] = 5;
-	s[n++] = P_MIC_GAIN; s[n++] = 32;
+	s[n++] = P_TX_TIMEOUT_S; s[n++] = 25;
 	f = v2(V2_SET_PARAMS, 0x46, s, n);
-	CHECK(status(f) == V2_RANGE && rb(f)[0] == P_MIC_GAIN);
-	CHECK(gEeprom.BUSY_LEVEL == 3 && gEeprom.MIC_GAIN == 20);
-	vec("set_params_range", "after set_params: SQUELCH 5 with MIC_GAIN 32 (out of range): RANGE, detail 0x06, nothing applied");
+	CHECK(status(f) == V2_RANGE && rb(f)[0] == P_TX_TIMEOUT_S);
+	CHECK(gEeprom.BUSY_LEVEL == 3 && gTxTimeoutSeconds[gEeprom.TX_TIMEOUT] == 60);
+	vec("set_params_range", "after set_params and TX_TIMEOUT_S 60: BUSY_SQL_LEVEL 5 with TX_TIMEOUT_S 25 (not one of the timeouts): RANGE, detail 0x0A, nothing applied");
 
 	// duplicate, unknown, truncated
 	n = 0; s[n++] = 0; s[n++] = P_BUSY_SQL_LEVEL; s[n++] = 2; s[n++] = P_BUSY_SQL_LEVEL; s[n++] = 2;
@@ -758,19 +763,19 @@ static void test_params(void)
 
 	// at critical battery nothing may set the receiver up
 	gReducedService = true;
-	n = 0; s[n++] = 0; s[n++] = P_MIC_GAIN; s[n++] = 11; s[n++] = P_BUSY_SQL_LEVEL; s[n++] = 4;
+	n = 0; s[n++] = 0; s[n++] = P_TX_TIMEOUT_S; s[n++] = 10; s[n++] = P_BUSY_SQL_LEVEL; s[n++] = 4;
 	f = v2(V2_SET_PARAMS, 0x58, s, n);
-	CHECK(status(f) == V2_STATE && rb(f)[0] == P_BUSY_SQL_LEVEL && gEeprom.MIC_GAIN == 20);
-	n = 0; s[n++] = 0; s[n++] = P_MIC_GAIN; s[n++] = 11;
-	CHECK(status(v2(V2_SET_PARAMS, 0x59, s, n)) == V2_OK && gEeprom.MIC_GAIN == 11);
+	CHECK(status(f) == V2_STATE && rb(f)[0] == P_BUSY_SQL_LEVEL && gTxTimeoutSeconds[gEeprom.TX_TIMEOUT] == 60);
+	n = 0; s[n++] = 0; s[n++] = P_TX_TIMEOUT_S; s[n++] = 10;
+	CHECK(status(v2(V2_SET_PARAMS, 0x59, s, n)) == V2_OK && gTxTimeoutSeconds[gEeprom.TX_TIMEOUT] == 10);
 	uint8_t op = 1;
 	CHECK(status(v2(V2_SAVE_PARAMS, 0x5A, &op, 1)) == V2_STATE);
 	gReducedService = false;
 
 	// PERSIST needs the settings block
-	n = 0; s[n++] = SETP_PERSIST; s[n++] = P_MIC_GAIN; s[n++] = 10;
+	n = 0; s[n++] = SETP_PERSIST; s[n++] = P_TX_TIMEOUT_S; s[n++] = 20;
 	f = v2(V2_SET_PARAMS, 0x57, s, n);
-	CHECK(status(f) == V2_EEPROM && rb(f)[0] == P_MIC_GAIN);
+	CHECK(status(f) == V2_EEPROM && rb(f)[0] == P_TX_TIMEOUT_S);
 	CHECK(eeprom_writes_in_cal == 0);
 }
 
@@ -785,28 +790,29 @@ static void test_persist(void)
 	uint8_t s[32];
 	unsigned n = 0;
 	s[n++] = SETP_PERSIST;
-	s[n++] = P_MIC_GAIN; s[n++] = 12;
+	s[n++] = P_TX_TIMEOUT_S; s[n++] = 60;
 	s[n++] = P_SERIAL_LOCK_MS; put16(s + n, 40); n += 2;
 	s[n++] = P_PTT_PRESS_MS; s[n++] = 3;
 	f = v2(V2_SET_PARAMS, 0x60, s, n);
 	CHECK(status(f) == V2_OK && (rb(f)[0] & SETR_PERSIST));
-	CHECK(eeprom[0x1D03] == 0xFF);                   // nothing yet: after the reply
+	CHECK(eeprom[0x1D02] == 0xFF);                   // nothing yet: after the reply
 	CHECK(lockms(f) == 20);                          // this frame's lock is the old setting
 
 	// never during a transmission, nor while PTT is pressed
 	gCurrentFunction = FUNCTION_TRANSMIT;
 	host_advance(20);
-	CHECK(eeprom[0x1D03] == 0xFF && PARAMS_PersistPending());
+	CHECK(eeprom[0x1D02] == 0xFF && PARAMS_PersistPending());
 	gCurrentFunction = FUNCTION_FOREGROUND;
 	host_ptt.pressed = true;
 	host_advance(20);
-	CHECK(eeprom[0x1D03] == 0xFF);
+	CHECK(eeprom[0x1D02] == 0xFF);
 	host_ptt.pressed = false;
 
 	// one block per pass
 	const uint32_t w0 = gEepromBlocksWritten;
 	host_advance(1);
-	CHECK(gEepromBlocksWritten == w0 + 1 && eeprom[0x1D03] == 12);
+	CHECK(gEepromBlocksWritten == w0 + 1 && eeprom[0x1D02] == 5);      // 60 s, as its index
+	CHECK(eeprom[0x1D03] == 0xFF);                   // reserved: the retired mic gain
 	host_advance(10);
 	CHECK(!PARAMS_PersistPending());
 	CHECK(eeprom[0x1D50] == 3);
@@ -817,7 +823,7 @@ static void test_persist(void)
 	CHECK(eeprom_writes_in_cal == 0);
 
 	// a legacy EEPROM write session drops queued v2 writes
-	n = 0; s[n++] = SETP_PERSIST; s[n++] = P_MIC_GAIN; s[n++] = 25;
+	n = 0; s[n++] = SETP_PERSIST; s[n++] = P_TX_TIMEOUT_S; s[n++] = 120;
 	v2(V2_SET_PARAMS, 0x6A, s, n);
 	CHECK(PARAMS_PersistPending());
 	{
@@ -828,18 +834,18 @@ static void test_persist(void)
 		host_send(0x051D, w, 16);
 		CHECK(!PARAMS_PersistPending());
 		host_advance(20);
-		CHECK(eeprom[0x1D03] == 12 && eeprom[0x0100] == 0x5A);
+		CHECK(eeprom[0x1D02] == 5 && eeprom[0x0100] == 0x5A);
 		CHECK(gReloadSettingsAfterSerial && gReloadQuietMs > 0);   // the reload (app.c) follows
 		gReloadSettingsAfterSerial = false;
-		gEeprom.MIC_GAIN = 12;
+		gEeprom.TX_TIMEOUT = 5;
 	}
 
 	// stored reads now match, and survive a reboot
-	uint8_t r[4] = { 1, P_MIC_GAIN, P_SERIAL_LOCK_MS };
+	uint8_t r[4] = { 1, P_TX_TIMEOUT_S, P_SERIAL_LOCK_MS };
 	f = v2(V2_GET_PARAMS, 0x61, r, 3);
-	CHECK(rb(f)[2] == 12 && get16(rb(f) + 4) == 40);
+	CHECK(rb(f)[2] == 60 && get16(rb(f) + 4) == 40);
 	host_boot_keep_eeprom();
-	CHECK(gEeprom.MIC_GAIN == 12 && gV2.SERIAL_LOCK_MS == 40 && gEeprom.PTT_PRESS_MS == 3 && gV2.valid);
+	CHECK(gEeprom.TX_TIMEOUT == 5 && gV2.SERIAL_LOCK_MS == 40 && gEeprom.PTT_PRESS_MS == 3 && gV2.valid);
 	host_send_mode(0x0514, &session, 4, false);
 	CHECK(gSerialLockMs == 40);
 
@@ -857,13 +863,13 @@ static void test_persist(void)
 	CHECK(!(rb(f)[10] & 0x01));
 
 	// REVERT drops RAM changes
-	n = 0; s[n++] = 0; s[n++] = P_MIC_GAIN; s[n++] = 30; s[n++] = P_AFC; s[n++] = 0;
+	n = 0; s[n++] = 0; s[n++] = P_TX_TIMEOUT_S; s[n++] = 30; s[n++] = P_AFC; s[n++] = 0;
 	v2(V2_SET_PARAMS, 0x66, s, n);
 	op = 1;
 	f = v2(V2_SAVE_PARAMS, 0x67, &op, 1);
-	CHECK(status(f) == V2_OK && get32(rb(f)) == ((1u << P_MIC_GAIN) | (1u << P_AFC)));
-	CHECK(gEeprom.MIC_GAIN == 12 && gAfcOn);
-	vec("save_params_revert", "settings block valid with MIC_GAIN 12 stored; RAM MIC_GAIN 30 and AFC 0; SAVE_PARAMS op 1 (REVERT)");
+	CHECK(status(f) == V2_OK && get32(rb(f)) == ((1u << P_TX_TIMEOUT_S) | (1u << P_AFC)));
+	CHECK(gEeprom.TX_TIMEOUT == 5 && gAfcOn);
+	vec("save_params_revert", "settings block valid with TX_TIMEOUT_S 60 stored; RAM TX_TIMEOUT_S 30 and AFC 0; SAVE_PARAMS op 1 (REVERT)");
 	op = 2;
 	CHECK(status(v2(V2_SAVE_PARAMS, 0x68, &op, 1)) == V2_RANGE);
 
@@ -957,12 +963,12 @@ static void test_stored_follows_local_saves(void)
 	CHECK(!live_differs(0x78));
 
 	// another 0x1D00-block setting, over a valid block
-	gEeprom.MIC_GAIN = 7;                            // menu MicG
+	gEeprom.TX_TIMEOUT = 6;                          // menu TxTOut, 120 s
 	SETTINGS_SaveSettings();
 	{
-		const uint8_t r[2] = { 1, P_MIC_GAIN };
+		const uint8_t r[2] = { 1, P_TX_TIMEOUT_S };
 		const Frame_t *f = v2(V2_GET_PARAMS, 0x79, r, 2);
-		CHECK(status(f) == V2_OK && rb(f)[1] == P_MIC_GAIN && rb(f)[2] == 7);
+		CHECK(status(f) == V2_OK && rb(f)[1] == P_TX_TIMEOUT_S && rb(f)[2] == 120);
 	}
 
 	// cheap: with nothing written since, a stored read reads no EEPROM
@@ -987,7 +993,7 @@ static void test_stored_follows_local_saves(void)
 	// and after a reboot, what the view said
 	host_boot_keep_eeprom();
 	CHECK(gVfo->Frequency == 14510000 && gVfo->OUTPUT_POWER == 1 && gVfo->CHANNEL_BANDWIDTH == 0);
-	CHECK(gEeprom.DEVIATION_WIDE == 0x0800 && gEeprom.MIC_GAIN == 7);
+	CHECK(gEeprom.DEVIATION_WIDE == 0x0800 && gEeprom.TX_TIMEOUT == 6);
 	CHECK(eeprom_writes_in_cal == 0);
 }
 

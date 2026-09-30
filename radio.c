@@ -201,8 +201,8 @@ void RADIO_SetupRegisters(bool switchToForeground)
 	}
 	BK4819_WriteRegister(BK4819_REG_3F, 0);
 
-	// mic gain 0.5dB/step 0 to 31
-	BK4819_WriteRegister(BK4819_REG_7D, PKT_REG_7D_BASE | (gEeprom.MIC_GAIN & PKT_MIC_GAIN_MAX));
+	// mic gain: fixed at the maximum (packet.h)
+	BK4819_WriteRegister(BK4819_REG_7D, PKT_REG_7D);
 
 	const uint32_t Frequency = gVfo->Frequency;
 	BK4819_SetFrequency(Frequency);
@@ -257,8 +257,7 @@ void RADIO_SetTxParameters(void)
 	// Scrambler, VOX and compander stay off.
 	BK4819_WriteRegister(BK4819_REG_31, BK4819_ReadRegister(BK4819_REG_31) & ~PKT_REG_31_OFF_MASK);
 
-	BK4819_PrepareDigitalTransmit(gEeprom.MIC_GAIN,
-		narrow ? gEeprom.DEVIATION_NARROW : gEeprom.DEVIATION_WIDE);
+	BK4819_PrepareDigitalTransmit(narrow ? gEeprom.DEVIATION_NARROW : gEeprom.DEVIATION_WIDE);
 
 	BK4819_PickRXFilterPathBasedOnFrequency(gVfo->Frequency);
 

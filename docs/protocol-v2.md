@@ -287,16 +287,16 @@ Offset estimate (host clock minus radio clock), with `t0` the host write time, `
 
 ### 6.5 GET_PARAMS (0x5004)
 
-Request: `u8 flags` (bit 0 STORED: return the stored EEPROM value, or the default a blank would load, instead of the live one), then zero or more `u8 param_id` (none = all supported). Reply: `u8 flags`, then `(u8 id, value)` records in request order, each value in the size the parameter table gives. With STORED, RAM-only parameters are omitted, also when asked for by id. An unknown or repeated id gives `BAD_PARAM` (detail = id). STORED values for FREQ_HZ, POWER and BANDWIDTH are those of the operating-channel block (0x1D58), or what a power-on would take when it is not in use (7). STORED always reflects the EEPROM as it is now, whoever wrote it: keypad and menu saves, SET_PARAMS and SAVE_PARAMS persistence, and legacy EEPROM writes.
+Request: `u8 flags` (bit 0 STORED: return the stored EEPROM value, or the default a blank would load, instead of the live one), then zero or more `u8 param_id` (none = all supported). Reply: `u8 flags`, then `(u8 id, value)` records in request order, each value in the size the parameter table gives. With STORED, RAM-only parameters are omitted, also when asked for by id. An unknown or repeated id gives `BAD_PARAM` (detail = id), a retired id (0x06, 0x07, section 7) `UNSUPPORTED` (detail = id). STORED values for FREQ_HZ, POWER and BANDWIDTH are those of the operating-channel block (0x1D58), or what a power-on would take when it is not in use (7). STORED always reflects the EEPROM as it is now, whoever wrote it: keypad and menu saves, SET_PARAMS and SAVE_PARAMS persistence, and legacy EEPROM writes.
 
 ### 6.6 SET_PARAMS (0x5005)
 
 Request: `u8 flags` (bit 0 PERSIST, bit 1 REQUIRE_TX_OK, bit 2 DRY_RUN), then `(u8 id, value)` records, each id at most once.
 
 Semantics:
-- All records are validated first. Any failure rejects the whole command (BAD_PARAM, RANGE, TX_BAND, NOT_PERSISTABLE) and changes nothing.
+- All records are validated first. Any failure rejects the whole command (BAD_PARAM, UNSUPPORTED for a retired id, RANGE, TX_BAND, NOT_PERSISTABLE) and changes nothing.
 - DRY_RUN stops after validation and replies as if applied, without applying.
-- Otherwise all values are applied together, then the receiver is set up once (`RADIO_ConfigureSquelchAndOutputPower` if frequency, power or the busy detector level changed, then `RADIO_SetupRegisters`). A receiver set-up forces busy closed (`CD` cause RETUNE); the audio stays open. Values that only matter at key-up (deviation, mic gain, PA delays) take effect at the next key-up.
+- Otherwise all values are applied together, then the receiver is set up once (`RADIO_ConfigureSquelchAndOutputPower` if frequency, power or the busy detector level changed, then `RADIO_SetupRegisters`). A receiver set-up forces busy closed (`CD` cause RETUNE); the audio stays open. Values that only matter at key-up (deviation, PA delays) take effect at the next key-up.
 - A transmission never sees a change: the frame's lock has already ended any transmission (5.3).
 - In reduced service (critical battery) a change that needs the receiver set up (frequency, power, bandwidth, BUSY_SQL_LEVEL, BUSY_SQL_RAW, AGC_FIX, AFC, RX gains) is refused with `STATE` (detail = the lowest such id); other changes apply.
 - FREQ_HZ keeps the live power and bandwidth; if the step does not hold the frequency, the largest step that does is chosen, so the keypad steps from it.
@@ -371,7 +371,7 @@ Ids for `GET_PARAMS` and `SET_PARAMS`. "Stored" is the EEPROM home when persiste
 | 0x03 | BANDWIDTH | u8 | 0 wide, 1 narrow | 0 | 0x1D5D |
 | 0x04 | DEV_WIDE | u16 | 0 to 0x0A7F | 0x0856 | 0x1D04 |
 | 0x05 | DEV_NARROW | u16 | 0 to 0x0A7F | 0x0756 | 0x1D06 |
-| 0x06 | MIC_GAIN | u8 | 0 to 31 | 31 | 0x1D03 |
+| 0x06 | (retired: MIC_GAIN) | | | | the mic gain is fixed at the maximum (31), since the whole range moved the deviation by only about 0.5 dB; GET_PARAMS and SET_PARAMS reply `UNSUPPORTED`, detail 0x06; 0x1D03 is reserved and ignored |
 | 0x07 | (retired: SQUELCH) | | | | the firmware has no squelch; GET_PARAMS and SET_PARAMS reply `UNSUPPORTED`, detail 0x07 |
 | 0x08 | RX_GAIN | u8 | 0 to 63 | factory calibration | 0x1D08 |
 | 0x09 | RX_DAC_GAIN | u8 | 0 to 15 | 15 | 0x1D09 |
@@ -632,7 +632,7 @@ Everything in sections 2 to 9 is implemented, with the points below settled by t
 | Legacy commands, PKT2 marker, subscription reset on hello, 1.0 s reload timer (2.1, 3) | implemented, byte-compatible |
 | Serial PTT lock in ms, late key up to 30 ms, refusal and latch, lock_ms in every reply (5.3) | implemented |
 | GET_INFO, GET_STATUS, SUBSCRIBE, TIME_SYNC, GET_COUNTERS | implemented |
-| GET_PARAMS, SET_PARAMS, SAVE_PARAMS, all 24 parameters, v2 EEPROM block | implemented |
+| GET_PARAMS, SET_PARAMS, SAVE_PARAMS, all 23 parameters (0x01 to 0x19 except the retired 0x06 and 0x07), v2 EEPROM block | implemented |
 | REG_READ, REG_WRITE, REG_OVERRIDE with expiry | implemented |
 | LEVEL_TONE | mode 1 (raw) implemented; mode 0 replies UNSUPPORTED until the calibration byte 0x1D6F is set, and its law is provisional |
 | Events: CD, RX_BURST, TX_START, TX_END, TX_REFUSED, RSSI_STREAM, HEARTBEAT, BATTERY, PARAMS_CHANGED, EVENTS_LOST, TONE_END, OVERRIDE_EXPIRED, BOOT | implemented |
@@ -641,7 +641,8 @@ Everything in sections 2 to 9 is implemented, with the points below settled by t
 | BOOT reset cause | always 0 |
 | GET_INFO caps bits 4 to 7 (validated measurements) | clear |
 | 0x5020 serial keying | not implemented, reserved; replies UNKNOWN_CMD |
-| Squelch (Tom, 30 September) | removed: receive audio always open; parameter 0x07 retired (UNSUPPORTED); the chip's squelch result kept as the busy detector, level 0x19 and thresholds 0x14 |
+| Squelch (30 September) | removed: receive audio always open; parameter 0x07 retired (UNSUPPORTED); the chip's squelch result kept as the busy detector, level 0x19 and thresholds 0x14 |
+| Mic gain (30 September) | fixed at the maximum; parameter 0x06 retired (UNSUPPORTED), EEPROM 0x1D03 ignored |
 
 Points settled by the implementation, beyond the amendments above:
 - PARAMS_CHANGED with source 0 (keypad or menu) comes from comparing every parameter with its last reported value every 500 ms, so it follows anything the operator changes, up to 0.5 s late.

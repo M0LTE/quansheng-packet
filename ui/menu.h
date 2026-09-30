@@ -25,7 +25,6 @@ enum {
 	MENU_STEP = 0,  // frequency step (the operating channel)
 	MENU_TXP,       // TX power (the operating channel)
 	MENU_W_N,       // bandwidth (the operating channel)
-	MENU_MIC,       // mic gain, REG_7D<4:0>
 	MENU_DEVW,      // wide deviation, REG_40<11:0>
 	MENU_DEVN,      // narrow deviation, REG_40<11:0>
 	MENU_RXG,       // RX AF gain 2, REG_48<9:4>
