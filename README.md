@@ -48,22 +48,22 @@ k5ctl -p /dev/ttyACM0 flash quansheng-packet-v1.0.1.bin --really-flash
 
 On Windows the port is `COM3` or similar; `k5ctl ports` lists them. On macOS, a downloaded binary may need `xattr -d com.apple.quarantine k5ctl` before it will run. `k5ctl` checks the bootloader version before it flashes anything.
 
-### The first start is a factory reset
+### The first flash starts factory-fresh
 
-Flashing over any other firmware (or over v1.0.0 of this one) is like a factory reset. On its first start the radio ignores everything the previous firmware saved and starts with every setting at its default:
+The first time you flash it over other firmware (v1.0.0 of this one included), the radio ignores everything the previous firmware saved and starts with every setting at its default:
 
 - **144.800 MHz**, the European APRS frequency
 - **low power** (`~0.5W`), wide (25 kHz) channel, 12.5 kHz step
 - deviation `0x856` wide and `0x756` narrow, TX timeout 30 s, backlight 20 s, key lock off
 - receive audio gain from the radio's factory calibration
 
-It writes those defaults to its own settings area once, then remembers your changes from then on. Low power is the default because it is kinder to the radio's amplifier and battery on long packet transmissions and on a first key-up into an unknown antenna; raise it with F then 6, the menu or `k5ctl -p PORT set power=high --persist`.
+It writes those defaults to its own settings area once, then remembers your changes from then on. Later updates (from v1.0.1 on) keep your settings. Low power is the default because it is kinder to the radio's amplifier and battery on long packet transmissions and on a first key-up into an unknown antenna; raise it with F then 6, the menu or `k5ctl -p PORT set power=high --persist`.
 
 The radio's **factory calibration** (receive thresholds, transmit power, battery and crystal tuning) is kept: it is read, and never written.
 
 ### Going back
 
-Flashing the stock firmware or another one works the same way: flash its packed image in flash mode. This firmware never writes the factory calibration and never changes your memory channels. It keeps its own settings in the part of the EEPROM the stock firmware uses for DTMF contacts (0x1D00 to 0x1D6F), and its first start overwrites that part, so re-enter any DTMF contacts stored there if you used them. For extra peace of mind, take a backup before you start: `k5ctl -p PORT backup k5-backup.bin`.
+Flashing the stock firmware or another one works the same way: flash its packed image in flash mode. This firmware never writes the factory calibration and never changes your memory channels. It keeps its own settings in the part of the EEPROM the stock firmware uses for DTMF contacts (0x1D00 to 0x1D6F), and its first start over other firmware overwrites that part, so re-enter any DTMF contacts stored there if you used them. For extra peace of mind, take a backup before you start: `k5ctl -p PORT backup k5-backup.bin`.
 
 ## Using the radio
 

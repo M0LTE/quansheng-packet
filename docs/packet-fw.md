@@ -216,7 +216,7 @@ Timing settings, 8 bytes at `0x1D50` in the settings family (one UART write; not
 
 - REG_24 (DTMF detector) is cleared at power-on, not only at the first key-up; the DTMF coefficient writes (REG_09) are gone.
 - REG_48 uses the RX DAC gain setting (default 15) at all times; upstream used the calibration value (usually 8) while its squelch was closed.
-- Every first start after flashing is a factory reset onto 144.800 MHz, whatever the EEPROM held (upstream: a blank EEPROM starts at the bottom of the 2 m band slot, 137.000 MHz).
+- The first start after flashing over other firmware (v1.0.0 of this one included) is a factory reset onto 144.800 MHz, whatever the EEPROM held; updates from v1.0.1 on keep the settings (upstream: a blank EEPROM starts at the bottom of the 2 m band slot, 137.000 MHz).
 - TX is limited to 136 to 174 MHz and 400 to 470 MHz whatever `0x0F40` says; upstream read its TX band plan from there.
 - The first-power-on defaults differ from upstream: no dual watch, and a 30 s TX timeout instead of 1 minute.
 
