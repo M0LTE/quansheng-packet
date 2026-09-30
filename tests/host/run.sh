@@ -47,3 +47,6 @@ gcc $CFLAGS -DPTT_HOST_TEST -o "$out-ptt" tests/host/test_ptt.c ptt.c
 
 gcc $CFLAGS -o "$out-sched" tests/host/test_sched.c scheduler.c misc.c
 "$out-sched"
+
+gcc $CFLAGS $SAN -o "$out-ui" tests/host/test_ui.c ui/menu.c ui/helper.c font.c frequencies.c misc.c
+"$out-ui"

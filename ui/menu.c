@@ -156,8 +156,12 @@ void UI_DisplayMenu(void)
 	UI_PrintString(String, value_x, 0, 1, 8);
 	UI_PrintStringSmallNormal(Hint, value_x, 0, 4);
 
+	// the edit cursor, in the gap between the list and the value: the
+	// small ">" is inked in its columns 1 to 4 and drawn one column in,
+	// so from value_x - 7 it covers value_x - 5 to value_x - 2 and leaves
+	// value_x - 1 clear before the value (the list names end by x 42)
 	if (gIsInSubMenu)
-		UI_PrintStringSmallNormal(">", value_x - 3, 0, 1);
+		UI_PrintStringSmallNormal(">", value_x - 7, 0, 1);
 
 	sprintf(String, "%u/%u", gMenuCursor + 1, MENU_N_ITEMS);
 	UI_PrintStringSmallNormal(String, value_x, 0, 6);
