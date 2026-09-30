@@ -86,7 +86,7 @@ public enum BusyCause : byte
     /// <summary>None.</summary>
     None = 0,
 
-    /// <summary>Squelch edge.</summary>
+    /// <summary>Squelch detector edge.</summary>
     SquelchEdge = 1 << 0,
 
     /// <summary>RSSI edge.</summary>
@@ -132,6 +132,9 @@ public enum TxRefusedReason : byte
 
     /// <summary>Reduced service.</summary>
     ReducedService = 5,
+
+    /// <summary>The radio could not key within the late-key limit of the press (its main loop was held up, by a long legacy EEPROM write session for example).</summary>
+    Late = 6,
 }
 
 /// <summary>Battery class in BATTERY events.</summary>
@@ -389,8 +392,11 @@ public sealed record TxRefusedEvent : RadioEvent
     /// <summary>Why.</summary>
     public TxRefusedReason Reason { get; init; }
 
-    /// <summary>For <see cref="TxRefusedReason.Lock"/>, the lock remaining at the press.</summary>
+    /// <summary>For <see cref="TxRefusedReason.Lock"/>, the lock remaining at the press; zero otherwise.</summary>
     public TimeSpan LockRemaining { get; init; }
+
+    /// <summary>For <see cref="TxRefusedReason.Late"/>, how long after the press edge the radio got to it; zero otherwise.</summary>
+    public TimeSpan LateBy { get; init; }
 }
 
 /// <summary>One RSSI stream sample.</summary>
@@ -566,12 +572,7 @@ internal static class EventParser
                 MicAmplitudeMax = OrNull(r.U16()),
                 MicSamples = r.U16(),
             },
-            4 => new TxRefusedEvent
-            {
-                PressedAtMs = r.U32(),
-                Reason = (TxRefusedReason)r.U8(),
-                LockRemaining = TimeSpan.FromMilliseconds(r.U16()),
-            },
+            4 => ParseRefused(ref r),
             5 => ParseStream(ref r, t),
             6 => new HeartbeatEvent
             {
@@ -632,6 +633,20 @@ internal static class EventParser
         };
         short fe = r.S16();
         return e with { FrequencyErrorHz = fe == 0x7FFF ? null : fe, EndCause = (BusyCause)r.U8() };
+    }
+
+    private static TxRefusedEvent ParseRefused(ref WireReader r)
+    {
+        uint press = r.U32();
+        var reason = (TxRefusedReason)r.U8();
+        var detail = TimeSpan.FromMilliseconds(r.U16());
+        return new TxRefusedEvent
+        {
+            PressedAtMs = press,
+            Reason = reason,
+            LockRemaining = reason == TxRefusedReason.Lock ? detail : TimeSpan.Zero,
+            LateBy = reason == TxRefusedReason.Late ? detail : TimeSpan.Zero,
+        };
     }
 
     private static TxStartEvent ParseTxStart(ref WireReader r, DeviationLaw law)

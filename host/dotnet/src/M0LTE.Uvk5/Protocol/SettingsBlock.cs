@@ -16,7 +16,7 @@ internal static class SettingsBlock
 
     public static readonly RadioParameterId[] V1Parameters =
     [
-        RadioParameterId.DeviationWide, RadioParameterId.DeviationNarrow, RadioParameterId.MicGain, RadioParameterId.Squelch,
+        RadioParameterId.DeviationWide, RadioParameterId.DeviationNarrow, RadioParameterId.MicGain, RadioParameterId.BusySquelchLevel,
         RadioParameterId.RxGain, RadioParameterId.RxDacGain, RadioParameterId.TxTimeoutSeconds, RadioParameterId.PttPressMs,
         RadioParameterId.PttReleaseMs, RadioParameterId.PaEnableDelayMs, RadioParameterId.PaBiasDelayMs,
         RadioParameterId.Backlight, RadioParameterId.KeyLock,
@@ -41,7 +41,7 @@ internal static class SettingsBlock
         int rxGain = block[8];
         return new RadioSettings
         {
-            Squelch = U8(block, 1, 0, 9, 1),
+            BusySquelchLevel = U8(block, 1, 0, 9, 1),
             TxTimeout = TimeSpan.FromSeconds(ParameterCodec.TxTimeoutSeconds[U8(block, 2, 0, 6, 4)]),
             MicGain = U8(block, 3, 0, 31, 31),
             DeviationWide = new Deviation(Dev(block, 4, 0x856), law),
@@ -69,7 +69,7 @@ internal static class SettingsBlock
         {
             switch (id)
             {
-                case RadioParameterId.Squelch: b[1] = (byte)v; break;
+                case RadioParameterId.BusySquelchLevel: b[1] = (byte)v; break;
                 case RadioParameterId.TxTimeoutSeconds: b[2] = (byte)Array.IndexOf(ParameterCodec.TxTimeoutSeconds, (int)v); break;
                 case RadioParameterId.MicGain: b[3] = (byte)v; break;
                 case RadioParameterId.DeviationWide: BinaryPrimitives.WriteUInt16LittleEndian(b.AsSpan(4), (ushort)v); break;

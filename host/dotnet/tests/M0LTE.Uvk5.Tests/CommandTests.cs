@@ -91,11 +91,11 @@ public class CommandTests
         Assert.Equal(AgcSetting.Auto, all.Agc);
         Assert.Equal(24, all.SetIds.Count);
 
-        var some = await rig.Radio.GetSettingsAsync(false, [RadioParameterId.Squelch, RadioParameterId.Power], Ct);
-        Assert.Equal([RadioParameterId.Power, RadioParameterId.Squelch], some.SetIds);
+        var some = await rig.Radio.GetSettingsAsync(false, [RadioParameterId.BusySquelchLevel, RadioParameterId.Power], Ct);
+        Assert.Equal([RadioParameterId.Power, RadioParameterId.BusySquelchLevel], some.SetIds);
 
         var stored = await rig.Radio.GetSettingsAsync(true, cancellationToken: Ct);
-        Assert.Null(stored.SquelchThresholds);
+        Assert.Null(stored.BusySquelchThresholds);
         Assert.Null(stored.Agc);
         Assert.Null(stored.Afc);
     }
@@ -125,7 +125,7 @@ public class CommandTests
     {
         await using var rig = await Rig.StartAsync();
         int before = rig.Sim.ReceivedIds.Count;
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => rig.Radio.SetSettingsAsync(new RadioSettings { Squelch = 10 }, cancellationToken: Ct));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => rig.Radio.SetSettingsAsync(new RadioSettings { BusySquelchLevel = 10 }, cancellationToken: Ct));
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => rig.Radio.SetSettingsAsync(new RadioSettings { FrequencyHz = 145_000_005 }, cancellationToken: Ct));
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => rig.Radio.SetSettingsAsync(new RadioSettings { TxTimeout = TimeSpan.FromSeconds(25) }, cancellationToken: Ct));
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => rig.Radio.SetSettingsAsync(new RadioSettings { SerialLock = TimeSpan.FromMilliseconds(25) }, cancellationToken: Ct));
@@ -141,41 +141,100 @@ public class CommandTests
     {
         await using var rig = await Rig.StartAsync();
         var e = await Assert.ThrowsAsync<K5CommandRejectedException>(() =>
-            rig.Radio.SetSettingsAsync(new RadioSettings { FrequencyHz = 150_000_000, Squelch = 3 }, SetSettingsFlags.RequireTxAllowed, Ct));
+            rig.Radio.SetSettingsAsync(new RadioSettings { FrequencyHz = 150_000_000, BusySquelchLevel = 3 }, SetSettingsFlags.RequireTxAllowed, Ct));
         Assert.Equal(K5Status.TxBand, e.Status);
-        Assert.Equal(1, rig.Sim.LiveSettings.Squelch);   // nothing changed
+        Assert.Equal(1, rig.Sim.LiveSettings.BusySquelchLevel);   // nothing changed
 
         var tone = await Assert.ThrowsAsync<K5CommandRejectedException>(() => rig.Radio.StartLevelToneAsync(1000, 3000, TimeSpan.FromSeconds(1), Ct));
         Assert.Equal(K5Status.Unsupported, tone.Status);
     }
 
     [Fact]
+    public async Task There_is_no_squelch()
+    {
+        await using var rig = await Rig.StartAsync();
+        Assert.Equal(0x03FFFF7Eu, rig.Radio.Firmware.SupportedParameters.Aggregate(0u, (m, id) => m | (1u << (int)id)));
+        var e = await Assert.ThrowsAsync<K5CommandRejectedException>(() => rig.Radio.GetSettingsAsync(false, [(RadioParameterId)0x07], Ct));
+        Assert.Equal(K5Status.Unsupported, e.Status);
+        Assert.Equal(0x07, e.Detail);
+
+        // The busy detector level never mutes anything; busy follows the chip's detector.
+        await rig.Radio.SetSettingsAsync(new RadioSettings { BusySquelchLevel = 9 }, cancellationToken: Ct);
+        Assert.Equal(Simulation.SimulatedAudioOutput.Receive, rig.Sim.AudioOutput);
+        rig.Sim.StartCarrier(Rssi.FromDbm(-90));
+        var s = await rig.Radio.GetStatusAsync(Ct);
+        Assert.Equal(RadioState.Busy, s.State);
+        Assert.True(s.Flags.HasFlag(StatusFlags.SquelchDetector));
+        Assert.Equal(9, s.BusySquelchLevel);
+        Assert.Equal(0xFF, s.Channel);
+        rig.Sim.StopCarrier();
+        Assert.Equal(RadioState.Idle, (await rig.Radio.GetStatusAsync(Ct)).State);
+    }
+
+    [Fact]
+    public async Task Level_tone_returns_to_receive_audio()
+    {
+        await using var rig = await Rig.StartAsync();
+        await rig.Radio.StartLevelToneRawAsync(1000, 40, TimeSpan.FromSeconds(5), Ct);
+        Assert.Equal(Simulation.SimulatedAudioOutput.Tone, rig.Sim.AudioOutput);
+        await rig.Radio.StopLevelToneAsync(Ct);
+        Assert.Equal(Simulation.SimulatedAudioOutput.Receive, rig.Sim.AudioOutput);
+    }
+
+    [Fact]
+    public async Task Frequency_persists_in_the_operating_channel_block()
+    {
+        await using var rig = await Rig.StartAsync();
+        await rig.Radio.SetSettingsAsync(new RadioSettings { FrequencyHz = 433_500_000, Power = TxPower.Mid }, SetSettingsFlags.Persist, Ct);
+        byte[] e = rig.Sim.Eeprom;
+        Assert.Equal(43_350_000u, System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(e.AsSpan(0x1D58)));
+        Assert.Equal(1, e[0x1D5C]);
+        Assert.Equal(0, e[0x1D5D]);
+        var stored = await rig.Radio.GetSettingsAsync(true, [RadioParameterId.FrequencyHz, RadioParameterId.Power], Ct);
+        Assert.Equal(433_500_000, stored.FrequencyHz);
+        Assert.Equal(TxPower.Mid, stored.Power);
+    }
+
+    [Fact]
+    public async Task Persist_needs_a_valid_settings_block()
+    {
+        var blank = new byte[0x2000];
+        Array.Fill(blank, (byte)0xFF);
+        new Random(3).NextBytes(blank.AsSpan(0x1E00));
+        await using var rig = await Rig.StartAsync(simOptions: new SimulatedRadioOptions { Eeprom = blank });
+        var e = await Assert.ThrowsAsync<K5CommandRejectedException>(() =>
+            rig.Radio.SetSettingsAsync(new RadioSettings { FrequencyHz = 145_000_000 }, SetSettingsFlags.Persist, Ct));
+        Assert.Equal(K5Status.Eeprom, e.Status);
+        Assert.Equal(1, (await rig.Radio.GetSettingsAsync(true, [RadioParameterId.BusySquelchLevel], Ct)).BusySquelchLevel);
+    }
+
+    [Fact]
     public async Task Dry_run_changes_nothing()
     {
         await using var rig = await Rig.StartAsync();
-        var r = await rig.Radio.SetSettingsAsync(new RadioSettings { Squelch = 5 }, SetSettingsFlags.DryRun, Ct);
-        Assert.Equal(5, r.Applied.Squelch);
-        Assert.Equal(1, rig.Sim.LiveSettings.Squelch);
+        var r = await rig.Radio.SetSettingsAsync(new RadioSettings { BusySquelchLevel = 5 }, SetSettingsFlags.DryRun, Ct);
+        Assert.Equal(5, r.Applied.BusySquelchLevel);
+        Assert.Equal(1, rig.Sim.LiveSettings.BusySquelchLevel);
     }
 
     [Fact]
     public async Task Persist_save_and_revert()
     {
         await using var rig = await Rig.StartAsync();
-        var r = await rig.Radio.SetSettingsAsync(new RadioSettings { Squelch = 4, DeviationWide = new Deviation(0x800) }, SetSettingsFlags.Persist, Ct);
+        var r = await rig.Radio.SetSettingsAsync(new RadioSettings { BusySquelchLevel = 4, DeviationWide = new Deviation(0x800) }, SetSettingsFlags.Persist, Ct);
         Assert.True(r.PersistQueued);
         Assert.Equal(4, rig.Sim.Eeprom[0x1D01]);
         Assert.Equal(0x00, rig.Sim.Eeprom[0x1D04]);
         Assert.Equal(0x08, rig.Sim.Eeprom[0x1D05]);
 
-        await rig.Radio.SetSettingsAsync(new RadioSettings { Squelch = 7, Backlight = 6 }, cancellationToken: Ct);
+        await rig.Radio.SetSettingsAsync(new RadioSettings { BusySquelchLevel = 7, Backlight = 6 }, cancellationToken: Ct);
         var reverted = await rig.Radio.RevertSettingsAsync(Ct);
-        Assert.Contains(RadioParameterId.Squelch, reverted);
-        Assert.Equal(4, rig.Sim.LiveSettings.Squelch);
+        Assert.Contains(RadioParameterId.BusySquelchLevel, reverted);
+        Assert.Equal(4, rig.Sim.LiveSettings.BusySquelchLevel);
 
-        await rig.Radio.SetSettingsAsync(new RadioSettings { Squelch = 6 }, cancellationToken: Ct);
+        await rig.Radio.SetSettingsAsync(new RadioSettings { BusySquelchLevel = 6 }, cancellationToken: Ct);
         var saved = await rig.Radio.SaveSettingsAsync(Ct);
-        Assert.Equal([RadioParameterId.Squelch], saved);
+        Assert.Equal([RadioParameterId.BusySquelchLevel], saved);
         Assert.Equal(6, rig.Sim.Eeprom[0x1D01]);
     }
 
@@ -280,7 +339,7 @@ public class CommandTests
     {
         await using var rig = await Rig.StartAsync(FirmwareKind.PacketV1);
         var s = await rig.Radio.GetSettingsAsync(cancellationToken: Ct);
-        Assert.Equal(1, s.Squelch);
+        Assert.Equal(1, s.BusySquelchLevel);
         Assert.Equal(TimeSpan.FromSeconds(30), s.TxTimeout);
         Assert.Equal(0x856, s.DeviationWide!.Value.Register);
         Assert.Equal(0x756, s.DeviationNarrow!.Value.Register);
@@ -293,19 +352,19 @@ public class CommandTests
     public async Task V1_settings_write_needs_a_backup_and_applies_after_quiet()
     {
         await using var rig = await Rig.StartAsync(FirmwareKind.PacketV1);
-        await Assert.ThrowsAsync<K5SafetyException>(() => rig.Radio.SetSettingsAsync(new RadioSettings { Squelch = 3 }, cancellationToken: Ct));
+        await Assert.ThrowsAsync<K5SafetyException>(() => rig.Radio.SetSettingsAsync(new RadioSettings { BusySquelchLevel = 3 }, cancellationToken: Ct));
         await Assert.ThrowsAsync<K5FirmwareNotSupportedException>(() => rig.Radio.SetSettingsAsync(new RadioSettings { FrequencyHz = 145_000_000 }, cancellationToken: Ct));
 
         await rig.Radio.BackupEepromAsync(cancellationToken: Ct);
-        var r = await rig.Radio.SetSettingsAsync(new RadioSettings { Squelch = 3, DeviationWide = new Deviation(0x762), PaBiasDelay = TimeSpan.FromMilliseconds(4) }, cancellationToken: Ct);
+        var r = await rig.Radio.SetSettingsAsync(new RadioSettings { BusySquelchLevel = 3, DeviationWide = new Deviation(0x762), PaBiasDelay = TimeSpan.FromMilliseconds(4) }, cancellationToken: Ct);
         Assert.Equal(TimeSpan.FromSeconds(1.5), r.AppliesAfterQuiet);
-        Assert.Equal(3, r.Applied.Squelch);
+        Assert.Equal(3, r.Applied.BusySquelchLevel);
         Assert.Null(r.Applied.MicGain);
         Assert.Equal(3, rig.Sim.Eeprom[0x1D01]);
         Assert.Equal(0x62, rig.Sim.Eeprom[0x1D04]);
         Assert.Equal(4, rig.Sim.Eeprom[0x1D53]);
-        Assert.Equal(1, rig.Sim.LiveSettings.Squelch);    // not yet: the reload waits for quiet
-        await Rig.Until(() => rig.Sim.LiveSettings.Squelch == 3, 4000);
+        Assert.Equal(1, rig.Sim.LiveSettings.BusySquelchLevel);    // not yet: the reload waits for quiet
+        await Rig.Until(() => rig.Sim.LiveSettings.BusySquelchLevel == 3, 4000);
     }
 
     [Fact]

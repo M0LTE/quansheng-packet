@@ -154,7 +154,7 @@ public enum BusySources : byte
     /// <summary>None (not a valid setting).</summary>
     None = 0,
 
-    /// <summary>The BK4819 squelch result, polled every 1 ms. Always open at squelch 0.</summary>
+    /// <summary>The chip's squelch detector (REG_0C bit 1), polled every 1 ms, with the thresholds of the busy detector level. A detector only: nothing is muted.</summary>
     Squelch = 1,
 
     /// <summary>RSSI thresholds with hang time, sampled every 2 ms.</summary>
@@ -199,11 +199,11 @@ public readonly record struct AgcReading(byte Raw)
     public override string ToString() => $"{(IsFixed ? "fixed" : "auto")} {Index}";
 }
 
-/// <summary>Raw squelch thresholds (SQL_RAW, RAM only): overrides the squelch level table until SQUELCH is set or the radio reboots.</summary>
+/// <summary>Raw thresholds of the chip's squelch detector (BUSY_SQL_RAW, RAM only): override the busy detector level's table row until BUSY_SQL_LEVEL is set or the radio reboots.</summary>
 /// <param name="RssiOpen">RSSI open threshold, 0 to 255.</param>
 /// <param name="RssiClose">RSSI close threshold, 0 to 255.</param>
 /// <param name="NoiseOpen">Noise open threshold, 0 to 127.</param>
 /// <param name="NoiseClose">Noise close threshold, 0 to 127.</param>
 /// <param name="GlitchOpen">Glitch open threshold, 0 to 255.</param>
 /// <param name="GlitchClose">Glitch close threshold, 0 to 255.</param>
-public readonly record struct SquelchThresholds(byte RssiOpen, byte RssiClose, byte NoiseOpen, byte NoiseClose, byte GlitchOpen, byte GlitchClose);
+public readonly record struct BusySquelchThresholds(byte RssiOpen, byte RssiClose, byte NoiseOpen, byte NoiseClose, byte GlitchOpen, byte GlitchClose);

@@ -135,7 +135,7 @@ public sealed partial class K5Radio
             Flags2 = (StatusFlags2)r.U8(),
             Power = (TxPower)r.U8(),
             Bandwidth = (Bandwidth)r.U8(),
-            Squelch = r.U8(),
+            BusySquelchLevel = r.U8(),
             Deviation = new Deviation((ushort)Math.Min(r.U16(), Deviation.MaxRegister), _options.DeviationLaw),
             Rssi = new Rssi(r.U16()),
             Noise = r.U8(),

@@ -7,7 +7,7 @@ What you get:
 - **Carrier detect from the radio itself**: busy edges as events, timestamped by the radio, so CSMA does not have to guess from audio.
 - **A per-burst signal report** after every received packet: RSSI mean, min and max, noise and glitch.
 - **Safe keying**: the library always knows when the radio will honour a PTT press, and can hold the serial port quiet while you transmit.
-- **Live settings** (frequency, power, deviation in kHz, squelch, busy thresholds, PTT timing) changed atomically and read back.
+- **Live settings** (frequency, power, deviation in kHz, busy detector thresholds, PTT timing) changed atomically and read back. There is no squelch: the packet firmware's receive audio is always open, and the chip's squelch result is only a carrier detector for busy (`BusySquelchLevel`, 1 to 9).
 - **Safety rails** that cannot be turned off: no writes to the calibration area, no EEPROM writes without a verified backup of this radio, no writes to dangerous registers, no serial keying.
 - **A simulated radio** for your own tests, a bootloader flasher, and `k5ctl`, a command-line tool.
 
@@ -177,7 +177,7 @@ k5ctl -p /dev/ttyACM0 watch --seconds 60
 k5ctl -p /dev/ttyACM0 get
 k5ctl -p /dev/ttyACM0 set frequency=144.800MHz dev-wide=3kHz power=high
 k5ctl -p /dev/ttyACM0 backup backups/k5.bin
-k5ctl -p /dev/ttyACM0 set squelch=2 --backup backups/k5.bin     # v1: an EEPROM write
+k5ctl -p /dev/ttyACM0 set mic-gain=31 --backup backups/k5.bin   # v1: an EEPROM write
 k5ctl -p /dev/ttyACM0 flash firmware.packed.bin                 # dry run
 k5ctl --sim v2 watch --seconds 10                               # no radio needed
 ```

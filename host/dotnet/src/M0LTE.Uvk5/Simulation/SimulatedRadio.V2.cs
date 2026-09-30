@@ -6,7 +6,6 @@ namespace M0LTE.Uvk5.Simulation;
 public sealed partial class SimulatedRadio
 {
     private readonly Dictionary<RadioParameterId, ulong> _live = [];
-    private readonly Dictionary<RadioParameterId, ulong> _storedChannel = [];
     private readonly List<StoredEvent> _ring = [];
     private readonly uint[] _counters = new uint[14];
     private readonly List<RegisterOverride> _ramOverrides = [];
@@ -141,6 +140,12 @@ public sealed partial class SimulatedRadio
 
     private bool SettingsBlockValid() => _eeprom[0x1D00] == 1;
 
+    private bool ChannelBlockInUse()
+    {
+        uint f = BinaryPrimitives.ReadUInt32LittleEndian(_eeprom.AsSpan(0x1D58));
+        return SettingsBlockValid() && f is >= 5_000_000 and <= 60_000_000;
+    }
+
     private bool V2BlockValid() => SettingsBlockValid() && _eeprom[0x1D60] == 1;
 
     private ulong StoredOrDefault(RadioParameterId id)
@@ -156,13 +161,13 @@ public sealed partial class SimulatedRadio
 
         return id switch
         {
-            RadioParameterId.FrequencyHz => _storedChannel.TryGetValue(id, out var f) ? f : (ulong)_options.FrequencyHz,
-            RadioParameterId.Power => _storedChannel.TryGetValue(id, out var p) ? p : 0,
-            RadioParameterId.Bandwidth => _storedChannel.TryGetValue(id, out var b) ? b : 0,
+            RadioParameterId.FrequencyHz => ChannelBlockInUse() ? BinaryPrimitives.ReadUInt32LittleEndian(_eeprom.AsSpan(0x1D58)) * 10UL : (ulong)_options.FrequencyHz,
+            RadioParameterId.Power => (ulong)U8(0x1D5C, 0, 2, 0, ChannelBlockInUse()),
+            RadioParameterId.Bandwidth => (ulong)U8(0x1D5D, 0, 1, 0, ChannelBlockInUse()),
             RadioParameterId.DeviationWide => (ulong)U16(0x1D04, Deviation.MaxRegister, 0x856, v1),
             RadioParameterId.DeviationNarrow => (ulong)U16(0x1D06, Deviation.MaxRegister, 0x756, v1),
             RadioParameterId.MicGain => (ulong)U8(0x1D03, 0, 31, 31, v1),
-            RadioParameterId.Squelch => (ulong)U8(0x1D01, 0, 9, 1, v1),
+            RadioParameterId.BusySquelchLevel => (ulong)Math.Max(1, U8(0x1D01, 0, 9, 1, v1)),    // a stored 0 (an old open squelch) reads as 1
             RadioParameterId.RxGain => (ulong)U8(0x1D08, 0, 63, 50, v1),
             RadioParameterId.RxDacGain => (ulong)U8(0x1D09, 0, 15, 15, v1),
             RadioParameterId.TxTimeoutSeconds => (ulong)ParameterCodec.TxTimeoutSeconds[U8(0x1D02, 0, 6, 4, v1)],
@@ -175,7 +180,7 @@ public sealed partial class SimulatedRadio
             RadioParameterId.BusyHangMs => (ulong)U8(0x1D63, 0, 250, 20, v2),
             RadioParameterId.BusyRssiOpen => (ulong)U16(0x1D64, 511, 110, v2),
             RadioParameterId.BusyRssiClose => (ulong)U16(0x1D66, 511, 104, v2),
-            RadioParameterId.SquelchRaw => 0x28_30_40_48_50_5AUL,
+            RadioParameterId.BusySquelchRaw => 0x28_30_40_48_50_5AUL,
             RadioParameterId.AgcFix => 0xFF,
             RadioParameterId.Afc => 1,
             RadioParameterId.Backlight => (ulong)U8(0x1D0A, 0, 7, 3, v1),
@@ -248,7 +253,7 @@ public sealed partial class SimulatedRadio
         }
 
         int src = (int)Param(RadioParameterId.BusySource);
-        bool squelchOpen = Param(RadioParameterId.Squelch) == 0 || _carrier is not null;
+        bool squelchOpen = _carrier is not null;       // the chip's squelch detector; nothing is muted
         if (_carrier is { } c)
         {
             if (c.Rssi.Raw >= Param(RadioParameterId.BusyRssiOpen))
@@ -283,7 +288,7 @@ public sealed partial class SimulatedRadio
 
         _busy = busy;
         _busyEdgeMs = now;
-        int sources = (_carrier is not null || Param(RadioParameterId.Squelch) == 0 ? 1 : 0) | (_rssiBusy ? 2 : 0);
+        int sources = (_carrier is not null ? 1 : 0) | (_rssiBusy ? 2 : 0);
         if (!busy)
         {
             sources = 0;
@@ -474,9 +479,9 @@ public sealed partial class SimulatedRadio
     private StatusFlags Flags1()
     {
         var f = StatusFlags.None;
-        if (_carrier is not null || Param(RadioParameterId.Squelch) == 0)
+        if (_carrier is not null && !_transmitting)
         {
-            f |= StatusFlags.SquelchOpen;
+            f |= StatusFlags.SquelchDetector;
         }
 
         if (_busy)
@@ -518,7 +523,7 @@ public sealed partial class SimulatedRadio
     }
 
     private RadioState State() =>
-        _transmitting ? RadioState.Transmitting : _carrier is not null || _busy ? RadioState.Receiving : RadioState.Idle;
+        _transmitting ? RadioState.Transmitting : _busy ? RadioState.Busy : RadioState.Idle;
 
     // ------------------------------------------------------------------ v2 commands
 
@@ -622,7 +627,7 @@ public sealed partial class SimulatedRadio
         uint busyAge = NowMs() - _busyEdgeMs;
         int txLeft = _transmitting ? Math.Max(0, (int)((TxTimeoutSeconds() * 1000 - (NowMs() - _txStartMs)) / 100)) : 0xFFFF;
         var w = new WireWriter().U32(NowMs()).U32((uint)Param(RadioParameterId.FrequencyHz)).U8((int)State()).U8((int)Flags1()).U8((int)flags2)
-            .U8((int)Param(RadioParameterId.Power)).U8(bw).U8((int)Param(RadioParameterId.Squelch))
+            .U8((int)Param(RadioParameterId.Power)).U8(bw).U8((int)Param(RadioParameterId.BusySquelchLevel))
             .U16((int)Param(bw == 0 ? RadioParameterId.DeviationWide : RadioParameterId.DeviationNarrow))
             .U16(rssi).U8(noise).U8(glitch).U8(0).U8(BatteryLevel()).U16(BatteryMillivolts / 10 * 10).U16(LockMs()).U16(txLeft)
             .U16((int)Math.Min(busyAge, 65535)).U16(_nextSeq).U8(0xFF).U8(TxTimeoutSeconds());
@@ -721,6 +726,12 @@ public sealed partial class SimulatedRadio
         var seen = new HashSet<RadioParameterId>();
         foreach (var p in ids)
         {
+            if ((byte)p == ParameterCodec.RetiredSquelch)
+            {
+                Error(id, tag, K5Status.Unsupported, (byte)p);      // the firmware has no squelch
+                return;
+            }
+
             if (!ParameterCodec.IsKnown(p) || !seen.Add(p))
             {
                 Error(id, tag, K5Status.BadParameter, (byte)p);
@@ -760,6 +771,12 @@ public sealed partial class SimulatedRadio
         {
             var p = (RadioParameterId)a[pos];
             int size = ParameterCodec.SizeOf(p);
+            if ((byte)p == ParameterCodec.RetiredSquelch)
+            {
+                Error(id, tag, K5Status.Unsupported, (byte)p);
+                return;
+            }
+
             if (size < 0 || records.Any(r => r.Id == p))
             {
                 Error(id, tag, K5Status.BadParameter, (byte)p);
@@ -825,9 +842,9 @@ public sealed partial class SimulatedRadio
 
                 _live[p] = v;
                 mask |= 1u << (int)p;
-                if (p == RadioParameterId.Squelch)
+                if (p == RadioParameterId.BusySquelchLevel)
                 {
-                    _live[RadioParameterId.SquelchRaw] = StoredOrDefault(RadioParameterId.SquelchRaw);
+                    _live[RadioParameterId.BusySquelchRaw] = StoredOrDefault(RadioParameterId.BusySquelchRaw);
                 }
             }
 
@@ -868,7 +885,7 @@ public sealed partial class SimulatedRadio
         RadioParameterId.Bandwidth => v <= 1,
         RadioParameterId.DeviationWide or RadioParameterId.DeviationNarrow => v <= Deviation.MaxRegister,
         RadioParameterId.MicGain => v <= 31,
-        RadioParameterId.Squelch => v <= 9,
+        RadioParameterId.BusySquelchLevel => v is >= 1 and <= 9,
         RadioParameterId.RxGain => v <= 63,
         RadioParameterId.RxDacGain => v <= 15,
         RadioParameterId.TxTimeoutSeconds => Array.IndexOf(ParameterCodec.TxTimeoutSeconds, (int)v) >= 0,
@@ -881,7 +898,7 @@ public sealed partial class SimulatedRadio
         RadioParameterId.BusyRssiOpen => v <= 511,
         RadioParameterId.BusyRssiClose => v <= 511 && v <= rssiOpen,
         RadioParameterId.BusyHangMs => v <= 250,
-        RadioParameterId.SquelchRaw => ((v >> 16) & 0xFF) <= 127 && ((v >> 24) & 0xFF) <= 127,
+        RadioParameterId.BusySquelchRaw => ((v >> 16) & 0xFF) <= 127 && ((v >> 24) & 0xFF) <= 127,
         RadioParameterId.AgcFix => v == 0xFF || v <= 7,
         RadioParameterId.Afc or RadioParameterId.KeyLock => v <= 1,
         RadioParameterId.Backlight => v <= 7,
@@ -904,11 +921,17 @@ public sealed partial class SimulatedRadio
         Counter(13);
         switch (p)
         {
-            case RadioParameterId.FrequencyHz or RadioParameterId.Power or RadioParameterId.Bandwidth: _storedChannel[p] = v; break;
+            case RadioParameterId.FrequencyHz or RadioParameterId.Power or RadioParameterId.Bandwidth:
+                // One operating channel: the block at 0x1D58 holds frequency, power, bandwidth and step together.
+                BinaryPrimitives.WriteUInt32LittleEndian(_eeprom.AsSpan(0x1D58), (uint)(Param(RadioParameterId.FrequencyHz) / 10));
+                _eeprom[0x1D5C] = (byte)Param(RadioParameterId.Power);
+                _eeprom[0x1D5D] = (byte)Param(RadioParameterId.Bandwidth);
+                _eeprom[0x1D5E] = 0;
+                break;
             case RadioParameterId.DeviationWide: W16(0x1D04, v); break;
             case RadioParameterId.DeviationNarrow: W16(0x1D06, v); break;
             case RadioParameterId.MicGain: W8(0x1D03, v); break;
-            case RadioParameterId.Squelch: W8(0x1D01, v); break;
+            case RadioParameterId.BusySquelchLevel: W8(0x1D01, v); break;
             case RadioParameterId.RxGain: W8(0x1D08, v); break;
             case RadioParameterId.RxDacGain: W8(0x1D09, v); break;
             case RadioParameterId.TxTimeoutSeconds: W8(0x1D02, (ulong)Array.IndexOf(ParameterCodec.TxTimeoutSeconds, (int)v)); break;

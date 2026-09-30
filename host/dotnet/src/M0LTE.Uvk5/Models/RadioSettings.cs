@@ -23,9 +23,6 @@ public enum RadioParameterId : byte
     /// <summary>Mic gain, REG_7D&lt;4:0&gt; (u8).</summary>
     MicGain = 0x06,
 
-    /// <summary>Squelch level 0 to 9 (u8).</summary>
-    Squelch = 0x07,
-
     /// <summary>RX AF gain 2, REG_48&lt;9:4&gt; (u8).</summary>
     RxGain = 0x08,
 
@@ -62,8 +59,8 @@ public enum RadioParameterId : byte
     /// <summary>RSSI busy hang, ms (u8).</summary>
     BusyHangMs = 0x13,
 
-    /// <summary>Raw squelch thresholds (6 bytes, RAM only).</summary>
-    SquelchRaw = 0x14,
+    /// <summary>Thresholds of the chip's squelch detector used for busy (6 bytes, RAM only; was SQL_RAW).</summary>
+    BusySquelchRaw = 0x14,
 
     /// <summary>AGC fix (u8, RAM only).</summary>
     AgcFix = 0x15,
@@ -76,6 +73,9 @@ public enum RadioParameterId : byte
 
     /// <summary>Key lock (u8).</summary>
     KeyLock = 0x18,
+
+    /// <summary>Busy detector level 1 to 9 (u8): the factory squelch-table row the chip's squelch detector uses. Not a squelch: receive audio is always open.</summary>
+    BusySquelchLevel = 0x19,
 }
 
 /// <summary>
@@ -83,6 +83,12 @@ public enum RadioParameterId : byte
 /// supported by this firmware or not asked for); when writing, only non-null properties are sent,
 /// all together, so a change is atomic on v2.
 /// </summary>
+/// <remarks>
+/// There is no squelch setting: the packet firmware has no squelch and its receive audio is always
+/// open. Parameter 0x07 (SQUELCH) is retired, and the radio answers UNSUPPORTED if asked for it.
+/// The chip's squelch result survives only as a carrier detector for busy, set by
+/// <see cref="BusySquelchLevel"/> and <see cref="BusySquelchThresholds"/>.
+/// </remarks>
 /// <remarks>Values are validated against the protocol's ranges when a change is sent, before
 /// anything goes to the radio.</remarks>
 public sealed record RadioSettings
@@ -104,9 +110,6 @@ public sealed record RadioSettings
 
     /// <summary>Mic gain, 0 to 31 (barely moves deviation on the DIG path; default 31).</summary>
     public int? MicGain { get; init; }
-
-    /// <summary>Squelch level, 0 (open) to 9. Setting it drops any <see cref="SquelchThresholds"/>.</summary>
-    public int? Squelch { get; init; }
 
     /// <summary>RX AF gain 2, REG_48&lt;9:4&gt;, 0 to 63 in 0.5 dB steps.</summary>
     public int? RxGain { get; init; }
@@ -144,8 +147,16 @@ public sealed record RadioSettings
     /// <summary>RSSI busy hang time, 0 to 250 ms.</summary>
     public TimeSpan? BusyHang { get; init; }
 
-    /// <summary>Raw squelch thresholds (RAM only).</summary>
-    public SquelchThresholds? SquelchThresholds { get; init; }
+    /// <summary>
+    /// Busy detector level, 1 to 9 (default 1): which row of the factory squelch tables the chip's
+    /// squelch detector uses for the busy state. It never mutes anything. Setting it drops any
+    /// <see cref="BusySquelchThresholds"/>. On packet firmware v1, where the same EEPROM byte
+    /// (0x1D01) is a real squelch, the value read is that squelch level, 0 to 9.
+    /// </summary>
+    public int? BusySquelchLevel { get; init; }
+
+    /// <summary>Raw thresholds for the chip's squelch detector (busy only, RAM only).</summary>
+    public BusySquelchThresholds? BusySquelchThresholds { get; init; }
 
     /// <summary>AGC mode (RAM only, diagnostic).</summary>
     public AgcSetting? Agc { get; init; }

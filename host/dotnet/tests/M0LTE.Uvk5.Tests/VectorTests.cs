@@ -189,17 +189,24 @@ public class VectorTests
 
         var all = await radio.GetSettingsAsync(cancellationToken: Ct);
         Assert.Equal(24, all.SetIds.Count);
+        Assert.Equal(1, all.BusySquelchLevel);
         Assert.Equal(45, all.RxGain);
         Assert.Equal(0x856, all.DeviationWide!.Value.Register);
         Assert.Equal(TimeSpan.FromMilliseconds(20), all.SerialLock);
         Assert.Equal(new Rssi(110), all.BusyRssiOpen);
 
-        var stored = await radio.GetSettingsAsync(true, [RadioParameterId.SquelchRaw, RadioParameterId.Squelch, RadioParameterId.RxGain], Ct);
-        Assert.Null(stored.SquelchThresholds);
-        Assert.Equal(1, stored.Squelch);
+        var stored = await radio.GetSettingsAsync(true, [RadioParameterId.BusySquelchRaw, RadioParameterId.BusySquelchLevel, RadioParameterId.RxGain], Ct);
+        Assert.Null(stored.BusySquelchThresholds);
+        Assert.Equal(1, stored.BusySquelchLevel);
         Assert.Equal(45, stored.RxGain);
 
-        var set = await radio.SetSettingsAsync(new RadioSettings { FrequencyHz = 433_500_000, Squelch = 3, DeviationWide = new Deviation(0x800) }, cancellationToken: Ct);
+        var retired = await Assert.ThrowsAsync<K5CommandRejectedException>(() =>
+            radio.GetSettingsAsync(false, [RadioParameterId.MicGain, (RadioParameterId)0x07], Ct));
+        Assert.Equal(K5Status.Unsupported, retired.Status);
+        Assert.Equal(0x07, retired.Detail);
+        Assert.Contains("no squelch", retired.Message);
+
+        var set = await radio.SetSettingsAsync(new RadioSettings { FrequencyHz = 433_500_000, BusySquelchLevel = 3, DeviationWide = new Deviation(0x800) }, cancellationToken: Ct);
         Assert.True(set.TxAllowed);
         Assert.True(set.Retuned);
         Assert.Equal(433_500_000, set.Applied.FrequencyHz);
@@ -270,6 +277,7 @@ public class VectorTests
     [InlineData("level_tone_raw")]
     [InlineData("level_tone_uncalibrated")]
     [InlineData("set_params_range")]
+    [InlineData("get_params_squelch_retired")]
     public async Task Simulator_answers_like_the_firmware(string name)
     {
         using var sim = new Simulation.SimulatedRadio(new Simulation.SimulatedRadioOptions { Version = "PKTFW test", TimeProvider = new Microsoft.Extensions.Time.Testing.FakeTimeProvider() });
@@ -361,7 +369,7 @@ public class VectorTests
                 MessageIds.GetInfo => Get("get_info"),
                 MessageIds.GetStatus => Get("get_status"),
                 MessageIds.Subscribe => Get("subscribe"),
-                MessageIds.GetParams => body[1] == 0 ? Get("get_params_all") : Get("get_params_stored"),
+                MessageIds.GetParams => body[1] == 1 ? Get("get_params_stored") : body.Length == 2 ? Get("get_params_all") : Get("get_params_squelch_retired"),
                 MessageIds.SetParams => Get("set_params"),
                 MessageIds.SaveParams => Get("save_params_revert"),
                 MessageIds.TimeSync => Get("time_sync"),

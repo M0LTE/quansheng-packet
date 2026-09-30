@@ -51,12 +51,12 @@ public class ModelTests
     [Fact]
     public void Settings_merge_and_ids()
     {
-        var a = new RadioSettings { Squelch = 1, Power = TxPower.Low };
+        var a = new RadioSettings { BusySquelchLevel = 1, Power = TxPower.Low };
         var b = new RadioSettings { Power = TxPower.High, KeyLock = true };
         var m = a.Merge(b);
-        Assert.Equal(1, m.Squelch);
+        Assert.Equal(1, m.BusySquelchLevel);
         Assert.Equal(TxPower.High, m.Power);
-        Assert.Equal([RadioParameterId.Power, RadioParameterId.Squelch, RadioParameterId.KeyLock], m.SetIds);
+        Assert.Equal([RadioParameterId.Power, RadioParameterId.KeyLock, RadioParameterId.BusySquelchLevel], m.SetIds);
     }
 
     [Fact]
@@ -66,7 +66,7 @@ public class ModelTests
         {
             FrequencyHz = 433_500_000,
             DeviationNarrow = new Deviation(0x662),
-            SquelchThresholds = new SquelchThresholds(90, 80, 40, 50, 20, 30),
+            BusySquelchThresholds = new BusySquelchThresholds(90, 80, 40, 50, 20, 30),
             Agc = AgcSetting.Fixed(3),
             SerialLock = TimeSpan.FromMilliseconds(40),
             TxTimeout = TimeSpan.FromSeconds(120),
@@ -82,7 +82,7 @@ public class ModelTests
         Assert.Equal(s.SetIds, order);
         Assert.Equal(s.FrequencyHz, back.FrequencyHz);
         Assert.Equal(s.DeviationNarrow!.Value.Register, back.DeviationNarrow!.Value.Register);
-        Assert.Equal(s.SquelchThresholds, back.SquelchThresholds);
+        Assert.Equal(s.BusySquelchThresholds, back.BusySquelchThresholds);
         Assert.Equal(s.Agc, back.Agc);
         Assert.Equal(s.SerialLock, back.SerialLock);
         Assert.Equal(s.TxTimeout, back.TxTimeout);

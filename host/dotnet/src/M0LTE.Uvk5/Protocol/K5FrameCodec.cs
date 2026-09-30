@@ -20,10 +20,10 @@ public static class K5FrameCodec
         [0x16, 0x6C, 0x14, 0xE6, 0x2E, 0x91, 0x0D, 0x40, 0x21, 0x35, 0xD5, 0x40, 0x13, 0x03, 0xE9, 0x80];
 
     /// <summary>
-    /// The largest request payload the radio can take: its receive ring is 256 bytes and a frame
-    /// adds 8 bytes of framing.
+    /// The largest request payload the radio can take: its receive ring is 256 bytes, a frame adds
+    /// 8 bytes of framing, and a frame filling the whole ring could never complete.
     /// </summary>
-    public const int MaxRadioPayload = 248;
+    public const int MaxRadioPayload = 247;
 
     /// <summary>
     /// CRC-16/XMODEM (polynomial 0x1021, initial value 0, no reflection, no final XOR). Check value

@@ -46,11 +46,12 @@ internal static class Program
         other:
           ports                      list serial ports
 
-        names for get/set: frequency, power, bandwidth, dev-wide, dev-narrow, mic-gain, squelch,
+        names for get/set: frequency, power, bandwidth, dev-wide, dev-narrow, mic-gain, busy-sql-level,
           rx-gain, rx-dac-gain, tx-timeout, ptt-press, ptt-release, pa-enable-delay, pa-bias-delay,
-          serial-lock, busy-source, busy-rssi-open, busy-rssi-close, busy-hang, squelch-raw, agc,
+          serial-lock, busy-source, busy-rssi-open, busy-rssi-close, busy-hang, busy-sql-raw, agc,
           afc, backlight, key-lock (or the enum names). Values: 145.025MHz, high, narrow, 0x856 or
-          2.8kHz, 20ms, 30s, on/off, -105dBm, auto.
+          2.8kHz, 20ms, 30s, on/off, -105dBm, auto. There is no squelch: receive audio is always
+          open, and busy-sql-level (1 to 9) only sets the chip's squelch detector used for busy.
         """;
 
     private static async Task<int> Main(string[] args)
@@ -354,7 +355,7 @@ internal static class Program
         Console.WriteLine($"frequency   {s.FrequencyHz / 1e6:F5} MHz, channel {s.Channel}");
         Console.WriteLine($"state       {s.State} ({s.Flags})");
         Console.WriteLine($"flags2      {s.Flags2}");
-        Console.WriteLine($"power       {s.Power}, bandwidth {s.Bandwidth}, squelch {s.Squelch}");
+        Console.WriteLine($"power       {s.Power}, bandwidth {s.Bandwidth}, busy detector level {s.BusySquelchLevel}");
         Console.WriteLine($"deviation   {s.Deviation}");
         Console.WriteLine($"rssi        {s.Rssi}, noise {s.Noise}, glitch {s.Glitch}, AGC {s.Agc}");
         Console.WriteLine($"battery     {s.BatteryVolts:F2} V, level {s.BatteryLevel}");
@@ -379,7 +380,6 @@ internal static class Program
         P("dev-wide", s.DeviationWide);
         P("dev-narrow", s.DeviationNarrow);
         P("mic-gain", s.MicGain);
-        P("squelch", s.Squelch);
         P("rx-gain", s.RxGain);
         P("rx-dac-gain", s.RxDacGain);
         P("tx-timeout", Ms(s.TxTimeout, "s"));
@@ -392,7 +392,8 @@ internal static class Program
         P("busy-rssi-open", s.BusyRssiOpen);
         P("busy-rssi-close", s.BusyRssiClose);
         P("busy-hang", Ms(s.BusyHang));
-        P("squelch-raw", s.SquelchThresholds is { } q ? $"rssi {q.RssiOpen}/{q.RssiClose}, noise {q.NoiseOpen}/{q.NoiseClose}, glitch {q.GlitchOpen}/{q.GlitchClose}" : null);
+        P("busy-sql-level", s.BusySquelchLevel);
+        P("busy-sql-raw", s.BusySquelchThresholds is { } q ? $"rssi {q.RssiOpen}/{q.RssiClose}, noise {q.NoiseOpen}/{q.NoiseClose}, glitch {q.GlitchOpen}/{q.GlitchClose}" : null);
         P("agc", s.Agc);
         P("afc", s.Afc is { } afc ? (afc ? "on" : "off") : null);
         P("backlight", s.Backlight);
@@ -549,7 +550,8 @@ internal static class Program
             TxStartEvent s => $"TX START {s.FrequencyHz / 1e6:F5} MHz {s.Power} {s.Bandwidth} dev 0x{s.Deviation.Register:X3}, press to RF {s.KeyUpLatency.TotalMilliseconds:F0} ms"
                 + (s.LateKey ? $", LATE by {s.LockDelay.TotalMilliseconds:F0} ms" : string.Empty) + (s.BusyAtPress ? ", CHANNEL WAS BUSY" : string.Empty),
             TxEndEvent x => $"TX END {x.Reason}, on air {x.OnAir.TotalMilliseconds:F0} ms, release to carrier off {x.KeyDownLatency.TotalMilliseconds:F0} ms, to RX ready {x.TurnaroundToReceive.TotalMilliseconds:F0} ms",
-            TxRefusedEvent x => $"TX REFUSED {x.Reason}" + (x.Reason == TxRefusedReason.Lock ? $" ({x.LockRemaining.TotalMilliseconds:F0} ms of lock left)" : string.Empty),
+            TxRefusedEvent x => $"TX REFUSED {x.Reason}" + (x.Reason == TxRefusedReason.Lock ? $" ({x.LockRemaining.TotalMilliseconds:F0} ms of lock left)"
+                : x.Reason == TxRefusedReason.Late ? $" ({x.LateBy.TotalMilliseconds:F0} ms after the press)" : string.Empty),
             HeartbeatEvent h => $"HEARTBEAT {h.State} {h.Rssi} battery {h.BatteryMillivolts} mV, busy {(h.BusyTime is { } bt ? $"{bt.TotalMilliseconds:F0} ms" : "unknown")}, lock {h.LockRemaining.TotalMilliseconds:F0} ms",
             RssiStreamEvent r => $"RSSI {string.Join(" ", r.Samples.Select(x => x.Rssi.Dbm.ToString("F0", CultureInfo.InvariantCulture)))} dBm every {r.Period.TotalMilliseconds:F0} ms",
             BatteryEvent b => $"BATTERY {b.Class} level {b.Level}, {b.Millivolts} mV",
@@ -633,7 +635,9 @@ internal static class Program
             "pabiasdelay" or "pabiasdelayms" => RadioParameterId.PaBiasDelayMs,
             "seriallock" or "seriallockms" => RadioParameterId.SerialLockMs,
             "busyhang" or "busyhangms" => RadioParameterId.BusyHangMs,
-            "squelchraw" or "sqlraw" => RadioParameterId.SquelchRaw,
+            "busysqlraw" or "busysquelchraw" or "sqlraw" => RadioParameterId.BusySquelchRaw,
+            "busysqllevel" or "busysquelchlevel" or "busylevel" => RadioParameterId.BusySquelchLevel,
+            "squelch" or "sql" => throw new UsageException("there is no squelch: receive audio is always open. busy-sql-level (1 to 9) sets the busy detector"),
             "agc" or "agcfix" => RadioParameterId.AgcFix,
             _ => Enum.TryParse<RadioParameterId>(n, ignoreCase: true, out var id) && Enum.IsDefined(id) ? id : throw new UsageException($"unknown setting '{name}'"),
         };
@@ -667,7 +671,7 @@ internal static class Program
             RadioParameterId.DeviationWide => new RadioSettings { DeviationWide = Dev() },
             RadioParameterId.DeviationNarrow => new RadioSettings { DeviationNarrow = Dev() },
             RadioParameterId.MicGain => new RadioSettings { MicGain = ParseInt(s) },
-            RadioParameterId.Squelch => new RadioSettings { Squelch = ParseInt(s) },
+            RadioParameterId.BusySquelchLevel => new RadioSettings { BusySquelchLevel = ParseInt(s) },
             RadioParameterId.RxGain => new RadioSettings { RxGain = ParseInt(s) },
             RadioParameterId.RxDacGain => new RadioSettings { RxDacGain = ParseInt(s) },
             RadioParameterId.TxTimeoutSeconds => new RadioSettings { TxTimeout = Millis("s") },
@@ -689,11 +693,11 @@ internal static class Program
             RadioParameterId.BusyRssiOpen => new RadioSettings { BusyRssiOpen = Level() },
             RadioParameterId.BusyRssiClose => new RadioSettings { BusyRssiClose = Level() },
             RadioParameterId.BusyHangMs => new RadioSettings { BusyHang = Millis() },
-            RadioParameterId.SquelchRaw => new RadioSettings
+            RadioParameterId.BusySquelchRaw => new RadioSettings
             {
-                SquelchThresholds = s.Split(',') is { Length: 6 } p
-                    ? new SquelchThresholds((byte)ParseInt(p[0]), (byte)ParseInt(p[1]), (byte)ParseInt(p[2]), (byte)ParseInt(p[3]), (byte)ParseInt(p[4]), (byte)ParseInt(p[5]))
-                    : throw new UsageException("squelch-raw takes six numbers: rssi open,close, noise open,close, glitch open,close"),
+                BusySquelchThresholds = s.Split(',') is { Length: 6 } p
+                    ? new BusySquelchThresholds((byte)ParseInt(p[0]), (byte)ParseInt(p[1]), (byte)ParseInt(p[2]), (byte)ParseInt(p[3]), (byte)ParseInt(p[4]), (byte)ParseInt(p[5]))
+                    : throw new UsageException("busy-sql-raw takes six numbers: rssi open,close, noise open,close, glitch open,close"),
             },
             RadioParameterId.AgcFix => new RadioSettings { Agc = s == "auto" ? AgcSetting.Auto : AgcSetting.Fixed(ParseInt(s)) },
             RadioParameterId.Afc => new RadioSettings { Afc = Bool() },

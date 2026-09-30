@@ -47,6 +47,19 @@ public sealed record SimulatedRadioOptions
     public int BatteryMillivolts { get; init; } = 7800;
 }
 
+/// <summary>What the simulated radio's audio output (the K1 speaker contact) carries.</summary>
+public enum SimulatedAudioOutput
+{
+    /// <summary>The receive audio (FM demodulator output). Always open: the packet firmware has no squelch.</summary>
+    Receive,
+
+    /// <summary>The level tone, instead of the receive audio.</summary>
+    Tone,
+
+    /// <summary>Nothing: the radio is transmitting.</summary>
+    None,
+}
+
 /// <summary>One transmission the simulated radio made, in radio milliseconds.</summary>
 /// <param name="PressedAtMs">When PTT was pressed.</param>
 /// <param name="RfAtMs">When RF was ready.</param>
@@ -160,6 +173,18 @@ public sealed partial class SimulatedRadio : IDisposable
             lock (_gate)
             {
                 return _transmitting;
+            }
+        }
+    }
+
+    /// <summary>What the audio output carries now. Never muted in receive: after a level tone it returns to the receive audio.</summary>
+    public SimulatedAudioOutput AudioOutput
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _transmitting ? SimulatedAudioOutput.None : _toneRunning ? SimulatedAudioOutput.Tone : SimulatedAudioOutput.Receive;
             }
         }
     }

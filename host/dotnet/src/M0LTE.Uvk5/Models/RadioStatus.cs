@@ -3,17 +3,14 @@ namespace M0LTE.Uvk5;
 /// <summary>Radio operating state.</summary>
 public enum RadioState : byte
 {
-    /// <summary>Idle, squelch closed.</summary>
+    /// <summary>Receiving, nothing detected. (Receive audio is always open: there is no squelch.)</summary>
     Idle = 0,
 
-    /// <summary>Receiving (squelch open).</summary>
-    Receiving = 1,
+    /// <summary>Receiving, and the channel is busy (the firmware's carrier detect).</summary>
+    Busy = 1,
 
     /// <summary>Transmitting.</summary>
     Transmitting = 2,
-
-    /// <summary>Monitor (squelch forced open).</summary>
-    Monitor = 3,
 
     /// <summary>Reduced service (critical battery): PTT is ignored.</summary>
     ReducedService = 4,
@@ -26,8 +23,8 @@ public enum StatusFlags : byte
     /// <summary>None.</summary>
     None = 0,
 
-    /// <summary>Squelch open.</summary>
-    SquelchOpen = 1 << 0,
+    /// <summary>The chip's squelch detector is open (a detector for busy only; nothing is muted).</summary>
+    SquelchDetector = 1 << 0,
 
     /// <summary>Busy (the firmware's carrier detect).</summary>
     Busy = 1 << 1,
@@ -72,9 +69,6 @@ public enum StatusFlags2 : byte
 
     /// <summary>A persist to EEPROM is in progress.</summary>
     PersistInProgress = 1 << 4,
-
-    /// <summary>Memory-channel mode (else a band slot).</summary>
-    MemoryChannelMode = 1 << 5,
 }
 
 /// <summary>A v2 GET_STATUS snapshot.</summary>
@@ -101,8 +95,8 @@ public sealed record RadioStatus
     /// <summary>Bandwidth.</summary>
     public Bandwidth Bandwidth { get; init; }
 
-    /// <summary>Squelch level, 0 to 9.</summary>
-    public int Squelch { get; init; }
+    /// <summary>Busy detector level, 1 to 9 (BUSY_SQL_LEVEL; there is no squelch).</summary>
+    public int BusySquelchLevel { get; init; }
 
     /// <summary>Deviation register in use for the current bandwidth.</summary>
     public Deviation Deviation { get; init; }

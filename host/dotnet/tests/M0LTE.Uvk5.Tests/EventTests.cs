@@ -335,6 +335,10 @@ public class EventTests
         Assert.Equal(300, te.MicAmplitudeMean);
         var rs = (RssiStreamEvent)EventParser.Parse(0x50C5, [.. Header(3), 10, 3, .. new WireWriter().U16(100).U8(1).U8(2).U16(110).U8(1).U8(2).U16(120).U8(1).U8(2).ToArray()], law, default);
         Assert.Equal([1214u, 1224u, 1234u], rs.Samples.Select(x => x.RadioTimeMs));
+        var late = (TxRefusedEvent)EventParser.Parse(0x50C4, [.. Header(6), .. new WireWriter().U32(1100).U8(6).U16(41).ToArray()], law, default);
+        Assert.Equal(TxRefusedReason.Late, late.Reason);
+        Assert.Equal(TimeSpan.FromMilliseconds(41), late.LateBy);
+        Assert.Equal(TimeSpan.Zero, late.LockRemaining);
         var boot = (BootEvent)EventParser.Parse(0x50CC, [.. Header(0), 0x00, 0x02, 1], law, default);
         Assert.Equal(new Version(2, 0), boot.ProtocolVersion);
         var unknown = (UnknownEvent)EventParser.Parse(0x50D5, [.. Header(4), 9, 9], law, default);

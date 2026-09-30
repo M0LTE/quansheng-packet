@@ -13,15 +13,19 @@ internal static class ParameterCodec
         RadioParameterId.FrequencyHz => 4,
         RadioParameterId.DeviationWide or RadioParameterId.DeviationNarrow or RadioParameterId.SerialLockMs
             or RadioParameterId.BusyRssiOpen or RadioParameterId.BusyRssiClose => 2,
-        RadioParameterId.SquelchRaw => 6,
+        RadioParameterId.BusySquelchRaw => 6,
         _ when IsKnown(id) => 1,
         _ => -1,
     };
 
-    public static bool IsKnown(RadioParameterId id) => id is >= RadioParameterId.FrequencyHz and <= RadioParameterId.KeyLock;
+    /// <summary>0x07 (SQUELCH) is retired: the firmware has no squelch.</summary>
+    public const byte RetiredSquelch = 0x07;
+
+    public static bool IsKnown(RadioParameterId id) =>
+        id is >= RadioParameterId.FrequencyHz and <= RadioParameterId.BusySquelchLevel && (byte)id != RetiredSquelch;
 
     public static bool IsRamOnly(RadioParameterId id) =>
-        id is RadioParameterId.SquelchRaw or RadioParameterId.AgcFix or RadioParameterId.Afc;
+        id is RadioParameterId.BusySquelchRaw or RadioParameterId.AgcFix or RadioParameterId.Afc;
 
     public static IReadOnlyList<RadioParameterId> IdsPresent(RadioSettings s)
     {
@@ -40,7 +44,6 @@ internal static class ParameterCodec
         Add(s.DeviationWide.HasValue, RadioParameterId.DeviationWide);
         Add(s.DeviationNarrow.HasValue, RadioParameterId.DeviationNarrow);
         Add(s.MicGain.HasValue, RadioParameterId.MicGain);
-        Add(s.Squelch.HasValue, RadioParameterId.Squelch);
         Add(s.RxGain.HasValue, RadioParameterId.RxGain);
         Add(s.RxDacGain.HasValue, RadioParameterId.RxDacGain);
         Add(s.TxTimeout.HasValue, RadioParameterId.TxTimeoutSeconds);
@@ -53,11 +56,12 @@ internal static class ParameterCodec
         Add(s.BusyRssiOpen.HasValue, RadioParameterId.BusyRssiOpen);
         Add(s.BusyRssiClose.HasValue, RadioParameterId.BusyRssiClose);
         Add(s.BusyHang.HasValue, RadioParameterId.BusyHangMs);
-        Add(s.SquelchThresholds.HasValue, RadioParameterId.SquelchRaw);
+        Add(s.BusySquelchThresholds.HasValue, RadioParameterId.BusySquelchRaw);
         Add(s.Agc.HasValue, RadioParameterId.AgcFix);
         Add(s.Afc.HasValue, RadioParameterId.Afc);
         Add(s.Backlight.HasValue, RadioParameterId.Backlight);
         Add(s.KeyLock.HasValue, RadioParameterId.KeyLock);
+        Add(s.BusySquelchLevel.HasValue, RadioParameterId.BusySquelchLevel);
         return ids;
     }
 
@@ -69,7 +73,7 @@ internal static class ParameterCodec
         DeviationWide = b.DeviationWide ?? a.DeviationWide,
         DeviationNarrow = b.DeviationNarrow ?? a.DeviationNarrow,
         MicGain = b.MicGain ?? a.MicGain,
-        Squelch = b.Squelch ?? a.Squelch,
+        BusySquelchLevel = b.BusySquelchLevel ?? a.BusySquelchLevel,
         RxGain = b.RxGain ?? a.RxGain,
         RxDacGain = b.RxDacGain ?? a.RxDacGain,
         TxTimeout = b.TxTimeout ?? a.TxTimeout,
@@ -82,7 +86,7 @@ internal static class ParameterCodec
         BusyRssiOpen = b.BusyRssiOpen ?? a.BusyRssiOpen,
         BusyRssiClose = b.BusyRssiClose ?? a.BusyRssiClose,
         BusyHang = b.BusyHang ?? a.BusyHang,
-        SquelchThresholds = b.SquelchThresholds ?? a.SquelchThresholds,
+        BusySquelchThresholds = b.BusySquelchThresholds ?? a.BusySquelchThresholds,
         Agc = b.Agc ?? a.Agc,
         Afc = b.Afc ?? a.Afc,
         Backlight = b.Backlight ?? a.Backlight,
@@ -129,7 +133,6 @@ internal static class ParameterCodec
         }
 
         Int(list, RadioParameterId.MicGain, nameof(s.MicGain), s.MicGain, 0, 31);
-        Int(list, RadioParameterId.Squelch, nameof(s.Squelch), s.Squelch, 0, 9);
         Int(list, RadioParameterId.RxGain, nameof(s.RxGain), s.RxGain, 0, 63);
         Int(list, RadioParameterId.RxDacGain, nameof(s.RxDacGain), s.RxDacGain, 0, 15);
         if (s.TxTimeout is { } tt)
@@ -182,16 +185,16 @@ internal static class ParameterCodec
         }
 
         Ms(list, RadioParameterId.BusyHangMs, nameof(s.BusyHang), s.BusyHang, 0, 250);
-        if (s.SquelchThresholds is { } q)
+        if (s.BusySquelchThresholds is { } q)
         {
             if (q.NoiseOpen > 127 || q.NoiseClose > 127)
             {
-                throw Range(nameof(s.SquelchThresholds), q, "noise thresholds 0 to 127");
+                throw Range(nameof(s.BusySquelchThresholds), q, "noise thresholds 0 to 127");
             }
 
             ulong v = q.RssiOpen | ((ulong)q.RssiClose << 8) | ((ulong)q.NoiseOpen << 16) | ((ulong)q.NoiseClose << 24)
                 | ((ulong)q.GlitchOpen << 32) | ((ulong)q.GlitchClose << 40);
-            list.Add((RadioParameterId.SquelchRaw, v));
+            list.Add((RadioParameterId.BusySquelchRaw, v));
         }
 
         if (s.Agc is { } agc)
@@ -209,6 +212,8 @@ internal static class ParameterCodec
         {
             list.Add((RadioParameterId.KeyLock, kl ? 1UL : 0UL));
         }
+
+        Int(list, RadioParameterId.BusySquelchLevel, nameof(s.BusySquelchLevel), s.BusySquelchLevel, 1, 9);
 
         return list;
     }
@@ -259,7 +264,6 @@ internal static class ParameterCodec
         RadioParameterId.DeviationWide => s with { DeviationWide = new Deviation((ushort)Math.Min(v, Deviation.MaxRegister), law) },
         RadioParameterId.DeviationNarrow => s with { DeviationNarrow = new Deviation((ushort)Math.Min(v, Deviation.MaxRegister), law) },
         RadioParameterId.MicGain => s with { MicGain = (int)v },
-        RadioParameterId.Squelch => s with { Squelch = (int)v },
         RadioParameterId.RxGain => s with { RxGain = (int)v },
         RadioParameterId.RxDacGain => s with { RxDacGain = (int)v },
         RadioParameterId.TxTimeoutSeconds => s with { TxTimeout = TimeSpan.FromSeconds(v) },
@@ -272,14 +276,15 @@ internal static class ParameterCodec
         RadioParameterId.BusyRssiOpen => s with { BusyRssiOpen = new Rssi((ushort)v) },
         RadioParameterId.BusyRssiClose => s with { BusyRssiClose = new Rssi((ushort)v) },
         RadioParameterId.BusyHangMs => s with { BusyHang = TimeSpan.FromMilliseconds(v) },
-        RadioParameterId.SquelchRaw => s with
+        RadioParameterId.BusySquelchRaw => s with
         {
-            SquelchThresholds = new SquelchThresholds((byte)v, (byte)(v >> 8), (byte)(v >> 16), (byte)(v >> 24), (byte)(v >> 32), (byte)(v >> 40)),
+            BusySquelchThresholds = new BusySquelchThresholds((byte)v, (byte)(v >> 8), (byte)(v >> 16), (byte)(v >> 24), (byte)(v >> 32), (byte)(v >> 40)),
         },
         RadioParameterId.AgcFix => s with { Agc = AgcSetting.FromRaw((byte)v) },
         RadioParameterId.Afc => s with { Afc = v != 0 },
         RadioParameterId.Backlight => s with { Backlight = (int)v },
         RadioParameterId.KeyLock => s with { KeyLock = v != 0 },
+        RadioParameterId.BusySquelchLevel => s with { BusySquelchLevel = (int)v },
         _ => s,
     };
 
