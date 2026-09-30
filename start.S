@@ -27,6 +27,9 @@
 	.global SystickHandler
 	.weak SystickHandler
 
+	.global UART1Handler
+	.weak UART1Handler
+
 	.section .text.isr
 
 Stack:
@@ -90,7 +93,7 @@ PWM_PLUS1:
 UART0:
 	.long	HandlerUART0 + 1
 UART1:
-	.long	HandlerUART1 + 1
+	.long	UART1Handler + 1
 UART2:
 	.long	HandlerUART2 + 1
 SPI0:
@@ -185,7 +188,7 @@ HandlerPWM_PLUS1:
 HandlerUART0:
 	b	.
 
-HandlerUART1:
+UART1Handler:
 	b	.
 
 HandlerUART2:

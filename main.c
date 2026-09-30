@@ -25,6 +25,7 @@
 #include "settings.h"
 #include "version.h"
 
+#include "outq.h"
 #include "app/app.h"
 #include "app/uart.h"
 #include "app/v2.h"
@@ -142,6 +143,7 @@ void Main(void)
 	}
 
 	while (true) {
+		OUTQ_Kick();            // keep the UART busy (also the TX interrupt and SysTick)
 		UART_Poll();            // every complete frame, on every pass
 		APP_CheckPtt();         // never keys at critical battery (reduced service)
 		APP_Update();

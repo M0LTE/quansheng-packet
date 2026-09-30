@@ -175,6 +175,7 @@ bool     tx_ready = true;
 bool UART_TxReady(void) { return tx_ready; }
 void UART_TxPut(uint8_t b) { if (out_len < OUT_MAX) out[out_len++] = b; }
 bool UART_TxEmpty(void) { return true; }
+void UART_TxIrq(bool on) { (void)on; }
 void UART_Send(const void *p, uint32_t n) { OUTQ_PutWait(p, (uint16_t)n); }
 
 // ------------------------------------------------------------- helpers --
