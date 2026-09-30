@@ -1,0 +1,58 @@
+# Every push and pull request: build the firmware in the pinned toolchain
+# container (release and bench builds), run the host tests, and build and
+# test the C# library and k5ctl.
+name: build
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  firmware:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Host tests
+        run: tests/host/run.sh
+
+      - name: Release build
+        run: ./compile-with-docker.sh --out out/release
+
+      - name: Bench build
+        run: ./compile-with-docker.sh --out out/bench bench
+
+      - name: Size
+        run: |
+          for f in out/release/firmware.bin out/bench/firmware.bin; do
+            size=$(stat -c %s "$f")
+            echo "$f: $size bytes of 61440"
+            [ "$size" -le 61440 ] || { echo "::error::$f does not fit the 60 KiB flash region"; exit 1; }
+          done
+          sha256sum out/release/*.bin
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: firmware-${{ github.sha }}
+          path: |
+            out/release/firmware.bin
+            out/release/firmware.packed.bin
+
+  dotnet:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Build
+        run: dotnet build host/dotnet/M0LTE.Uvk5.slnx -c Release
+
+      - name: Test
+        run: dotnet run --project host/dotnet/tests/M0LTE.Uvk5.Tests -c Release
