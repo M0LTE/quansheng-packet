@@ -5,6 +5,12 @@
 # The tag is the firmware version (it shows under Ver in the radio's menu),
 # so it must be at most 8 characters: v1.0.0, v1.2.10, v1.1.0b1. Anything
 # after vX.Y.Z makes a pre-release. Only GITHUB_TOKEN is used.
+#
+# The release notes are docs/releases/<tag>.md (if there is one) followed by
+# .github/release-notes.md, with {{TAG}} replaced. A release (not a
+# pre-release) also puts its packed image on the flash branch, for browser
+# flashing: <tag>/quansheng-packet-<tag>.bin, and latest/quansheng-packet.bin
+# for the newest release there.
 name: release
 
 on:
@@ -153,6 +159,9 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+    concurrency:
+      group: release-flash-branch    # two tags at once must not race on the flash branch
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v7
 
@@ -170,7 +179,15 @@ jobs:
           sha256sum -- * > SHA256SUMS
           cat SHA256SUMS
           cd ..
-          sed -e "s/{{TAG}}/$TAG/g" .github/release-notes.md > notes.md
+          {
+            if [ -f "docs/releases/$TAG.md" ]; then
+              cat "docs/releases/$TAG.md"
+              echo
+            fi
+            cat .github/release-notes.md
+          } | sed -e "s/{{TAG}}/$TAG/g" > notes.md
+          # a pre-release is not on the flash branch: no browser flashing link
+          echo "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || sed -i '/armel\.github\.io/d' notes.md
           {
             echo
             echo '```'
@@ -187,3 +204,68 @@ jobs:
           echo "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || pre="--prerelease"
           gh release create "$TAG" dist/* --verify-tag --title "$TAG" \
             --notes-file notes.md --generate-notes $pre
+
+      - name: Put the image on the flash branch (browser flashing)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # Web flashers load images from raw.githubusercontent.com, which allows
+          # cross-origin reads (release downloads do not). The flash branch holds
+          # each release's packed image and latest/, and nothing else.
+          if ! echo "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "pre-release: the flash branch is left alone"
+            exit 0
+          fi
+          bin="$PWD/dist/quansheng-packet-$TAG.bin"
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git init -q -b flash "$RUNNER_TEMP/flash"
+          cd "$RUNNER_TEMP/flash"
+          set +e
+          git ls-remote --exit-code --heads "$remote" flash > /dev/null
+          rc=$?
+          set -e
+          case $rc in
+            0)
+              git fetch -q --depth=1 "$remote" refs/heads/flash
+              git reset -q --hard FETCH_HEAD
+              ;;
+            2)
+              echo "no flash branch yet: starting it"
+              cat > README.md <<'EOF'
+          # Firmware images for browser flashing
+
+          This branch only holds the packed firmware images from the [releases](https://github.com/M0LTE/quansheng-packet/releases), so a browser-based flasher can load them directly (raw.githubusercontent.com allows cross-origin reads; release downloads do not).
+
+          - `vX.Y.Z/quansheng-packet-vX.Y.Z.bin`: the image from that release, byte for byte.
+          - `latest/quansheng-packet.bin`: the latest release.
+
+          Flash the latest release from your browser (Chrome or Edge, with Web Serial):
+          https://armel.github.io/uvtools/?firmwareURL=https://raw.githubusercontent.com/M0LTE/quansheng-packet/flash/latest/quansheng-packet.bin
+
+          The release workflow updates this branch; do not edit it by hand. Checksums are in each release's SHA256SUMS.
+          EOF
+              ;;
+            *)
+              echo "::error::cannot list the flash branch (git ls-remote exit $rc)"
+              exit 1
+              ;;
+          esac
+          # images and the README only (no workflow files, so a push here runs nothing)
+          git rm -rq --ignore-unmatch .github .gitignore
+          mkdir -p "$TAG" latest
+          cp "$bin" "$TAG/quansheng-packet-$TAG.bin"
+          # latest is the newest release on the branch, so releasing a fix for an
+          # older line does not move it backwards
+          newest=$(ls -d v*/ | tr -d / | sort -V | tail -n 1)
+          cp "$newest/quansheng-packet-$newest.bin" latest/quansheng-packet.bin
+          git add -A
+          sha256sum "$TAG/quansheng-packet-$TAG.bin" latest/quansheng-packet.bin
+          if git diff --cached --quiet; then
+            echo "the flash branch already has $TAG"
+            exit 0
+          fi
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -q -m "Images for browser flashing: $TAG"
+          git push -q "$remote" HEAD:refs/heads/flash
+          echo "flash branch: $TAG (latest: $newest)"
