@@ -71,12 +71,10 @@
   <h2><span class="num">2</span> Flash the AIOC</h2>
   <p>The packet AIOC firmware adds a transmit equaliser that makes a UV-K5's audio flat, which the radio firmware's default deviation expects. Flashing it <b>resets the AIOC's settings to the defaults</b>: PTT from the CM108 (HID) interface, and from the serial port with DTR high and RTS low.</p>
   <div class="note">
-    <p><b>Windows only, once per computer:</b> Windows has no driver for the AIOC's bootloader, so the browser cannot see it until you add one. After pressing <b>Switch to bootloader</b> below (or if Device Manager shows "STM32 BOOTLOADER" with Code 28):</p>
+    <p><b>Windows only, once per computer:</b> Windows has no driver for the two ways the AIOC shows itself here, so the browser cannot see them until you add one with <a href="https://zadig.akeo.ie/" target="_blank" rel="noopener">Zadig</a> (in Zadig, choose <b>Options, List All Devices</b> first):</p>
     <ol>
-      <li>Download and run <a href="https://zadig.akeo.ie/" target="_blank" rel="noopener">Zadig</a>.</li>
-      <li>Choose <b>Options, List All Devices</b>, then pick <b>STM32 BOOTLOADER</b> (USB ID 0483 DF11).</li>
-      <li>Check the driver on the right is <b>WinUSB</b>, then click <b>Install Driver</b> (or Replace Driver).</li>
-      <li>Come back here and press <b>Connect to bootloader</b>.</li>
+      <li><b>Before you switch:</b> pick <b>AIOC DFU Runtime (Interface 6)</b> (USB ID 1209 7388 06), check the driver on the right is <b>WinUSB</b>, and click <b>Install Driver</b>. Now <b>Switch to bootloader</b> below works.</li>
+      <li><b>After you switch:</b> the AIOC restarts as <b>STM32 BOOTLOADER</b> (USB ID 0483 DF11; Device Manager may show it with Code 28). Pick it in Zadig, <b>WinUSB</b>, <b>Install Driver</b>, then press <b>Connect to bootloader</b>.</li>
     </ol>
     <p>After that this computer just works. Mac, Linux and ChromeOS need nothing extra (Linux: see the notes below for permissions).</p>
   </div>
