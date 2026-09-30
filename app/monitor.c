@@ -28,6 +28,13 @@
 #include "radio.h"
 #include "settings.h"
 
+#ifdef HOST_TEST
+void AUDIO_AudioPathOnHost(void);
+#define AUDIO_AudioPathOn AUDIO_AudioPathOnHost
+#else
+#include "audio.h"
+#endif
+
 // ------------------------------------------------------------ busy --
 
 static bool     gBusy;
@@ -457,7 +464,9 @@ void MON_Slice500ms(void)
 static void ToneApply(void)
 {
 	// tone 1 into the AF output instead of the receiver audio (REG_47
-	// AF source 2), whatever the squelch
+	// AF source 2), whatever the squelch; the speaker amplifier (the K1
+	// audio out) is otherwise first switched on at the first squelch open
+	AUDIO_AudioPathOn();
 	BK4819_WriteRegister(BK4819_REG_71, gTone.word);
 	BK4819_WriteRegister(BK4819_REG_70, 0x8000u | ((uint16_t)gTone.gain << 8));
 	BK4819_SetAF(BK4819_AF_ALAM);

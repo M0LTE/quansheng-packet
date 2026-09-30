@@ -119,6 +119,8 @@ void BK4819_PrepareDigitalTransmit(const uint8_t micGain, const uint16_t deviati
 void BK4819_ExitSubAu(void) {}
 void BK4819_SetAF(BK4819_AF_Type_t AF) { regs[0x47] = (6u << 12) | (AF << 8) | (1u << 6); }
 void BACKLIGHT_TurnOn(void) {}
+bool audio_path_on;
+void AUDIO_AudioPathOnHost(void) { audio_path_on = true; }
 void BOARD_ADC_GetBatteryInfo(uint16_t *v, uint16_t *c) { *v = 2000; *c = 0; }
 void NVIC_SystemReset(void)
 {
@@ -218,6 +220,7 @@ void host_boot_keep_eeprom(void)
 	gAgcFix = 0xFF;
 	gAfcOn = true;
 	gRegOverrideRamCount = 0;
+	audio_path_on = false;
 	OUTQ_Reset();
 	tx_ready = true;
 	memset(gCounters, 0, sizeof(gCounters));

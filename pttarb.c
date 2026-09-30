@@ -36,6 +36,11 @@ static void Refuse(PttArb_t *a, PttArbOut_t *out, uint8_t reason, uint16_t detai
 	out->detail = detail;
 }
 
+static uint16_t Late(uint32_t ms)
+{
+	return (ms > 0xFFFF) ? 0xFFFF : (uint16_t)ms;
+}
+
 static void Key(PttArb_t *a, const PttArbIn_t *in, PttArbOut_t *out, bool late)
 {
 	a->state       = ARB_KEYED;
@@ -75,10 +80,18 @@ void PTTARB_Step(PttArb_t *a, const PttArbIn_t *in, PttArbOut_t *out)
 		a->tEdge    = in->tPressEdge;
 		out->tPress = in->tPress;
 
+		// what the lock would be now had no frame come since the edge
+		const uint32_t elapsed  = in->now - in->tPressEdge;
+		const uint32_t expected = (in->lockAtPress > elapsed) ? in->lockAtPress - elapsed : 0;
+
 		if (in->lockAtPress > LATE_KEY_MAX_MS)
 			Refuse(a, out, TXR_LOCK, in->lockAtPress);
+		else if (in->lockNow > expected)
+			Refuse(a, out, TXR_LOCK, in->lockNow);       // a frame after the press
 		else if (in->bar != TXR_NONE)
 			Refuse(a, out, in->bar, 0);
+		else if (elapsed > LATE_KEY_MAX_MS)
+			Refuse(a, out, TXR_LATE, Late(elapsed));
 		else if (in->lockNow > 0)
 			a->state = ARB_PENDING;
 		else
@@ -87,8 +100,11 @@ void PTTARB_Step(PttArb_t *a, const PttArbIn_t *in, PttArbOut_t *out)
 	}
 
 	if (a->state == ARB_PENDING && in->lockNow == 0) {
+		const uint32_t elapsed = in->now - a->tEdge;
 		if (in->bar != TXR_NONE)
 			Refuse(a, out, in->bar, 0);
+		else if (elapsed > LATE_KEY_MAX_MS)
+			Refuse(a, out, TXR_LATE, Late(elapsed));
 		else
 			Key(a, in, out, true);
 	}

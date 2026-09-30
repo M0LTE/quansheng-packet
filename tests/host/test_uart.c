@@ -277,6 +277,16 @@ static void test_resync(void)
 	nfr = host_frames(fr, 64);
 	CHECK(nfr == 1 && reply_id() == 0x0528);
 
+	// a length that fills the whole ring can never complete: dropped at once
+	const uint8_t full[4] = { 0xAB, 0xCD, 248, 0x00 };
+	const uint32_t dropped = gCounters[CNT_FRAMES_DROPPED];
+	host_clear_out();
+	host_rx(full, 4);
+	host_rx(b, m);
+	host_poll();
+	nfr = host_frames(fr, 64);
+	CHECK(nfr == 1 && reply_id() == 0x0528 && gCounters[CNT_FRAMES_DROPPED] == dropped + 1);
+
 	// oversize length: dropped, resynchronised
 	const uint8_t big[4] = { 0xAB, 0xCD, 0xFF, 0x00 };
 	host_clear_out();

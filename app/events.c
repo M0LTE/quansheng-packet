@@ -130,10 +130,12 @@ void EVT_Service(bool deferred, uint32_t now)
 		return;
 	}
 
-	while (gUnsent) {
+	// a stored event only when the queue is empty (its bytes have all gone
+	// to the UART's 8-byte FIFO): if PTT is asserted meanwhile, at most that
+	// one frame is cut or dropped by the AIOC (spec 1b); the rest stay in
+	// the ring, held back
+	while (gUnsent && OUTQ_Used() == 0) {
 		EvtSlot_t *s = Slot(gUnsent - 1);
-		if (OUTQ_Free() < FRAME_OVERHEAD + s->len + REPLY_RESERVE)
-			return;
 		uint8_t f = s->body[6];
 		f |= TimingFlags(get32(s->body + 2), now, f & EVF_DEFERRED);
 		if (f & EVF_DEFERRED)

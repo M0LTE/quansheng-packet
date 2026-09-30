@@ -36,6 +36,7 @@
 #include "driver/eeprom.h"
 #include "functions.h"
 #include "misc.h"
+#include "outq.h"
 #include "radio.h"
 #include "settings.h"
 
@@ -491,6 +492,32 @@ static void test_deferral_and_tx_events(void)
 	CHECK(gCounters[CNT_EVENTS_LOST] == 5);
 }
 
+// Events go into the output queue only when it is empty, so if PTT is
+// asserted meanwhile at most one frame is at risk at the AIOC (spec 1b).
+static void test_event_pacing(void)
+{
+	boot_plain();
+	subscribe(1u << EV_TX_REFUSED, 0, 0, 0, 0, 0);
+	host_advance(25);
+	host_clear_out();
+	tx_ready = false;                                // the UART is still busy
+	for (int i = 0; i < 5; i++) MON_TxRefused(g_ms, 2, 0);
+	host_advance(1);
+	CHECK(EVT_Unsent() == 4 && OUTQ_Used() > 0);     // one queued, four held in the ring
+	host_ptt.pressed = true;                         // PTT now: the rest wait
+	host_advance(2);
+	CHECK(EVT_Unsent() == 4);
+	tx_ready = true;
+	host_advance(3);                                 // the queued frame drains (lost at the AIOC)
+	CHECK(EVT_Unsent() == 4);
+	host_ptt.pressed = false;
+	host_advance(3);
+	CHECK(EVT_Unsent() == 0);
+	const Frame_t *e;
+	CHECK(events(EV_TX_REFUSED, &e) == 5);
+	CHECK(!(fr[0].body[6] & EVF_DEFERRED) && (fr[4].body[6] & EVF_DEFERRED));
+}
+
 static void test_replay(void)
 {
 	boot_plain();
@@ -761,6 +788,24 @@ static void test_persist(void)
 	CHECK(eeprom[0x1D00] == 1 && eeprom[0x1D01] == 0xFF);    // others untouched
 	CHECK(eeprom_writes_in_cal == 0);
 
+	// a legacy EEPROM write session drops queued v2 writes
+	n = 0; s[n++] = SETP_PERSIST; s[n++] = P_MIC_GAIN; s[n++] = 25;
+	v2(V2_SET_PARAMS, 0x6A, s, n);
+	CHECK(PARAMS_PersistPending());
+	{
+		uint8_t w[16] = { 0x00, 0x01, 8, 0 };
+		memcpy(w + 4, &session, 4);
+		memset(w + 8, 0x5A, 8);
+		host_clear_out();
+		host_send(0x051D, w, 16);
+		CHECK(!PARAMS_PersistPending());
+		host_advance(20);
+		CHECK(eeprom[0x1D03] == 12 && eeprom[0x0100] == 0x5A);
+		CHECK(gReloadSettingsAfterSerial && gReloadQuietMs > 0);   // the reload (app.c) follows
+		gReloadSettingsAfterSerial = false;
+		gEeprom.MIC_GAIN = 12;
+	}
+
 	// stored reads now match, and survive a reboot
 	uint8_t r[4] = { 1, P_MIC_GAIN, P_SERIAL_LOCK_MS };
 	f = v2(V2_GET_PARAMS, 0x61, r, 3);
@@ -967,6 +1012,7 @@ static void test_tone(void)
 	CHECK(f && status(f) == V2_OK && f->body_len == 7);
 	CHECK(rb(f)[0] == 64 && get16(rb(f) + 1) == 0x2854);   // round(1000 x 10.32444) = 10324
 	CHECK(regs[0x71] == 0x2854 && regs[0x70] == (0x8000 | (64 << 8)) && regs[0x47] == 0x6240);
+	CHECK(audio_path_on);                            // the K1 audio out, squelch never opened
 	vec("level_tone_raw", "LEVEL_TONE 1000 Hz, mode 1 (raw), gain code 64, 500 ms");
 
 	// a squelch-close receiver set-up does not end it
@@ -1074,6 +1120,7 @@ int main(int argc, char **argv)
 	test_status();
 	test_subscribe_and_busy();
 	test_deferral_and_tx_events();
+	test_event_pacing();
 	test_replay();
 	test_ephemeral();
 	test_params();

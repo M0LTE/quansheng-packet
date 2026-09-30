@@ -102,9 +102,13 @@ void UART_TxPut(uint8_t b)
 	UART1->TDR = b;
 }
 
+// Nothing left to send: the FIFO is empty and the last byte has left the
+// shift register.
 bool UART_TxEmpty(void)
 {
-	return (UART1->IF & UART_IF_TXFIFO_EMPTY_MASK) != UART_IF_TXFIFO_EMPTY_BITS_NOT_SET;
+	const uint32_t f = UART1->IF;
+	return (f & UART_IF_TXFIFO_EMPTY_MASK) != UART_IF_TXFIFO_EMPTY_BITS_NOT_SET
+	    && (f & UART_IF_TXBUSY_MASK) == UART_IF_TXBUSY_BITS_NOT_SET;
 }
 
 void UART_LogSend(const void *pBuffer, uint32_t Size)

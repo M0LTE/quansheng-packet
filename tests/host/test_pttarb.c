@@ -15,8 +15,9 @@
 
 // Host tests of pttarb.c, the serial PTT lock rules (protocol v2, 5.3):
 // key, late key (at most LATE_KEY_MAX_MS), refusal and latch, release,
-// the latch after a timeout or a serial frame, and a main loop that runs
-// late. A 1 ms simulated clock drives the lock as the SysTick handler does.
+// the latch after a timeout or a serial frame, a frame between the press
+// edge and the main loop, and a main loop that runs late (never a key more
+// than 30 ms after the press). A 1 ms simulated clock drives the lock as the SysTick handler does.
 
 #include <stdio.h>
 #include <string.h>
@@ -187,11 +188,54 @@ static void test_late_main_loop(void)
 	CHECK(in.lockNow == 0);
 	CHECK(step() == ARB_REFUSE && out.reason == TXR_LOCK && out.detail == 40);
 
+	// never keyed more than 30 ms after the press, whatever the reason
 	reset();
 	in.lockNow = 25;
 	press();
 	for (int i = 0; i < 40; i++) tick();                   // loop late, lock already out
-	CHECK(step() == ARB_KEY && out.late && out.lockDelay == 40);
+	CHECK(step() == ARB_REFUSE && out.reason == TXR_LATE && out.detail == 40);
+	for (int i = 0; i < 50; i++) { tick(); CHECK(step() == ARB_NONE); }   // latched
+
+	reset();
+	in.lockNow = 25;
+	press();
+	for (int i = 0; i < 30; i++) tick();                   // 30 ms late: still in time
+	CHECK(step() == ARB_KEY && out.late && out.lockDelay == 30);
+
+	reset();
+	in.lockNow = 20;
+	press();
+	CHECK(step() == ARB_NONE);                             // pending
+	for (int i = 0; i < 31; i++) tick();                   // then the loop stalls past 30 ms
+	CHECK(step() == ARB_REFUSE && out.reason == TXR_LATE && out.detail == 31);
+
+	reset();
+	press();                                               // no lock, loop stalled 31 ms
+	for (int i = 0; i < 31; i++) tick();
+	CHECK(step() == ARB_REFUSE && out.reason == TXR_LATE);
+	reset();
+	press();
+	for (int i = 0; i < 30; i++) tick();
+	CHECK(step() == ARB_KEY && !out.late);
+
+	// a frame that came after the press edge, before the loop acted on it:
+	// rule 1 cancels the press (the lock grew since the edge)
+	reset();
+	press();                                               // lock 0 at the edge
+	in.lockNow = 20;                                       // then a frame
+	tick();
+	CHECK(step() == ARB_REFUSE && out.reason == TXR_LOCK && out.detail == 19);
+	reset();
+	in.lockNow = 10;
+	press();                                               // late-key lock at the edge
+	tick(); tick();
+	in.lockNow = 20;                                       // a frame re-arms it
+	CHECK(step() == ARB_REFUSE && out.reason == TXR_LOCK && out.detail == 20);
+	reset();
+	in.lockNow = 10;
+	press();
+	tick(); tick();                                        // no frame: lock 8, pending
+	CHECK(step() == ARB_NONE && arb.state == ARB_PENDING);
 
 	// press, release and press again between two steps while keyed:
 	// unkey first, then the new press

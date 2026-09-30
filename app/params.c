@@ -201,6 +201,15 @@ bool PARAMS_PersistPending(void)
 	return gJobs != 0;
 }
 
+// A legacy EEPROM write session takes over: queued v2 writes are dropped
+// rather than written over it later (the reload then reads the result).
+void PARAMS_CancelPersist(void)
+{
+	gJobs  = 0;
+	gPMask = 0;
+	gPSub  = false;
+}
+
 // ------------------------------------------------------ validation --
 
 static int8_t TimeoutIndex(uint32_t s)
@@ -407,6 +416,8 @@ void PARAMS_PersistService(bool allowed)
 
 	if (j >= J_OVR0) {
 		const uint8_t i = j - J_OVR0;
+		if (!blockValid)
+			goto done;               // the settings block went away meanwhile
 		addr = SETTINGS_REG_OVERRIDES + i * 8u;
 		memset(b, 0xFF, sizeof(b));
 		if (i < gRegOverrideCount) {

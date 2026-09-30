@@ -20,6 +20,7 @@
 #include "ARMCM0.h"
 #include "app/app.h"
 #include "app/events.h"
+#include "app/params.h"
 #include "app/uart.h"
 #include "app/v2.h"
 #include "app/wire.h"
@@ -300,7 +301,9 @@ static void CMD_051D(const uint8_t *pBuffer, const uint16_t CommandSize)
 	for (unsigned int i = 0; i < (pCmd->Size / 8); i++)
 		EEPROM_WriteBuffer(pCmd->Offset + (i * 8U), &pCmd->Data[i * 8U]);
 
-	// apply it once the host has gone quiet (APP_TimeSlice10ms)
+	// apply it once the host has gone quiet (APP_TimeSlice10ms); queued v2
+	// EEPROM writes would land on top of this session: drop them
+	PARAMS_CancelPersist();
 	gReloadSettingsAfterSerial = true;
 	gReloadQuietMs             = SERIAL_RELOAD_QUIET_MS;
 
@@ -420,7 +423,7 @@ bool UART_IsCommandAvailable(void)
 		else if (CommandLength >= 4) {
 			const uint16_t Index = DMA_INDEX(gUART_WriteIndex, 2);
 			Size = (UART_DMA_Buffer[DMA_INDEX(Index, 1)] << 8) | UART_DMA_Buffer[Index];
-			if ((Size + 8u) > sizeof(UART_DMA_Buffer)) {
+			if ((Size + 8u) >= sizeof(UART_DMA_Buffer)) {   // could never complete in the ring
 				gCounters[CNT_FRAMES_DROPPED]++;
 				bad = true;
 			}

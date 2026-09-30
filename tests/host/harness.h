@@ -43,6 +43,7 @@ extern uint8_t  host_arb_state;
 extern int      serial_frames;
 extern uint16_t host_us;
 extern bool     tx_ready;           // the UART FIFO takes bytes
+extern bool     audio_path_on;      // the speaker amplifier (K1 audio out)
 
 #define OUT_MAX 16384
 extern uint8_t  last_req[320];      // the last frame host_send built

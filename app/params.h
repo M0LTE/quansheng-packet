@@ -77,6 +77,7 @@ uint8_t  PARAMS_Set(uint8_t flags, const uint8_t *rec, uint16_t n, uint8_t *deta
 uint8_t  PARAMS_Save(uint8_t op, uint32_t *mask);
 
 bool     PARAMS_PersistPending(void);
+void     PARAMS_CancelPersist(void);
 bool     PARAMS_LiveDiffers(void);
 void     PARAMS_PersistService(bool allowed);      // one block per call
 bool     PARAMS_PersistSubscription(uint32_t mask, uint8_t options, uint16_t heartbeatMs);

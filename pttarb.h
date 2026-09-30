@@ -24,6 +24,10 @@
 //   press edge, TX not allowed         refuse (reason), latch until release
 //   release                            unkey, clear a pending key or latch
 //   TX timeout or serial frame         latch until release (PTTARB_Latch)
+//   a frame after the press edge, not  refuse (LOCK), latch: rule 1, the
+//     yet acted on                     frame came before the key-up
+//   more than 30 ms after the edge     refuse (LATE), latch: the radio never
+//     when the key-up would happen     keys later than that
 //
 // The lock that counts is the one at the press edge, recorded by the 1 ms
 // tick, so a late main loop does not change the decision.
@@ -42,6 +46,7 @@ enum {
 	TXR_BATTERY_EMPTY,
 	TXR_OVER_VOLTAGE,
 	TXR_REDUCED_SERVICE,
+	TXR_LATE,              // could not key within LATE_KEY_MAX_MS of the press
 };
 
 enum { ARB_IDLE, ARB_PENDING, ARB_KEYED, ARB_LATCHED };
