@@ -77,7 +77,6 @@ static int32_t MaxValue(uint8_t item)
 		case MENU_RXDAC:  return 15;
 		case MENU_TOT:    return 6;
 		case MENU_ABR:    return 7;
-		case MENU_BATTYP: return 1;
 		default:          return 0;
 	}
 }

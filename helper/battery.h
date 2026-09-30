@@ -33,13 +33,6 @@ extern bool              gLowBatteryConfirmed;
 extern uint16_t          gBatteryCheckCounter;
 
 
-typedef enum {
-    BATTERY_TYPE_1600_MAH,
-    BATTERY_TYPE_2200_MAH,
-    BATTERY_TYPE_UNKNOWN
-} BATTERY_Type_t;
-
-
 unsigned int BATTERY_VoltsToPercent(unsigned int voltage_10mV);
 void BATTERY_GetReadings(bool bDisplayBatteryLevel);
 void BATTERY_TimeSlice500ms(void);

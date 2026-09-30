@@ -39,7 +39,6 @@ const char gMenuNames[MENU_N_ITEMS][7] =
 	[MENU_RXDAC]  = "RxDAC",
 	[MENU_TOT]    = "TxTOut",
 	[MENU_ABR]    = "BackLt",
-	[MENU_BATTYP] = "BatTyp",
 	[MENU_VOL]    = "BatVol",
 	[MENU_VER]    = "Ver",
 };
@@ -126,10 +125,6 @@ void UI_DisplayMenu(void)
 
 		case MENU_ABR:
 			strcpy(String, gSubMenu_BACKLIGHT[gSubMenuSelection % ARRAY_SIZE(gSubMenu_BACKLIGHT)]);
-			break;
-
-		case MENU_BATTYP:
-			strcpy(String, gSubMenuSelection ? "2200mAh" : "1600mAh");
 			break;
 
 		case MENU_VOL:

@@ -84,7 +84,7 @@ Stored in a 16-byte block at EEPROM `0x1D00` (the old DTMF contacts area). The b
 | 0x1D08 | RX AF gain 2, REG_48<9:4>, 0.5 dB steps | 0 to 63 | factory calibration (0x1F8E) |
 | 0x1D09 | RX DAC gain, REG_48<3:0>, about 2 dB steps | 0 to 15 | 15 |
 | 0x1D0A | backlight | 0 (off) to 7 (on) | 3 (20 s) |
-| 0x1D0B | battery type | 0 = 1600, 1 = 2200 mAh | 0 |
+| 0x1D0B | reserved: was the battery type (retired 2026-09-30); ignored, written 0xFF. The percentage uses the 1600 mAh curve | | |
 | 0x1D0C | key lock | 0, 1 | 0 |
 
 **Deviation is logarithmic.** Measured on the bench K5 (2026-09-28): +0x100 in REG_40<11:0> doubles the deviation, about 0.0235 dB per step. 0x862 gives 3.13 kHz for a 999 Hz tone at -6 dBFS from the AIOC at mic level, linear up to 0 dBFS; 0x800 gives 3.67 kHz at -1.94 dBFS. From 0xB00 up the chip wraps to near zero deviation, so both settings (and any REG_40 override) are clamped to 0xA7F. Narrow is 0x100 below wide, which halves the deviation. A value above 0xA7F in EEPROM means "use the default".
@@ -113,7 +113,7 @@ If the frequency there is not receivable (a blank block, or a radio coming from 
 
 Other EEPROM the firmware reads: S-meter levels at `0x0EA0`, TX band limits at `0x0F40` (no menu). Calibration (`0x1E00` up) is read only.
 
-The same settings are in the menu (MENU, then UP/DOWN, MENU to edit and again to store, EXIT to cancel): Step, TxPwr, W/N, DevW, DevN, RxG, RxDAC, TxTOut, BackLt, BatTyp, plus the battery voltage and the version.
+The same settings are in the menu (MENU, then UP/DOWN, MENU to edit and again to store, EXIT to cancel): Step, TxPwr, W/N, DevW, DevN, RxG, RxDAC, TxTOut, BackLt, plus the battery voltage and the version.
 
 Keys on the main screen: digits enter a frequency, UP/DOWN step, F then 6 cycles power, F held locks the keypad. The side keys have no function (there is no squelch to open).
 

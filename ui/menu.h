@@ -31,7 +31,6 @@ enum {
 	MENU_RXDAC,     // RX AF DAC gain, REG_48<3:0>
 	MENU_TOT,       // TX timeout
 	MENU_ABR,       // backlight time
-	MENU_BATTYP,    // battery type
 	MENU_VOL,       // battery voltage (read only)
 	MENU_VER,       // firmware version (read only)
 	MENU_N_ITEMS

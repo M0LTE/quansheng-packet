@@ -61,7 +61,8 @@ enum {
 //   0x1D08  RX AF gain 2, REG_48<9:4>, 0 to 63
 //   0x1D09  RX AF DAC gain, REG_48<3:0>, 0 to 15
 //   0x1D0A  backlight time, 0 (off) to 7 (always on)
-//   0x1D0B  battery type, 0 = 1600 mAh, 1 = 2200 mAh
+//   0x1D0B  reserved: was the battery type (retired, ignored, written 0xFF;
+//           the percentage uses the 1600 mAh curve)
 //   0x1D0C  keypad lock, 0 or 1
 //   0x1D0D  reserved (0xFF)
 //
@@ -193,7 +194,6 @@ typedef struct {
 	uint8_t               BACKLIGHT_TIME;
 	uint8_t               BACKLIGHT_MIN;
 	uint8_t               BACKLIGHT_MAX;
-	BATTERY_Type_t        BATTERY_TYPE;
 
 	// read only, from calibration and upstream settings
 	int16_t               BK4819_XTAL_FREQ_LOW;

@@ -166,6 +166,7 @@ static void test_settings_defaults_and_roundtrip(void)
 	SETTINGS_SaveSettings();
 	CHECK(eeprom[SETTINGS_PKT_BLOCK] == SETTINGS_PKT_VERSION);
 	CHECK(eeprom[SETTINGS_PKT_BLOCK + 3] == 0xFF);      // reserved: the retired mic gain
+	CHECK(eeprom[SETTINGS_PKT_BLOCK + 11] == 0xFF);     // reserved: the retired battery type
 
 	memset(&gEeprom.BUSY_LEVEL, 0x55, 8);
 	SETTINGS_InitEEPROM();

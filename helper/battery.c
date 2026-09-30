@@ -51,37 +51,25 @@ const uint16_t 	  lowBatteryPeriod = 30;
 
 
 
-const uint16_t Voltage2PercentageTable[][7][2] = {
-	[BATTERY_TYPE_1600_MAH] = {
-		{828, 100},
-		{814, 97 },
-		{760, 25 },
-		{729, 6  },
-		{630, 0  },
-		{0,   0  },
-		{0,   0  },
-	},
-
-	[BATTERY_TYPE_2200_MAH] = {
-		{832, 100},
-		{813, 95 },
-		{740, 60 },
-		{707, 21 },
-		{682, 5  },
-		{630, 0  },
-		{0,   0  },
-	},
+// Charge percentage against voltage (10 mV units) for the standard 1600 mAh
+// pack. The 2200 mAh curve and the battery type setting were removed on
+// 2026-09-30: the percentage is only a guide, and the TX limits (about 6.3 V
+// and 8.9 V) do not depend on it.
+static const uint16_t Voltage2PercentageTable[][2] = {
+	{828, 100},
+	{814, 97 },
+	{760, 25 },
+	{729, 6  },
+	{630, 0  },
+	{0,   0  },
 };
-
-static_assert(ARRAY_SIZE(Voltage2PercentageTable[BATTERY_TYPE_1600_MAH]) ==
-	ARRAY_SIZE(Voltage2PercentageTable[BATTERY_TYPE_2200_MAH]));
 
 
 unsigned int BATTERY_VoltsToPercent(const unsigned int voltage_10mV)
 {
-	const uint16_t (*crv)[2] = Voltage2PercentageTable[gEeprom.BATTERY_TYPE];
+	const uint16_t (*crv)[2] = Voltage2PercentageTable;
 	const int mulipl = 1000;
-	for (unsigned int i = 1; i < ARRAY_SIZE(Voltage2PercentageTable[BATTERY_TYPE_2200_MAH]); i++) {
+	for (unsigned int i = 1; i < ARRAY_SIZE(Voltage2PercentageTable); i++) {
 		if (voltage_10mV > crv[i][0]) {
 			const int a = (crv[i - 1][1] - crv[i][1]) * mulipl / (crv[i - 1][0] - crv[i][0]);
 			const int b = crv[i][1] - a * crv[i][0] / mulipl;

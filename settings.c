@@ -68,7 +68,6 @@ void SETTINGS_Decode(const uint8_t Data[16], const uint8_t T[8], EEPROM_Config_t
 	e->RX_GAIN          = Data[8];   // checked in SETTINGS_LoadCalibration
 	e->RX_DAC_GAIN      = ByteOr(Data[9], PKT_RX_DAC_GAIN_MAX, PKT_RX_DAC_GAIN_DEFAULT);
 	e->BACKLIGHT_TIME   = ByteOr(Data[10], 7, 3);
-	e->BATTERY_TYPE     = ByteOr(Data[11], BATTERY_TYPE_2200_MAH, BATTERY_TYPE_1600_MAH);
 	e->KEY_LOCK         = ByteOr(Data[12], 1, 0);
 }
 
@@ -261,7 +260,6 @@ void SETTINGS_SaveSettings(void)
 	State[8]  = gEeprom.RX_GAIN;
 	State[9]  = gEeprom.RX_DAC_GAIN;
 	State[10] = gEeprom.BACKLIGHT_TIME;
-	State[11] = gEeprom.BATTERY_TYPE;
 	State[12] = gEeprom.KEY_LOCK;
 	EEPROM_WriteBuffer(SETTINGS_PKT_BLOCK + 0, State + 0);
 	EEPROM_WriteBuffer(SETTINGS_PKT_BLOCK + 8, State + 8);

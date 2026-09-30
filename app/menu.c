@@ -45,7 +45,6 @@ static bool MENU_GetLimits(uint8_t menu_id, int32_t *pMin, int32_t *pMax)
 		case MENU_RXDAC:  *pMax = PKT_RX_DAC_GAIN_MAX;                 break;
 		case MENU_TOT:    *pMax = ARRAY_SIZE(gTxTimeoutSeconds) - 1;   break;
 		case MENU_ABR:    *pMax = ARRAY_SIZE(gSubMenu_BACKLIGHT) - 1;  break;
-		case MENU_BATTYP: *pMax = BATTERY_TYPE_2200_MAH;               break;
 		default:
 			*pMax = 0;
 			return false;
@@ -89,7 +88,6 @@ void MENU_AcceptSetting(void)
 		case MENU_RXG:    gEeprom.RX_GAIN          = gSubMenuSelection; break;
 		case MENU_RXDAC:  gEeprom.RX_DAC_GAIN      = gSubMenuSelection; break;
 		case MENU_TOT:    gEeprom.TX_TIMEOUT       = gSubMenuSelection; break;
-		case MENU_BATTYP: gEeprom.BATTERY_TYPE     = gSubMenuSelection; break;
 		case MENU_ABR:
 			gEeprom.BACKLIGHT_TIME = gSubMenuSelection;
 			BACKLIGHT_TurnOn();
@@ -115,7 +113,6 @@ void MENU_ShowCurrentSetting(void)
 		case MENU_RXDAC:  gSubMenuSelection = gEeprom.RX_DAC_GAIN;      break;
 		case MENU_TOT:    gSubMenuSelection = gEeprom.TX_TIMEOUT;       break;
 		case MENU_ABR:    gSubMenuSelection = gEeprom.BACKLIGHT_TIME;   break;
-		case MENU_BATTYP: gSubMenuSelection = gEeprom.BATTERY_TYPE;     break;
 		default:          gSubMenuSelection = 0;                        break;
 	}
 }
