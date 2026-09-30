@@ -65,6 +65,7 @@ enum {
 #define CAP_RAM_OVERRIDES    (1u << 8)
 #define CAP_PERSISTENCE      (1u << 9)
 #define CAP_EXACT_TIME_SYNC  (1u << 10)
+#define CAP_RAW_REG_WRITE    (1u << 11)     // bench build: legacy 0x0602 built in
 
 void    V2_Init(void);
 void    V2_Handle(uint16_t id, const uint8_t *body, uint16_t bodyLen, uint16_t payloadLen);

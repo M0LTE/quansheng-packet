@@ -172,13 +172,26 @@ static void test_register_and_status_commands(void)
 	send(0x0601, NULL, 0);
 	CHECK(nfr == 0);
 
-	// BK4819 register write and read (0x0602 has no reply)
+	// BK4819 register write (0x0602 has no reply) and read. The write is
+	// built in only in bench builds (ENABLE_UART_RAW_REG_WRITE); release
+	// builds ignore it like any unknown command, the lock still starts.
 	uint8_t w[3] = { 0x7D, 0x5A, 0xE9 };
+	gSerialLockMs = 0;
 	send(0x0602, w, 3);
+	CHECK(gSerialLockMs == SERIAL_LOCK_DEFAULT_MS);
+#ifdef ENABLE_UART_RAW_REG_WRITE
 	CHECK(nfr == 0 && regs[0x7D] == 0xE95A);
+	const uint8_t want_lo = 0x5A, want_hi = 0xE9;
+#else
+	CHECK(nfr == 0 && regs[0x7D] == 0x1234);
+	w[0] = 0x30; w[1] = 0xFE; w[2] = 0xC1;           // TX enable: never written
+	send(0x0602, w, 3);
+	CHECK(nfr == 0 && regs[0x30] != 0xC1FE);
+	const uint8_t want_lo = 0x34, want_hi = 0x12;
+#endif
 	uint8_t r[1] = { 0x7D };
 	send(0x0601, r, 1);
-	CHECK(reply_id() == 0x0601 && fr[0].body[0] == 0x7D && fr[0].body[1] == 0x5A && fr[0].body[2] == 0xE9);
+	CHECK(reply_id() == 0x0601 && fr[0].body[0] == 0x7D && fr[0].body[1] == want_lo && fr[0].body[2] == want_hi);
 
 	// unknown ids outside 0x50xx: no reply, but the lock still starts
 	gSerialLockMs = 0;
@@ -308,6 +321,10 @@ int main(void)
 		printf("%d check(s) failed\n", failures);
 		return 1;
 	}
-	printf("all UART host tests passed\n");
+#ifdef ENABLE_UART_RAW_REG_WRITE
+	printf("all UART host tests passed (bench build, 0x0602 built in)\n");
+#else
+	printf("all UART host tests passed (release build, 0x0602 ignored)\n");
+#endif
 	return 0;
 }

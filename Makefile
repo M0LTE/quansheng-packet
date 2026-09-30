@@ -3,8 +3,24 @@
 #
 # Every radio feature a packet station does not use has been deleted from the
 # source, so there are no feature flags left. What remains is always built in:
-# the flat (DIG style) audio path, the UART EEPROM protocol and the BK4819
-# register read/write commands. See docs/packet-fw.md.
+# the flat (DIG style) audio path, the UART EEPROM protocol, the BK4819
+# register read command (0x0601) and serial protocol v2. See docs/packet-fw.md.
+#
+#   make                 release build
+#   make bench           bench build: ENABLE_UART_RAW_REG_WRITE=1
+#   make VERSION_STRING=v1.2.3   set the version (at most 8 characters)
+#
+# Changing an option rebuilds everything (the options are recorded in
+# .build-options), so release and bench builds never share objects.
+
+# ---- BENCH OPTIONS (off in release builds) ----
+# 1: build in the legacy 0x0602 command, which writes any BK4819 register
+# unchecked, REG_30 (TX enable), REG_33 (PA enable) and REG_36 (PA bias)
+# included, so it can put out RF outside the transmit state machine. For
+# bench experiments only; never in a release. Without it 0x0602 is ignored
+# like any unknown command. (Protocol v2 REG_WRITE is always built in: it
+# refuses those registers.)
+ENABLE_UART_RAW_REG_WRITE     ?= 0
 
 # ---- COMPILER/LINKER OPTIONS ----
 ENABLE_CLANG                  ?= 0
@@ -107,10 +123,12 @@ SIZE = arm-none-eabi-size
 AUTHOR_STRING ?= PKTFW
 # the user might not have/want git installed
 # can set own version string here (max 7 chars)
+# Release builds pass the tag (VERSION_STRING=v1.2.3). Otherwise: the tag
+# on HEAD, else the short commit hash.
 ifneq (, $(shell $(WHERE) git))
 	VERSION_STRING ?= $(shell git describe --tags --exact-match 2>$(NULL_OUTPUT))
 	ifeq (, $(VERSION_STRING))
-    	VERSION_STRING := $(shell git rev-parse --short HEAD)
+    	VERSION_STRING := $(shell git rev-parse --short=7 HEAD 2>$(NULL_OUTPUT))
 	endif
 endif
 # If there is still no VERSION_STRING we need to make one.
@@ -118,7 +136,11 @@ endif
 ifeq (, $(VERSION_STRING))
 	VERSION_STRING := NOGIT
 endif
-#VERSION_STRING := 230930b
+# The packed image has 16 bytes for "*PKTFW <version>" and the menu shows 8
+# characters of the version.
+ifneq (ok, $(shell [ $$(printf '%s' '$(VERSION_STRING)' | wc -c) -le 8 ] && echo ok))
+    $(error VERSION_STRING '$(VERSION_STRING)' is longer than 8 characters)
+endif
 
 
 ASFLAGS = -c -mcpu=cortex-m0
@@ -154,6 +176,10 @@ CFLAGS += -DAUTHOR_STRING=\"$(AUTHOR_STRING)\" -DVERSION_STRING=\"$(VERSION_STRI
 
 ifeq ($(ENABLE_SWD),1)
 	CFLAGS += -DENABLE_SWD
+endif
+
+ifeq ($(ENABLE_UART_RAW_REG_WRITE),1)
+	CFLAGS += -DENABLE_UART_RAW_REG_WRITE
 endif
 
 LDFLAGS =
@@ -207,6 +233,9 @@ endif
 
 	$(SIZE) $<
 
+bench:
+	$(MAKE) ENABLE_UART_RAW_REG_WRITE=1 all
+
 debug:
 	/opt/openocd/bin/openocd -c "bindto 0.0.0.0" -f interface/jlink.cfg -f dp32g030.cfg
 
@@ -214,6 +243,13 @@ flash:
 	/opt/openocd/bin/openocd -c "bindto 0.0.0.0" -f interface/jlink.cfg -f dp32g030.cfg -c "write_image firmware.bin 0; shutdown;"
 
 version.o: .FORCE
+
+# Record the options; any change rebuilds every object.
+BUILD_OPTIONS := CLANG=$(ENABLE_CLANG) SWD=$(ENABLE_SWD) LTO=$(ENABLE_LTO) RAW_REG_WRITE=$(ENABLE_UART_RAW_REG_WRITE) DEBUG=$(DEBUG)
+.build-options: .FORCE
+	@echo '$(BUILD_OPTIONS)' | cmp -s - $@ || echo '$(BUILD_OPTIONS)' > $@
+
+$(OBJS): .build-options
 
 $(TARGET): $(OBJS)
 	$(LD) $(LDFLAGS) $^ -o $@ $(LIBS)
@@ -231,7 +267,7 @@ bsp/dp32g030/%.h: hardware/dp32g030/%.def
 -include $(DEPS)
 
 clean:
-	$(RM) $(call FixPath, $(TARGET).bin $(TARGET).packed.bin $(TARGET) $(OBJS) $(DEPS))
+	$(RM) $(call FixPath, $(TARGET).bin $(TARGET).packed.bin $(TARGET) $(OBJS) $(DEPS) .build-options)
 
 doxygen:
 	doxygen

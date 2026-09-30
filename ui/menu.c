@@ -137,7 +137,11 @@ void UI_DisplayMenu(void)
 			const char *hash = strchr(Version, ' ');
 			strncpy(String, hash ? hash + 1 : Version, 8);
 			String[8] = 0;
+#ifdef ENABLE_UART_RAW_REG_WRITE
+			strcpy(Hint, "PKTFW bench");   // raw register writes built in
+#else
 			strcpy(Hint, "PKTFW");
+#endif
 		}
 			break;
 	}

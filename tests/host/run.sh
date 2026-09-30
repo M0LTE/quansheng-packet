@@ -23,6 +23,9 @@ gcc $CFLAGS -o "$out" \
 
 gcc $CFLAGS $PROTO -o "$out-uart" tests/host/test_uart.c $PROTO_SRC
 "$out-uart"
+# the bench build: legacy 0x0602 raw register writes built in
+gcc $CFLAGS $PROTO -DENABLE_UART_RAW_REG_WRITE -o "$out-uart-bench" tests/host/test_uart.c $PROTO_SRC
+"$out-uart-bench"
 
 gcc $CFLAGS $PROTO -o "$out-v2" tests/host/test_v2.c $PROTO_SRC
 "$out-v2" "$out-vectors.json"

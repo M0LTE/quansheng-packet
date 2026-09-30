@@ -373,6 +373,11 @@ static void CMD_0601_ReadBK4819Reg(const uint8_t *pBuffer)
 	SendReply(&reply, sizeof(reply));
 }
 
+#ifdef ENABLE_UART_RAW_REG_WRITE
+// Bench builds only (make bench): writes any register unchecked, REG_30,
+// REG_33 and REG_36 included, so it can put out RF outside the transmit
+// state machine. Release builds ignore 0x0602 like any unknown command;
+// protocol v2 REG_WRITE, which refuses those registers, is always there.
 static void CMD_0602_WriteBK4819Reg(const uint8_t *pBuffer)
 {
 	typedef struct __attribute__((__packed__)) {
@@ -384,6 +389,7 @@ static void CMD_0602_WriteBK4819Reg(const uint8_t *pBuffer)
 	CMD_0602_t *cmd = (CMD_0602_t*) pBuffer;
 	BK4819_WriteRegister(cmd->reg, cmd->value);
 }
+#endif
 
 static uint16_t Ahead(uint16_t from, uint16_t to)
 {
@@ -559,10 +565,12 @@ void UART_HandleCommand(void)
 				CMD_0601_ReadBK4819Reg(UART_Command.Buffer);
 			break;
 
+#ifdef ENABLE_UART_RAW_REG_WRITE
 		case 0x0602: // id, size, register, value
 			if (gUART_CommandSize >= 7)
 				CMD_0602_WriteBK4819Reg(UART_Command.Buffer);
 			break;
+#endif
 	}
 }
 

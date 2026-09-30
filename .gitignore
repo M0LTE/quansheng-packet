@@ -10,3 +10,4 @@ compile_commands.json
 /out
 k5_eeprom.raw
 .claude/
+/.build-options

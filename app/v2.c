@@ -91,6 +91,9 @@ static uint16_t GetInfo(uint8_t *o)
 	uint32_t caps = CAP_LIVE_TX | CAP_RSSI_BUSY | CAP_TONE_RAW | CAP_RAM_OVERRIDES | CAP_PERSISTENCE | CAP_EXACT_TIME_SYNC;
 	if (gV2.TONE_CAL)
 		caps |= CAP_TONE_DEVIATION;
+#ifdef ENABLE_UART_RAW_REG_WRITE
+	caps |= CAP_RAW_REG_WRITE;
+#endif
 	put16(o, V2_PROTOCOL_VERSION);
 	memset(o + 2, 0, 16);
 	strncpy((char *)o + 2, Version, 15);

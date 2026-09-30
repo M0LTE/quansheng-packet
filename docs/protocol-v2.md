@@ -54,7 +54,7 @@ payload = id u16 | body_len u16 | body (body_len bytes)       body_len = len - 4
 
 ### 2.1 Legacy commands
 
-0x0514 and 0x052F (hello), 0x051B (EEPROM read), 0x051D (EEPROM write), 0x0527 (RSSI), 0x0529 (battery), 0x05DD (reboot), 0x0601 and 0x0602 (BK4819 register read, write) behave exactly as in `docs/packet-fw.md`. Visible differences in v2 firmware, none of them a change of wire format:
+0x0514 and 0x052F (hello), 0x051B (EEPROM read), 0x051D (EEPROM write), 0x0527 (RSSI), 0x0529 (battery), 0x05DD (reboot), 0x0601 (BK4819 register read) and, in bench builds only, 0x0602 (register write) behave exactly as in `docs/packet-fw.md`. Release builds ignore 0x0602 like any unknown legacy id. Visible differences in v2 firmware, none of them a change of wire format:
 - the 0x0515 hello reply carries the v2 marker in its challenge field (3);
 - the PTT lock after any frame is `SERIAL_LOCK_MS` (5.3); the settings reload after an 0x051D write session uses its own timer: 1.0 s after the last 0x051D, never during TX;
 - frames are processed within 5 ms instead of one per 10 ms slice, so back-to-back frames are no longer lost (except while an EEPROM block is being written: about 8 ms each, 6.6);
@@ -146,7 +146,7 @@ An event is stored, and takes a sequence number, only if the live subscription i
 - One outstanding 0x50xx command at a time: wait for its reply (matching tag) or a 100 ms timeout. Events may arrive in between.
 - The radio replies within 5 ms of the last command byte (plus its own output queue, at most about 15 ms). `EVENT_REPLAY` sends its events before the reply.
 - On timeout, retry once. All commands are safe to repeat except `REG_WRITE` and `REG_OVERRIDE` ADD; re-read state instead of repeating those.
-- Legacy commands have no tag; 0x0602 has no reply at all.
+- Legacy commands have no tag; 0x0602 (bench builds) has no reply at all.
 
 ### 5.2 When the host may key
 
@@ -221,7 +221,7 @@ Request: empty. Reply (40 bytes):
 | 38 | u8 | v2 block layout (1), 0 if not valid |
 | 39 | u8 | default burst sample period, ms |
 
-Caps: bit 0 LIVE_TX option, bit 1 RSSI busy detector, bit 2 LEVEL_TONE raw, bit 3 LEVEL_TONE deviation mode calibrated, bit 4 RX AF amplitude meaningful, bit 5 AGC readback meaningful, bit 6 frequency error available, bit 7 TX mic amplitude meaningful, bit 8 RAM register overrides, bit 9 persistence, bit 10 exact TIME_SYNC timestamps. Bits 4 to 7 are set only once the matching measurement (12) has validated the register; the raw fields are reported regardless.
+Caps: bit 0 LIVE_TX option, bit 1 RSSI busy detector, bit 2 LEVEL_TONE raw, bit 3 LEVEL_TONE deviation mode calibrated, bit 4 RX AF amplitude meaningful, bit 5 AGC readback meaningful, bit 6 frequency error available, bit 7 TX mic amplitude meaningful, bit 8 RAM register overrides, bit 9 persistence, bit 10 exact TIME_SYNC timestamps, bit 11 legacy raw register write 0x0602 built in (a bench build; never set in a release). Bits 4 to 7 are set only once the matching measurement (12) has validated the register; the raw fields are reported regardless.
 
 ### 6.2 GET_STATUS (0x5001)
 
@@ -332,7 +332,7 @@ Request: `u8 first`, `u8 count` (1 to 64, `first + count <= 0x80`), `u8 flags` (
 
 ### 6.10 REG_WRITE (0x5009)
 
-Request: `u8 n` (1 to 16), then n x `(u8 reg, u16 value)`. Registers `REG_OVERRIDE` refuses (0x00, 0x30, 0x33, 0x36, 0x37, 0x38, 0x39, 0x3B, 0x3C, above 0x7F) reject the whole command with REFUSED. Written in order; read back after the last write. `n` outside 1 to 16: `RANGE` detail 0; a body that is not `1 + 3n` bytes: `BAD_LENGTH`. Reply: `u8 n`, n x `(u8 reg, u16 read-back)`. Registers the firmware manages (7D, 40, 47, 48, 7E, 2B, 43, 31 and the squelch set) are rewritten at the next set-up; use parameters or `REG_OVERRIDE` for those. Legacy 0x0602 stays unrestricted.
+Request: `u8 n` (1 to 16), then n x `(u8 reg, u16 value)`. Registers `REG_OVERRIDE` refuses (0x00, 0x30, 0x33, 0x36, 0x37, 0x38, 0x39, 0x3B, 0x3C, above 0x7F) reject the whole command with REFUSED. Written in order; read back after the last write. `n` outside 1 to 16: `RANGE` detail 0; a body that is not `1 + 3n` bytes: `BAD_LENGTH`. Reply: `u8 n`, n x `(u8 reg, u16 read-back)`. Registers the firmware manages (7D, 40, 47, 48, 7E, 2B, 43, 31 and the squelch set) are rewritten at the next set-up; use parameters or `REG_OVERRIDE` for those. REG_WRITE is in every build; the unrestricted legacy 0x0602 only in bench builds (caps bit 11).
 
 ### 6.11 REG_OVERRIDE (0x500A)
 
@@ -650,5 +650,5 @@ Points settled by the implementation, beyond the amendments above:
 - The event deferral also covers a press that is still being debounced, and resumes 2 ms after the last millisecond in which PTT was asserted or the radio transmitted.
 - EEPROM persistence (6.6) is also deferred while the PTT rules have a key-up pending.
 - The stored view (GET_PARAMS STORED, GET_STATUS flags2 bit 0, SAVE_PARAMS SAVE) is a copy of the EEPROM settings, re-read on the first request after any EEPROM block was written, from any source, and never during a transmission. Until 2026-09-30 (`f988b24` and earlier) it missed keypad and menu saves and could report a value the radio no longer had stored.
-- Known limits: a keypad or menu save stores the live value of everything in the block it writes, so a value a host set in RAM in the same block (a deviation trial, say) is persisted with it; and legacy 0x0602 still writes any BK4819 register, REG_30, REG_33 and REG_36 included, which can put out RF outside the transmit state machine (no TX timeout, a PTT release does not stop it): tools must not use it for that.
+- Known limits: a keypad or menu save stores the live value of everything in the block it writes, so a value a host set in RAM in the same block (a deviation trial, say) is persisted with it; and in a bench build (caps bit 11) legacy 0x0602 writes any BK4819 register, REG_30, REG_33 and REG_36 included, which can put out RF outside the transmit state machine (no TX timeout, a PTT release does not stop it): tools must not use it for that. Release builds leave 0x0602 out.
 - Golden vectors from the firmware code for the C# client and simulator: `tests/vectors/protocol-v2.json` (format in `tests/vectors/README.md`), regenerated and compared by `tests/host/run.sh`.
