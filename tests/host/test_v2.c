@@ -995,6 +995,14 @@ static void test_overrides(void)
 	CHECK(status(f) == V2_OK && gRegOverrideCount == 0);
 	host_advance(20);
 	CHECK(eeprom[0x1D10] == 0xFF);
+	// queued table writes check the settings block again when they run
+	v2(V2_REG_OVERRIDE, 0x9B, r, 11);
+	c[0] = 3;
+	CHECK(status(v2(V2_REG_OVERRIDE, 0x9C, c, 5)) == V2_OK);
+	eeprom[SETTINGS_PKT_BLOCK] = 0x41;               // the block went away meanwhile
+	host_advance(20);
+	CHECK(eeprom[0x1D10] == 0xFF && !PARAMS_PersistPending());
+	eeprom[SETTINGS_PKT_BLOCK] = SETTINGS_PKT_VERSION;
 	c[0] = 2;
 	CHECK(status(v2(V2_REG_OVERRIDE, 0x99, c, 5)) == V2_OK);
 	c[0] = 5;
