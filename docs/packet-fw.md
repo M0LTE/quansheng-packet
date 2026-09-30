@@ -32,6 +32,7 @@ Flash for the firmware is 61440 bytes (60 KiB). All sizes are gcc 10.3.1 (Docker
 | Review fixes: REG_30 off at key-down, release debounce | 23520 | 37920 |
 | Bench defaults: deviation 0x956/0x856, PA delays 1/2 ms | 23520 | 37920 |
 | Deviation defaults 0x856/0x756 (TNC at 0 dBFS) | 23520 | 37920 |
+| Serial control protocol v2 (`docs/protocol-v2.md`) | 36188 | 25252 |
 
 ## What was removed
 
@@ -45,7 +46,7 @@ CTCSS/DCS went because packet uses carrier squelch and dropping it removes the t
 - Frequency entry on the keypad, up/down stepping, 200 memory channels and 7 band slots in the upstream EEPROM layout (CHIRP-compatible). Only frequency, power, bandwidth and step are read and saved; the other channel fields are left untouched.
 - Power (low, mid, high from the factory calibration), bandwidth (wide, narrow), squelch (0 to 9 from the factory tables), TX timeout, battery monitoring (TX refused below about 6.3 V and above about 8.9 V, as upstream), backlight, key lock.
 - Display: frequency, memory or band slot, TX/RX, RSSI in dBm and S-units, and the settings in use.
-- UART: the upstream EEPROM protocol and the BK4819 register commands.
+- UART: the upstream EEPROM protocol and the BK4819 register commands, plus the serial control protocol v2 (`docs/protocol-v2.md`): identification, status, events (busy, bursts, TX timing, heartbeats), parameters, register access and overrides, a level tone.
 
 ## The audio path
 
@@ -121,7 +122,7 @@ Timing settings, 8 bytes at `0x1D50` (one UART write; not in the menu; used only
 | 0x1D53 | delay after the PA bias, ms | 0 to 20 | 2 (upstream 10) |
 | 0x1D54 | reserved, 0xFF | | |
 
-**Why a 5 ms press debounce is still safe with UART on the same contact.** While not keyed, a tick only counts towards a press if the line reads low continuously for 280 us (`PTT_WINDOW_US`), read in a tight loop well under 1 us per read. At 38400 baud one character is 260 us and always ends in a high stop bit of 26 us, and the line idles high between characters, so any UART traffic, even an unbroken run of 0x00 bytes (low for 9 of every 10 bits), shows a high level inside every 280 us window and never counts. A real press (the AIOC holding the line low) passes. The busy read runs only while the radio is not keyed and the line reads low, so it costs at most 0.28 ms per ms, and only during a candidate press or during serial traffic. On top of that the payload of obfuscated frames is XORed with a 16-byte key (so zero runs become mixed bytes), frames start with `AB CD`, and the post-frame PTT lock (1 to 1.5 s after every valid frame) still holds PTT off and forces release. The host tests run the real `PTT_Tick` against a simulated line and SysTick and sweep a 2000-byte stream of zero bytes and of random bytes over every start phase: nothing keys even with a 1 ms debounce; shortening the window to 200 us makes them fail. Limit: this relies on the host sending at 38400 baud. A host at a much lower baud rate (a character longer than 280 us) is only covered by the post-frame lock.
+**Why a 5 ms press debounce is still safe with UART on the same contact.** While not keyed, a tick only counts towards a press if the line reads low continuously for 280 us (`PTT_WINDOW_US`), read in a tight loop well under 1 us per read. At 38400 baud one character is 260 us and always ends in a high stop bit of 26 us, and the line idles high between characters, so any UART traffic, even an unbroken run of 0x00 bytes (low for 9 of every 10 bits), shows a high level inside every 280 us window and never counts. A real press (the AIOC holding the line low) passes. The busy read runs only while the radio is not keyed and the line reads low, so it costs at most 0.28 ms per ms, and only during a candidate press or during serial traffic. On top of that the payload of obfuscated frames is XORed with a 16-byte key (so zero runs become mixed bytes), frames start with `AB CD`, and every valid frame ends any transmission and starts the serial PTT lock (below). The host tests run the real `PTT_Tick` against a simulated line and SysTick and sweep a 2000-byte stream of zero bytes and of random bytes over every start phase: nothing keys even with a 1 ms debounce; shortening the window to 200 us makes them fail. Limit: this relies on the host sending at 38400 baud. A host at a much lower baud rate (a character longer than 280 us) can key the radio: on the bench 1000 zero bytes keyed it for 0.455 s at 9600 baud and 0.120 s at 19200, never at 38400. Hosts must use 38400 baud and never send a break.
 
 **Key-up path**, with the defaults: 5 ms debounce plus up to 1.3 ms of tick phase and window, then the main loop picks the change up (usually well under 1 ms, longer if it is in the middle of a screen redraw or a UART command), then about 30 register operations (roughly 3 ms of bit-banged SPI: filters, frequency, TX set-up, TX enable), PA enable, 5 ms, PA bias (RF appears here), 10 ms (ready for modulation). The screen is no longer redrawn before key-up; the 10 ms slice redraws it afterwards. Expected: RF about 10 ms and ready for modulation about 12 ms after PTT goes low with the default PA delays of 1 and 2 ms (about 14 and 24 ms with the upstream 5 and 10 ms). Upstream measured 61 to 66 ms to RF.
 
@@ -149,7 +150,7 @@ Timing settings, 8 bytes at `0x1D50` (one UART write; not in the menu; used only
 | 0x0514 hello | version reply, starts the PTT lock | no backlight change, no AES fields |
 | 0x052F hello | same as 0x0514 | no longer changes VFO settings |
 | 0x051B read EEPROM | up to 128 bytes | refuses more than 128 (upstream overflowed its stack) |
-| 0x051D write EEPROM | 8-byte blocks | refused whole, with no reply, if any block is unaligned or at 0x1E00 and up, or if the data does not fit the frame; applied about 1 to 1.5 s after the session goes quiet |
+| 0x051D write EEPROM | 8-byte blocks | refused whole, with no reply, if any block is unaligned or at 0x1E00 and up, or if the data does not fit the frame; applied 1.0 s after the last write, never during TX |
 | 0x0527 | RSSI, noise, glitch | none |
 | 0x0529 | battery voltage and current | none |
 | 0x05DD | reboot | de-keys first (PA off, BK4819 off) |
@@ -157,7 +158,11 @@ Timing settings, 8 bytes at `0x1D50` (one UART write; not in the menu; used only
 
 0x052D (AES challenge), 0x051F and 0x0521 are gone. Register writes still get overwritten by the firmware on the next receive set-up or key-up for the registers it manages (7D, 40, 47, 48, 7E, 2B, 43, 31): change those through the settings instead.
 
-**PTT lock.** On the K1 connector the UART receive line shares a contact with PTT, so after a hello or an EEPROM command the firmware ignores PTT, and drops any transmission, for a while. Upstream held this for 6 s after a hello or EEPROM command; here it is 1 to 1.5 s (`SERIAL_PTT_LOCK_500ms`), refreshed by every valid frame, including the RSSI, battery and BK4819 register commands. The risk: a host that pauses for more than a second in the middle of a session and then sends a long frame full of zero bytes could hold the line low for 30 ms before the frame is complete and the lock re-arms, which would key the radio briefly. Upstream had the same exposure on the first frame of every session. Keep sessions continuous, start with a short hello, and wait 1.5 s after the last command before keying. Because every frame holds PTT off, registers cannot be changed while transmitting (upstream allowed 0x0601/0x0602 during a side-PTT transmission), and a tool that polls RSSI more often than once a second keeps the radio from transmitting at all.
+**PTT lock.** On the K1 connector the UART receive line shares a contact with PTT. Every valid frame, of any kind, ends any transmission before its command runs and starts the serial PTT lock: `SERIAL_LOCK_MS`, 20 ms by default (a v2 parameter, 0 to 1500 ms, stored at 0x1D61), counted every 1 ms. A press during the lock keys at most 30 ms late, when the lock runs out, or is refused until PTT is released and pressed again; v1 held PTT off for 1.0 to 1.5 s and keyed late when it ran out, eating the start of the frame. After a v2 command a host may key at `t_reply + lock_ms` (the lock is in every reply); after a legacy reply at `t_reply + SERIAL_LOCK_MS + 2 ms`. A transmission ended by a frame, a TX timeout or a refused press needs PTT released first. What stops serial data being taken as a press is the 280 us window, not the lock (`docs/protocol-v2.md` 1c).
+
+**Output and timing.** Everything the radio sends goes through a 512-byte queue drained by the 1 ms tick into the UART FIFO; the command handler no longer blocks with interrupts off. Frames are handled on every pass of the main loop (v1: one per 10 ms slice, so replies took 10 to 20 ms), all complete frames at once. The parser drops only the `AB` of anything that cannot be a frame and drops a frame still incomplete 5 ms after its last byte, so a frame cut short by PTT no longer leaves the radio deaf to hellos.
+
+**Protocol v2.** Commands 0x5000 to 0x507F, events 0x50C0 up, specified in `docs/protocol-v2.md` (section 13 lists what is implemented). A hello's 0x0515 reply carries the `PKT2` marker in its challenge field; the replies to legacy commands are otherwise byte-identical to v1. v2 settings (lock, busy detection, default subscription, tone calibration) live in the 16-byte block at 0x1D60, used only with a valid settings block and its own version byte, and blanked by the first menu save over foreign data. Nothing in v2 keys the transmitter.
 
 ## Fixes
 

@@ -1,6 +1,6 @@
 # Serial control protocol v2 (packet firmware)
 
-Status: specification, not implemented. Written 29 September 2026 against `packet-fw` 2951c48.
+Status: implemented in the firmware (branch `fw-v2`), host-tested, not yet run on a radio; section 13 lists what is implemented and where the firmware settled a point this text left open. Written 29 September 2026 against `packet-fw` 2951c48; amended 30 September 2026 with the implementation.
 
 This is the serial protocol a TNC or soundmodem (pdn-soundmodem, say) uses to control and watch the UV-K5 packet firmware through an AIOC: AIOC sound card for audio, AIOC CM108 HID for PTT, AIOC CDC serial for this protocol. It adds a command set in its own ID range (0x50xx) to the existing framing. Every existing command and the framing stay as they are on the wire.
 
@@ -48,8 +48,8 @@ payload = id u16 | body_len u16 | body (body_len bytes)       body_len = len - 4
 - `crc16` is CRC-16/XMODEM (poly 0x1021, init 0) over the payload. In obfuscated mode payload and CRC are XORed with `16 6C 14 E6 2E 91 0D 40 21 35 D5 40 13 03 E9 80`, cycling from payload byte 0. 38400 8N1; the radio actually runs at about 39056 baud (1.7% fast).
 - Mode: a hello whose raw id bytes are `14 05` switches the radio to plain mode; raw `02 69` (an obfuscated 0x0514) switches it back. Power-on mode is obfuscated. The mode applies to both directions and to v2 frames exactly as to legacy ones.
 - Frames from the radio: legacy replies keep `FF FF` (obfuscated as usual) in the CRC field, as today. **All 0x50xx frames from the radio carry a real CRC.** Hosts MUST check it on 0x50xx frames and accept either on legacy frames (k5.py already does).
-- The radio drops frames with a bad CRC, a bad footer, or `len + 8 > 256` (its DMA ring), without reply.
-- For v2 IDs the firmware MUST check `body_len == len - 4`; otherwise it replies `BAD_LENGTH`.
+- The radio drops frames with a bad CRC, a bad footer, or `len + 8 > 256` (its DMA ring), without reply. It resynchronises as a host does (2.3): anything that cannot be a frame (second byte not `CD`, oversize length, bad footer) loses only its `AB`, and a frame still incomplete 5 ms after the last byte arrived is dropped as truncated, so a frame cut short (for example by PTT pulling the shared line low) never swallows the frames after it.
+- For v2 IDs the firmware MUST check `body_len == len - 4`; otherwise it replies `BAD_LENGTH`. A 0x50xx frame too short to hold the tag gets `BAD_LENGTH` with tag 0. Frames with ids 0x5080 to 0x50FF from the host are not requests and get no reply.
 - v2 request bodies MUST NOT exceed 120 bytes (frame of 132 bytes), so that two frames fit in the 256-byte receive ring.
 
 ### 2.1 Legacy commands
@@ -57,7 +57,7 @@ payload = id u16 | body_len u16 | body (body_len bytes)       body_len = len - 4
 0x0514 and 0x052F (hello), 0x051B (EEPROM read), 0x051D (EEPROM write), 0x0527 (RSSI), 0x0529 (battery), 0x05DD (reboot), 0x0601 and 0x0602 (BK4819 register read, write) behave exactly as in `docs/packet-fw.md`. Visible differences in v2 firmware, none of them a change of wire format:
 - the 0x0515 hello reply carries the v2 marker in its challenge field (3);
 - the PTT lock after any frame is `SERIAL_LOCK_MS` (5.3); the settings reload after an 0x051D write session uses its own timer: 1.0 s after the last 0x051D, never during TX;
-- frames are processed within 5 ms instead of one per 10 ms slice, so back-to-back frames are no longer lost;
+- frames are processed within 5 ms instead of one per 10 ms slice, so back-to-back frames are no longer lost (except while an EEPROM block is being written: about 8 ms each, 6.6);
 - a hello resets the live event subscription to the stored default (6.3), so a tool that takes over the port does not get event frames it does not expect.
 
 ### 2.2 Radio output that is not a frame
@@ -137,7 +137,7 @@ On an error status the reply body after the header is one `u8 detail` (the offen
 | 2 | u32 | t_ms: radio clock, ms since boot (meaning of the instant defined per event) |
 | 6 | u8 | flags: bit 0 REPLAY, bit 1 DEFERRED (held while PTT was asserted), bit 2 QUEUED (waited more than 2 ms behind other output), bit 3 EPHEMERAL (not stored, not replayable), bit 4 TIME_EXACT (the output queue was empty, so the frame's first byte left within 1 ms of t_ms) |
 
-A client keeps `expected = last_seq + 1`. A stored event with a larger seq, or an ephemeral event whose seq differs from `expected`, means events were missed; fetch them with `EVENT_REPLAY` when idle.
+An event is stored, and takes a sequence number, only if the live subscription includes it when it happens (`EVENTS_LOST`: if any stored event is subscribed), so a client never sees gaps for events it did not ask for. A client keeps `expected = last_seq + 1`. A stored event with a larger seq, or an ephemeral event whose seq differs from `expected`, means events were missed; fetch them with `EVENT_REPLAY` when idle.
 
 ## 5. Host timing rules
 
@@ -161,7 +161,7 @@ A press inside the lock is handled as in 5.3; clients MUST NOT rely on it.
 
 Evaluated on every 1 ms tick. `press` is the v1 debounced press (280 us windows, `PTT_PRESS_MS`), now computed even while the lock runs.
 
-1. Every valid frame (any id, legacy included) sets `lock_ms = SERIAL_LOCK_MS` and ends any transmission (`TX_END` reason SERIAL, if it had not already ended as a release).
+1. Every valid frame (any id, legacy included) sets `lock_ms = SERIAL_LOCK_MS` and ends any transmission (`TX_END` reason SERIAL, if it had not already ended as a release), before its command runs. A transmission ended this way, and a pending late key, need PTT released and pressed again.
 2. On a press edge:
    - `lock_ms == 0` and no other bar: key normally.
    - `0 < lock_ms <= 30` (LATE_KEY_MAX_MS): key when `lock_ms` reaches 0 if still pressed; `TX_START.lock_delay_ms` gives the delay.
@@ -210,7 +210,7 @@ Request: empty. Reply (40 bytes):
 | 22 | u32 | params: bit n set = parameter id n supported |
 | 26 | u32 | events: bit n set = event 0x50C0 + n supported |
 | 30 | u8 | max request body, bytes (at least 120) |
-| 31 | u8 | event ring capacity, events (at least 16) |
+| 31 | u8 | event ring capacity, events (at least 16; 20 in this firmware) |
 | 32 | u16 | SERIAL_LOCK_MS in force |
 | 34 | u8 | LATE_KEY_MAX_MS (30) |
 | 35 | u8 | TX band plan (F_LOCK, 0 to 7 as `settings.h`) |
@@ -264,6 +264,8 @@ Request (10 bytes):
 
 Reply (8 bytes): `u16 next_seq`, `u16 oldest_seq` (oldest event still in the ring, equal to next_seq if empty), `u32 t_ms` (radio clock now).
 
+Mask bits for events the radio does not support, and option bits other than 0 and 1, are ignored. The batch may be 0 only when the stream period is 0. PERSIST needs a valid settings block (else `EEPROM`); the default is written after the reply, like SET_PARAMS PERSIST. Errors: `RANGE` with the field offset as detail (5 heartbeat, 7 stream period, 8 batch, 9 burst period).
+
 The live subscription is RAM. It returns to the stored default (normally nothing) at power-on and on every legacy hello. A persisted non-empty mask makes the radio send frames unprompted from power-on, which may confuse CHIRP and similar tools; use it only for dedicated stations. Heartbeat needs bit 6 and a period; the stream needs bit 5 and a period.
 
 ### 6.4 TIME_SYNC (0x5003)
@@ -275,7 +277,7 @@ Request: `u8 host_ref[8]` (opaque, echoed). Reply (21 bytes):
 | 0 | u8[8] | host_ref |
 | 8 | u32 | rx_ms: when the firmware first saw the request complete |
 | 12 | u16 | rx_us: sub-millisecond part, 0 to 999 |
-| 14 | u32 | tx_ms: when the reply's first byte was written to the UART |
+| 14 | u32 | tx_ms: when the reply's first byte was queued (the frame header goes out first; with flag bit 0 the queue was empty and the byte left within microseconds) |
 | 18 | u16 | tx_us |
 | 20 | u8 | flags: bit 0 tx time exact (queue was empty) |
 
@@ -283,7 +285,7 @@ Offset estimate (host clock minus radio clock), with `t0` the host write time, `
 
 ### 6.5 GET_PARAMS (0x5004)
 
-Request: `u8 flags` (bit 0 STORED: return the stored EEPROM value, or the default a blank would load, instead of the live one), then zero or more `u8 param_id` (none = all supported). Reply: `u8 flags`, then `(u8 id, value)` records in request order, each value in the size the parameter table gives. With STORED, RAM-only parameters are omitted.
+Request: `u8 flags` (bit 0 STORED: return the stored EEPROM value, or the default a blank would load, instead of the live one), then zero or more `u8 param_id` (none = all supported). Reply: `u8 flags`, then `(u8 id, value)` records in request order, each value in the size the parameter table gives. With STORED, RAM-only parameters are omitted, also when asked for by id. An unknown or repeated id gives `BAD_PARAM` (detail = id). STORED values for FREQ_HZ, POWER and BANDWIDTH are those the radio would load at power-on (the channel indices at 0x0E80 and the record they point at).
 
 ### 6.6 SET_PARAMS (0x5005)
 
@@ -294,13 +296,16 @@ Semantics:
 - DRY_RUN stops after validation and replies as if applied, without applying.
 - Otherwise all values are applied together, then the receiver is set up once (`RADIO_ConfigureSquelchAndOutputPower` if frequency, power or squelch changed, then `RADIO_SetupRegisters`). A retune closes an open squelch (`CD` cause RETUNE). Values that only matter at key-up (deviation, mic gain, PA delays) take effect at the next key-up.
 - A transmission never sees a change: the frame's lock has already ended any transmission (5.3).
+- In reduced service (critical battery) a change that needs the receiver set up (frequency, power, bandwidth, squelch, SQL_RAW, AGC_FIX, AFC, RX gains) is refused with `STATE` (detail = the lowest such id); other changes apply.
+- FREQ_HZ keeps the live power, bandwidth and step when it moves from a memory channel to the band slot; if the step does not hold the frequency, the largest step that does is chosen, so a reload never rounds it.
+- BUSY_RSSI_CLOSE must not exceed BUSY_RSSI_OPEN after the command (`RANGE`, detail = the one that was sent, CLOSE if both).
 - PERSIST writes the changed values to EEPROM after the reply is sent, one 8-byte block per main-loop pass, never during a transmission (a press defers the rest). Each block takes about 8 ms and can delay a key-up by up to 10 ms, so persist only when idle.
 
 Reply: `u8 result` (bit 0 TX allowed at the resulting frequency, bit 1 persist queued, bit 2 receiver retuned), then `(u8 id, value)` read back for every id sent, in request order.
 
 ### 6.7 SAVE_PARAMS (0x5006)
 
-Request: `u8 op`: 0 SAVE (persist every live persistable parameter that differs from its stored value), 1 REVERT (reload all live parameters from EEPROM, as at power-on, and drop RAM-only settings). Reply: `u32 mask` (bit n = parameter id n written or reverted). SAVE needs a valid settings block (else EEPROM); write rules as 6.6.
+Request: `u8 op`: 0 SAVE (persist every live persistable parameter that differs from its stored value), 1 REVERT (reload all live parameters from EEPROM, as at power-on, and drop RAM-only settings). Reply: `u32 mask` (bit n = parameter id n written or reverted, that is, whose value differed). SAVE needs a valid settings block (else EEPROM); write rules as 6.6. REVERT is refused with `STATE` while a persist is still being written, and in reduced service. Any other op: `RANGE`, detail 0.
 
 ### 6.8 LEVEL_TONE (0x5007)
 
@@ -317,15 +322,15 @@ Request (7 bytes):
 
 Reply (3 bytes): `u8 gain code used`, `u16 REG_71 word used` (`round(f x 10.32444)` for the K5's 26 MHz crystal).
 
-While the tone runs the audio output carries only the tone (received audio muted); busy and squelch events continue. It ends (`TONE_END`) when the duration elapses, on a stop request, on a new tone, on a PTT press (before key-up) and on a retune. Mode 0 needs the calibration byte (7, v2 block 0x1D6F) and returns UNSUPPORTED without it; how the code maps to level, and whether REG_48 scales the tone like received audio, are open (M8, Q4). Refused with STATE in reduced service.
+While the tone runs the audio output carries only the tone (received audio muted), whatever the squelch: the firmware itself selects the tone as the AF source (REG_47 = 0x6240), and writes REG_70, REG_71 and REG_47 again after every receive set-up and squelch open, which would otherwise mute it. Busy and squelch events continue. It ends (`TONE_END`) when the duration elapses, on a stop request, on a new tone, on a PTT press (before key-up) and on a retune; the AF output then returns to FM audio if the squelch is open, else muted. Mode 0 needs the calibration byte (7, v2 block 0x1D6F) and returns UNSUPPORTED without it; the firmware then uses `code = round(cal x deviation / 3000)`, clamped to 127, which assumes a linear law and is provisional (M8 found it compressive, Q4). A stop request (duration 0) replies code 0 and word 0. Refused with STATE in reduced service. Errors: `RANGE` with the field offset as detail (0 frequency, 2 mode, 3 level, 5 duration).
 
 ### 6.9 REG_READ (0x5008)
 
-Request: `u8 first`, `u8 count` (1 to 64, `first + count <= 0x80`), `u8 flags` (bit 0 include 0x5F; otherwise 0x5F, the FSK FIFO, is not read and returns 0). Reply: `u8 first`, `u8 count`, `u16 value[count]`. Two requests dump the whole chip.
+Request: `u8 first`, `u8 count` (1 to 64, `first + count <= 0x80`), `u8 flags` (bit 0 include 0x5F; otherwise 0x5F, the FSK FIFO, is not read and returns 0). Reply: `u8 first`, `u8 count`, `u16 value[count]`. Two requests dump the whole chip. Errors: `RANGE`, detail 1 for the count, 0 for the end past 0x7F.
 
 ### 6.10 REG_WRITE (0x5009)
 
-Request: `u8 n` (1 to 16), then n x `(u8 reg, u16 value)`. Registers the override table refuses (0x00, 0x30, 0x33, 0x36, 0x37, 0x38, 0x39, 0x3B, 0x3C, above 0x7F) reject the whole command with REFUSED. Written in order. Reply: `u8 n`, n x `(u8 reg, u16 read-back)`. Registers the firmware manages (7D, 40, 47, 48, 7E, 2B, 43, 31 and the squelch set) are rewritten at the next set-up; use parameters or `REG_OVERRIDE` for those. Legacy 0x0602 stays unrestricted.
+Request: `u8 n` (1 to 16), then n x `(u8 reg, u16 value)`. Registers the override table refuses (0x00, 0x30, 0x33, 0x36, 0x37, 0x38, 0x39, 0x3B, 0x3C, above 0x7F) reject the whole command with REFUSED. Written in order; read back after the last write. `n` outside 1 to 16: `RANGE` detail 0; a body that is not `1 + 3n` bytes: `BAD_LENGTH`. Reply: `u8 n`, n x `(u8 reg, u16 read-back)`. Registers the firmware manages (7D, 40, 47, 48, 7E, 2B, 43, 31 and the squelch set) are rewritten at the next set-up; use parameters or `REG_OVERRIDE` for those. Legacy 0x0602 stays unrestricted.
 
 ### 6.11 REG_OVERRIDE (0x500A)
 
@@ -341,15 +346,17 @@ Request:
 | 4 | u8 | n entries (ADD only, else 0) |
 | 5 | n x 6 | `u8 phase` (bit 0 TX, bit 1 RX), `u8 reg`, `u16 and`, `u16 or` |
 
-At most 8 RAM entries. ADD takes effect at once for RX-phase entries (the RX-phase overrides are re-applied) and at the next key-up for TX-phase entries. When either expiry is reached the RAM table is cleared, the receiver set up again, and `OVERRIDE_EXPIRED` sent: a bad trial cannot outlive its bound. COMMIT and CLEAR_EEPROM need a valid settings block, write 0x1D10 to 0x1D4F, reload the EEPROM table, and COMMIT clears the RAM table. Reply: `u8 n_ram`, `u16 expiry s left` (0xFFFF none), `u8 key-ups left` (0xFF none), n_ram x 6 bytes, `u8 n_eeprom`, n_eeprom x 6 bytes.
+At most 8 RAM entries (more: `RANGE`, detail 4). An entry's phase must be 1 to 3 (`RANGE`, detail = the offset of its phase byte in the request after the tag); a refused register gives `REFUSED` (detail = register); the whole command is rejected. Ops other than ADD must carry n = 0 (`RANGE`, detail 4); any op above 4: `RANGE`, detail 0. ADD takes effect at once for RX-phase entries (the RX-phase overrides are re-applied) and at the next key-up for TX-phase entries. CLEAR, COMMIT and CLEAR_EEPROM set the receiver up again (not in reduced service). An expiry that falls during a transmission takes effect when it ends. When either expiry is reached the RAM table is cleared, the receiver set up again, and `OVERRIDE_EXPIRED` sent: a bad trial cannot outlive its bound. COMMIT and CLEAR_EEPROM need a valid settings block, write 0x1D10 to 0x1D4F, reload the EEPROM table, and COMMIT clears the RAM table. Reply: `u8 n_ram`, `u16 expiry s left` (0xFFFF none), `u8 key-ups left` (0xFF none), n_ram x 6 bytes, `u8 n_eeprom`, n_eeprom x 6 bytes.
 
 ### 6.12 EVENT_REPLAY (0x500B)
 
-Request: `u16 from_seq`. The radio re-sends every stored event still in the ring with seq at or after from_seq, flag REPLAY set, then replies: `u16 first_sent`, `u8 count_sent`, `u16 oldest_available`, `u16 next_seq`. If from_seq is older than the ring, the gap is visible from `oldest_available`.
+Request: `u16 from_seq`. The radio re-sends stored events still in the ring with seq at or after from_seq, oldest first, flag REPLAY set, then replies: `u16 first_sent`, `u8 count_sent`, `u16 oldest_available`, `u16 next_seq`. If from_seq is older than the ring, the gap is visible from `oldest_available`.
+
+So that the reply stays inside the host's 100 ms timeout, one request re-sends at most 256 bytes of event frames (about 5 burst reports or 13 busy edges); a host that wants more asks again from `first_sent + count_sent`. Events not delivered yet (held back, 8.1) are not replayed: they follow through normal delivery. `first_sent` is `next_seq` when nothing was sent.
 
 ### 6.13 GET_COUNTERS (0x500C)
 
-Request: `u8 flags` (bit 0 clear after reading). Reply: `u8 n`, then n x `u32`, in this order (later versions only append): frames accepted, frames with bad CRC or footer, frames dropped (oversize, ring overrun), non-OK replies, events stored, events lost (overwritten before sending), events deferred, transmissions, TX timeouts, TX refused, busy opens, late keys, ephemeral frames dropped (output queue full), EEPROM blocks written.
+Request: `u8 flags` (bit 0 clear after reading). Reply: `u8 n`, then n x `u32`, in this order (later versions only append): frames accepted, frames with bad CRC or footer or truncated, frames dropped (oversize; a DMA ring overrun cannot be detected), non-OK replies, events stored, events lost (overwritten before sending), events deferred, transmissions, TX timeouts, TX refused, busy opens, late keys, ephemeral frames dropped (output queue full), EEPROM blocks written.
 
 ## 7. Parameters
 
@@ -427,7 +434,7 @@ The calibration area 0x1E00 to 0x1FFF is never written by anything in this proto
 
 ### 8.1 Delivery
 
-- Stored events go into a ring of at least 768 bytes (16 of the largest events) and out through the output queue in seq order. Ephemeral events are never stored and are the first dropped when the queue is short of space.
+- Stored events go into a ring that holds at least 16 of the largest events (this firmware: 20 slots of 36 bytes) and out through the output queue in seq order, each only when the queue has room for it and for the largest reply. Ephemeral events are never stored and are the first dropped when the queue is short of space, while stored events wait, and while events are held back.
 - Priority in the output queue: replies, then stored events, then ephemeral events.
 - Deferral (default): the radio starts no event frame while the PTT line reads low or the radio is transmitting, and resumes 2 ms after the release; such events carry DEFERRED. Replies are never deferred. With LIVE_TX the radio sends events during transmissions too.
 - If the ring overwrites an event that was never sent, the radio sends `EVENTS_LOST` once it can.
@@ -435,14 +442,14 @@ The calibration area 0x1E00 to 0x1FFF is never written by anything in this proto
 ### 8.2 Busy (carrier detect)
 
 `busy` is the OR of the enabled sources (BUSY_SOURCE):
-- squelch: the BK4819 squelch result, REG_0C<1>, polled every 1 ms (the chip's squelch interrupt is kept too). With squelch level 0 it is always open, so use the RSSI source.
+- squelch: the BK4819 squelch result, REG_0C<1>, polled every 1 ms in receive, whether or not anything is subscribed (the chip's squelch interrupt is kept too). With squelch level 0 it is always open, so use the RSSI source.
 - RSSI: REG_67 sampled every 2 ms in receive; opens at the first sample at or above BUSY_RSSI_OPEN, closes after BUSY_HANG_MS continuously below BUSY_RSSI_CLOSE.
 
 Busy is forced closed when a transmission starts and when the receiver is set up again (retune); it is re-evaluated when receive resumes. A burst is one busy interval.
 
 ### 8.3 Layouts (after the 7-byte event header)
 
-**CD 0x50C0** (7 bytes). t_ms = when the firmware saw the edge.
+**CD 0x50C0** (7 bytes). t_ms = when the firmware saw the edge. When busy is forced closed (a key-up or a retune) the registers are not read: RSSI is the last value sampled, noise and glitch are 0, and the cause carries the source bits that were open.
 
 | Off | Type | Field |
 |---|---|---|
@@ -453,7 +460,7 @@ Busy is forced closed when a transmission starts and when the receiver is set up
 | 5 | u8 | noise |
 | 6 | u8 | glitch |
 
-**RX_BURST 0x50C1** (29 bytes), sent after the closing `CD`. t_ms = close time. Samples every burst sample period while busy; means are `floor(sum / n)`.
+**RX_BURST 0x50C1** (29 bytes), sent after the closing `CD`. t_ms = close time. Samples every burst sample period while busy, the first at the open (the values in the opening `CD`); means are `floor(sum / n)`.
 
 | Off | Type | Field |
 |---|---|---|
@@ -521,7 +528,7 @@ Busy is forced closed when a transmission starts and when the receiver is set up
 | 0 | u16 | t_us, 0 to 999 |
 | 2 | u8 | flags1 (as status) |
 | 3 | u8 | state |
-| 4 | u16 | RSSI raw |
+| 4 | u16 | RSSI raw (0 when not receiving) |
 | 6 | u16 | battery, mV |
 | 8 | u16 | busy time since the previous heartbeat, ms (channel occupancy) |
 | 10 | u16 | lock remaining, ms |
@@ -536,11 +543,11 @@ Busy is forced closed when a transmission starts and when the receiver is set up
 
 **OVERRIDE_EXPIRED 0x50CB** (2 bytes): `u8 reason` (0 time, 1 key-ups), `u8 entries reverted`.
 
-**BOOT 0x50CC** (3 bytes): `u16 protocol version`, `u8 reset cause` (0 unknown, 1 power-on, 2 software reboot).
+**BOOT 0x50CC** (3 bytes): `u16 protocol version`, `u8 reset cause` (0 unknown, 1 power-on, 2 software reboot; this firmware always sends 0, the reset-cause register is not identified). With a persisted mask containing PARAMS_CHANGED, a `PARAMS_CHANGED` with source 3 (boot) and every supported id follows it.
 
 ## 9. Firmware requirements
 
-1. Output through a queue of at least 512 bytes, drained by the UART TX interrupt or a DMA channel, legacy replies included. `UART_Send`'s busy wait goes. Interrupts are never disabled for more than 50 us (v1 disables them around the whole command handler, which stalls the 1 ms PTT tick for the length of a reply: 136 bytes is 35 ms).
+1. Output through a queue of at least 512 bytes, drained by the UART TX interrupt, a DMA channel, or (this firmware) the 1 ms SysTick handler refilling the 8-byte transmit FIFO, which at 39 kbaud lasts 2 ms, plus a refill as soon as a frame is queued; legacy replies included. `UART_Send`'s busy wait goes. Interrupts are never disabled for more than 50 us (v1 disables them around the whole command handler, which stalls the 1 ms PTT tick for the length of a reply: 136 bytes is 35 ms).
 2. Frames parsed on every main-loop pass, all complete frames processed, reply queued within 5 ms of the last byte.
 3. A 1 ms clock `u32 g_ms` incremented in the SysTick handler; sub-ms from `SysTick->VAL` (48 counts per us). All event times use it.
 4. BK4819 access only from the main loop (the bit-banged SPI is not re-entrant). The 1 ms tick sets a flag; the main loop polls REG_0C each ms, and does the RSSI busy (2 ms), burst, stream and TX mic sampling on their periods. At 5 ms burst sampling, four register reads cost about 8% CPU while busy.
@@ -548,7 +555,7 @@ Busy is forced closed when a transmission starts and when the receiver is set up
 6. The settings reload after legacy EEPROM writes has its own 1.0 s quiet timer and never runs during a transmission.
 7. EEPROM writes: one 8-byte block per main-loop pass, never during a transmission, deferred while a press is pending; never 0x1E00 and up.
 8. Stored events are kept serialized in the ring, so replay re-sends the same bytes with REPLAY set (and a fresh CRC).
-9. Budget: at most 8 KB of flash (about 38 KB free) and 2 KB of RAM (about 13 KB free).
+9. Budget: at most 8 KB of flash (about 38 KB free) and 2 KB of RAM (about 13 KB free). Measured: the full implementation costs about 12.7 KB of flash (23 520 to 36 188 bytes, 25 252 bytes left) and 2.2 KB of RAM (bss 2116 to about 4300 bytes). Over the estimate but well inside the flash and RAM left; the memory-channel removal planned next will win some back.
 
 ## 10. Frame and MCU budget
 
@@ -608,3 +615,31 @@ Measurements for tonight on the bench radio (2951c48, transmit and register poke
 | M10 | TX timeout 5 s (EEPROM 0x1D02 = 0), key 7 s: RF should end between 5.0 and 5.5 s; re-key only after release. | 5.3 rule 4 |
 
 Later, with the reference transmitter: squelch and RSSI busy latency against level (Q8), AF amplitude and AGC against level and deviation (Q2, Q3), carrier offset against any candidate register (Q1), and the tone's deviation equivalence (Q4). TX mic amplitude (Q3, TX side) needs v2 firmware, because host frames end a transmission.
+
+Results reported on 29 September (2951c48): M2, a reply sent while HID PTT was held was lost 4 of 4 times with the AIOC default 0x60 = 0x00010100 and arrived intact 4 of 4 with 0x00000100, so LIVE_TX works once the host clears RXIGNPTT (Q6). M3, one 0x0527 sent 1.2 s into a 4 s key-up ended RF for the rest of it, and AIOC 0xD0 bit 16 read 0 afterwards (1a confirmed). M4, 50 port opens and closes, 50 baud changes and 100 DTR/RTS toggles gave no RF (Q7, partly). M5, 1000 zero bytes keyed the radio for 0.455 s at 9600 baud and 0.120 s at 19200, never at 38400: the host rule is necessary. M6, legacy reply latency 9.9 to 22.1 ms, bimodal at 10 and 20 ms (the v1 10 ms slice); a full 0x00 to 0x7F sweep via 0x0601 took 2.05 s. M8, with the squelch open, REG_71 = 0x2854, REG_70 = 0x8000 or (g << 8), REG_47 = 0x6240 gave a clean 1 kHz tone replacing the receiver audio: g = 16 -13.0 dBFS, 64 -4.8 dBFS, 127 +0.6 dBFS (clipping), so the law is compressive (x2 about +5.4 dB, x4 about +8.2 dB); with the squelch closed nothing reached the AIOC while REG_47 read 0x6040 (AF muted), which is why LEVEL_TONE selects the AF source itself. M9, idle: REG_0C 0x0280 (bit 1 clear, squelch closed), REG_7E 0x37C0, REG_64 0x0097, REG_6F 0x1B5B constant; REG_65 noise-like; REG_63 wanders widely; REG_67 tracks RSSI; REG_0D 0x8000, REG_0E 0. M10, a 5 s TX timeout with a 7 s key gave 4.995 s of RF and no re-key while held. A robustness finding: a frame cut by a key-up 2 ms after it was written left v1 deaf to hellos for a while; v2 drops truncated frames (2).
+
+## 13. Implementation status (firmware, branch `fw-v2`)
+
+Everything in sections 2 to 9 is implemented, with the points below settled by the implementation (the text above has been amended to match). Unimplemented request ids reply `UNKNOWN_CMD`; an absent capability replies `UNSUPPORTED`.
+
+| Feature | Status |
+|---|---|
+| Output queue, frames handled every main-loop pass with interrupts on, parser resynchronisation (2, 9.1, 9.2) | implemented; queue drained from the SysTick tick |
+| Legacy commands, PKT2 marker, subscription reset on hello, 1.0 s reload timer (2.1, 3) | implemented, byte-compatible |
+| Serial PTT lock in ms, late key up to 30 ms, refusal and latch, lock_ms in every reply (5.3) | implemented |
+| GET_INFO, GET_STATUS, SUBSCRIBE, TIME_SYNC, GET_COUNTERS | implemented |
+| GET_PARAMS, SET_PARAMS, SAVE_PARAMS, all 24 parameters, v2 EEPROM block | implemented |
+| REG_READ, REG_WRITE, REG_OVERRIDE with expiry | implemented |
+| LEVEL_TONE | mode 1 (raw) implemented; mode 0 replies UNSUPPORTED until the calibration byte 0x1D6F is set, and its law is provisional |
+| Events: CD, RX_BURST, TX_START, TX_END, TX_REFUSED, RSSI_STREAM, HEARTBEAT, BATTERY, PARAMS_CHANGED, EVENTS_LOST, TONE_END, OVERRIDE_EXPIRED, BOOT | implemented |
+| Deferral, LIVE_TX, sequence numbers, timestamps and flags, EVENT_REPLAY | implemented |
+| RX_BURST frequency error | always 0x7FFF (Q1) |
+| BOOT reset cause | always 0 |
+| GET_INFO caps bits 4 to 7 (validated measurements) | clear |
+| 0x5020 serial keying | not implemented, reserved; replies UNKNOWN_CMD |
+
+Points settled by the implementation, beyond the amendments above:
+- PARAMS_CHANGED with source 0 (keypad or menu) comes from comparing every parameter with its last reported value every 500 ms, so it follows anything the operator changes, up to 0.5 s late.
+- The event deferral also covers a press that is still being debounced, and resumes 2 ms after the last millisecond in which PTT was asserted or the radio transmitted.
+- EEPROM persistence (6.6) is also deferred while the PTT rules have a key-up pending.
+- Golden vectors from the firmware code for the C# client and simulator: `tests/vectors/protocol-v2.json` (format in `tests/vectors/README.md`), regenerated and compared by `tests/host/run.sh`.

@@ -5,6 +5,28 @@
   "firmware_version_string": "PKTFW test",
   "vectors": [
     {
+      "name": "hello_obfuscated",
+      "state": "fresh boot (obfuscated, the power-on mode); legacy hello 0x0514, session 0x12345678, obfuscated (raw id 02 69)",
+      "request_mode": "obfuscated",
+      "request": "ABCD0800026910E656C7395204A8DCBA",
+      "response_mode": "obfuscated",
+      "response": "ABCD2800036930E67EDA59067615A1256077E980166C14E62E910D40717E81721301E980166C14E62E910D40DECADCBA",
+      "frames": [
+        { "id": "0x0515", "crc": "FFFF", "body": "504B544657207465737400000000000000000000504B5432000200000000000000000000" }
+      ]
+    },
+    {
+      "name": "hello_plain",
+      "state": "after hello_obfuscated; legacy hello 0x0514 with raw id bytes 14 05, which switches the radio to plain mode",
+      "request_mode": "plain",
+      "request": "ABCD08001405040078563412259DDCBA",
+      "response_mode": "plain",
+      "response": "ABCD280015052400504B544657207465737400000000000000000000504B5432000200000000000000000000FFFFDCBA",
+      "frames": [
+        { "id": "0x0515", "crc": "FFFF", "body": "504B544657207465737400000000000000000000504B5432000200000000000000000000" }
+      ]
+    },
+    {
       "name": "get_info",
       "state": "fresh boot on a blank EEPROM (factory calibration only), plain mode after a hello; lock 20 ms",
       "request_mode": "plain",
@@ -132,6 +154,28 @@
       ]
     },
     {
+      "name": "event_heartbeat",
+      "state": "event, no request: SUBSCRIBE HEARTBEAT|RSSI_STREAM, heartbeat 100 ms; first heartbeat 100 ms later, 250 us into the ms, queue empty; idle, RSSI 0x77, battery 7.80 V, lock 0",
+      "request_mode": "plain",
+      "request": "",
+      "response_mode": "plain",
+      "response": "ABCD1700C650130000004C04000018FA0010007700781EFFFF00002562DCBA",
+      "frames": [
+        { "id": "0x50C6", "crc": "real", "body": "00004C04000018FA0010007700781EFFFF0000" }
+      ]
+    },
+    {
+      "name": "event_rssi_stream",
+      "state": "event, no request: RSSI stream every 10 ms in batches of 3; RSSI 0x77, noise 0x49, glitch 0x5B",
+      "request_mode": "plain",
+      "request": "",
+      "response_mode": "plain",
+      "response": "ABCD1900C5501500000057040000180A037700495B7700495B7700495BA3C2DCBA",
+      "frames": [
+        { "id": "0x50C5", "crc": "real", "body": "000057040000180A037700495B7700495B7700495B" }
+      ]
+    },
+    {
       "name": "get_params_all",
       "state": "fresh boot, blank EEPROM (RX gain from the factory byte 0x1F8E = 45); GET_PARAMS flags 0, no ids: every parameter, live",
       "request_mode": "plain",
@@ -140,6 +184,17 @@
       "response": "ABCD4600845042004000140000010079A10802000300045608055607061F0701082D090F0A1E0B050C050D010E020F14001001116E0012680013141420407F40804015FF160117031800A5E2DCBA",
       "frames": [
         { "id": "0x5084", "crc": "real", "body": "4000140000010079A10802000300045608055607061F0701082D090F0A1E0B050C050D010E020F14001001116E0012680013141420407F40804015FF160117031800" }
+      ]
+    },
+    {
+      "name": "get_params_stored",
+      "state": "fresh boot, blank EEPROM; GET_PARAMS flags 1 (STORED) for SQL_RAW, SQUELCH, RX_GAIN: SQL_RAW is RAM-only and omitted",
+      "request_mode": "plain",
+      "request": "ABCD09000450050041011407089D64DCBA",
+      "response_mode": "plain",
+      "response": "ABCD0D008450090041001400010701082DB7D2DCBA",
+      "frames": [
+        { "id": "0x5084", "crc": "real", "body": "41001400010701082D" }
       ]
     },
     {

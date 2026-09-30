@@ -177,6 +177,21 @@ static void squelch(bool open)
 
 static void test_framing(void)
 {
+	// identification: the legacy hello reply carries the PKT2 marker
+	host_boot();
+	host_clear_out();
+	reqObf = true;
+	host_send_mode(0x0514, &session, 4, true);
+	nfr = host_frames(fr, 64);
+	CHECK(nfr == 1 && fr[0].id == 0x0515 && fr[0].crc_ff && get32(fr[0].body + 20) == V2_MAGIC);
+	vec("hello_obfuscated", "fresh boot (obfuscated, the power-on mode); legacy hello 0x0514, session 0x12345678, obfuscated (raw id 02 69)");
+	host_clear_out();
+	reqObf = false;
+	host_send_mode(0x0514, &session, 4, false);
+	nfr = host_frames(fr, 64);
+	CHECK(nfr == 1 && fr[0].id == 0x0515 && get16(fr[0].body + 24) == V2_PROTOCOL_VERSION);
+	vec("hello_plain", "after hello_obfuscated; legacy hello 0x0514 with raw id bytes 14 05, which switches the radio to plain mode");
+
 	boot_plain();
 
 	// GET_INFO: 40 bytes after the reply header, real CRC, id + 0x80
@@ -538,9 +553,20 @@ static void test_ephemeral(void)
 	CHECK(get16(e->body) == EVT_NextSeq());
 	CHECK(get16(e->body + 7) == 250);
 	CHECK(e->body[7 + 3] == 0 && get16(e->body + 7 + 4) == 0x77 && get16(e->body + 7 + 6) == 7800);
+	{
+		const Frame_t *hb = e;
+		memmove(out, out + hb->offset, hb->size); out_len = hb->size;
+		last_req_len = 0;
+		vec("event_heartbeat", "event, no request: SUBSCRIBE HEARTBEAT|RSSI_STREAM, heartbeat 100 ms; first heartbeat 100 ms later, 250 us into the ms, queue empty; idle, RSSI 0x77, battery 7.80 V, lock 0");
+		host_clear_out();
+		host_advance(100);
+	}
 	CHECK(events(EV_RSSI_STREAM, &e) >= 3);
 	CHECK(e->body_len == 7 + 2 + 12 && e->body[7] == 10 && e->body[8] == 3);
 	CHECK(get16(e->body + 9) == 0x77 && e->body[11] == 0x49 && e->body[12] == 0x5B);
+	memmove(out, out + e->offset, e->size); out_len = e->size;
+	last_req_len = 0;
+	vec("event_rssi_stream", "event, no request: RSSI stream every 10 ms in batches of 3; RSSI 0x77, noise 0x49, glitch 0x5B");
 
 	// ephemeral events are dropped, not held, while PTT is asserted
 	host_clear_out();
@@ -573,6 +599,7 @@ static void test_params(void)
 	f = v2(V2_GET_PARAMS, 0x41, r, 4);
 	CHECK(f && status(f) == V2_OK && f->body_len == 4 + 1 + 4);
 	CHECK(rb(f)[1] == P_SQUELCH && rb(f)[2] == 1 && rb(f)[3] == P_RX_GAIN && rb(f)[4] == 45);
+	vec("get_params_stored", "fresh boot, blank EEPROM; GET_PARAMS flags 1 (STORED) for SQL_RAW, SQUELCH, RX_GAIN: SQL_RAW is RAM-only and omitted");
 	r[0] = 0; r[1] = 0x19;
 	f = v2(V2_GET_PARAMS, 0x42, r, 2);
 	CHECK(status(f) == V2_BAD_PARAM && rb(f)[0] == 0x19);
