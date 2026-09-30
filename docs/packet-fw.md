@@ -57,7 +57,7 @@ CTCSS/DCS went because packet needs no tone squelch, and dropping it removes the
 - Display: frequency, TX/RX, RSSI in dBm and S-units, and the settings in use (for example `~5W WIDE TOT30`).
 
 **The watts are nominal, not measured.** The screen and the menu show the usual UV-K5 figures for the three power levels, the same on VHF and UHF, with a tilde because nothing measures them. What the radio really puts out depends on its factory PA calibration (0x1ED0 up), which varies from radio to radio: the bench K5's VHF high row is 105, 116 and 123 across 137 to 174 MHz, against 135 in most dumps, so at 145 MHz its high (about 110) is barely above its mid (105) and likely less than 5 W. Measure a radio's output before relying on the figure.
-- UART: the upstream EEPROM protocol and the BK4819 register commands, plus the serial control protocol v2 (`docs/protocol-v2.md`): identification, status, events (busy, bursts, TX timing, heartbeats), parameters, register access and RAM-only overrides, a level tone.
+- UART: the upstream EEPROM protocol and the BK4819 register read (0x0601; the unchecked write, 0x0602, only in bench builds), plus the serial control protocol v2 (`docs/protocol-v2.md`): identification, status, events (busy, bursts, TX timing, heartbeats), parameters, register access and RAM-only overrides, a level tone.
 
 ## The audio path
 
