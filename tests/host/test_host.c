@@ -229,10 +229,39 @@ static void test_timing_block(void)
 	SETTINGS_InitEEPROM();
 	CHECK(gEeprom.PTT_PRESS_MS == 5);
 
-	// the first menu save over foreign data blanks the timing block
+	// the first menu save over foreign data blanks the timing and v2 blocks
 	eeprom[SETTINGS_PKT_BLOCK] = 0x41;
+	memset(&eeprom[SETTINGS_V2_BLOCK], 0x01, 16);
 	SETTINGS_SaveSettings();
 	CHECK(eeprom[SETTINGS_TIMING] == 0xFF && eeprom[SETTINGS_TIMING + 3] == 0xFF);
+	for (unsigned i = 0; i < 16; i++)
+		CHECK(eeprom[SETTINGS_V2_BLOCK + i] == 0xFF);
+}
+
+// Protocol v2 block (0x1D60): used only with a valid settings block and its
+// own version byte; a byte out of range means the default.
+static void test_v2_block(void)
+{
+	memset(eeprom, 0xFF, sizeof(eeprom));
+	static const uint8_t b[16] = { 1, 5, 2, 100, 0x20, 0x01, 0x10, 0x01, 0x03, 0, 0, 0, 0xE8, 0x03, 1, 60 };
+	memcpy(&eeprom[SETTINGS_V2_BLOCK], b, 16);
+	SETTINGS_InitEEPROM();
+	CHECK(!gV2.valid && gV2.SERIAL_LOCK_MS == 20 && gV2.DEFAULT_MASK == 0);   // no settings block
+	eeprom[SETTINGS_PKT_BLOCK] = SETTINGS_PKT_VERSION;
+	SETTINGS_InitEEPROM();
+	CHECK(gV2.valid && gV2.SERIAL_LOCK_MS == 50 && gV2.BUSY_SOURCE == 2 && gV2.BUSY_HANG_MS == 100);
+	CHECK(gV2.BUSY_RSSI_OPEN == 0x120 && gV2.BUSY_RSSI_CLOSE == 0x110);
+	CHECK(gV2.DEFAULT_MASK == 3 && gV2.DEFAULT_HEARTBEAT_MS == 1000 && gV2.DEFAULT_OPTIONS == 1 && gV2.TONE_CAL == 60);
+	static const uint8_t bad[16] = { 1, 151, 4, 251, 0x00, 0x02, 0x00, 0x02, 0xFF, 0xFF, 0xFF, 0xFF, 50, 0, 2, 128 };
+	memcpy(&eeprom[SETTINGS_V2_BLOCK], bad, 16);
+	SETTINGS_InitEEPROM();
+	CHECK(gV2.SERIAL_LOCK_MS == 20 && gV2.BUSY_SOURCE == 1 && gV2.BUSY_HANG_MS == 20);
+	CHECK(gV2.BUSY_RSSI_OPEN == 110 && gV2.BUSY_RSSI_CLOSE == 104);
+	CHECK(gV2.DEFAULT_MASK == 0 && gV2.DEFAULT_HEARTBEAT_MS == 0 && gV2.DEFAULT_OPTIONS == 0 && gV2.TONE_CAL == 0);
+	eeprom[SETTINGS_V2_BLOCK] = 2;                      // another layout: all defaults
+	eeprom[SETTINGS_V2_BLOCK + 1] = 3;
+	SETTINGS_InitEEPROM();
+	CHECK(!gV2.valid && gV2.SERIAL_LOCK_MS == 20);
 }
 
 static void test_channel_load_save(void)
@@ -419,6 +448,7 @@ int main(void)
 	test_eeprom_guard();
 	test_timing_block();
 	test_settings_defaults_and_roundtrip();
+	test_v2_block();
 	test_channel_load_save();
 	test_frequency();
 	test_tx_rx_registers();

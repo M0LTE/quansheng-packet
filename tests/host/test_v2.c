@@ -695,6 +695,7 @@ static void test_params(void)
 static void test_persist(void)
 {
 	boot_plain();
+	memset(&eeprom[SETTINGS_V2_BLOCK + 8], 0x00, 8);    // leftovers behind a v2 block not in use
 	valid_settings_block();
 	const Frame_t *f = v2(V2_GET_INFO, 1, NULL, 0);
 	CHECK(rb(f)[37] == 1 && rb(f)[38] == 0);
@@ -728,7 +729,8 @@ static void test_persist(void)
 	CHECK(!PARAMS_PersistPending());
 	CHECK(eeprom[0x1D50] == 3);
 	CHECK(eeprom[0x1D60] == 1 && eeprom[0x1D61] == 4);
-	CHECK(eeprom[0x1D62] == 0xFF && eeprom[0x1D68] == 0xFF && eeprom[0x1D6F] == 0xFF);   // fresh v2 block blanked
+	for (unsigned a = 0x1D62; a < 0x1D70; a++)
+		CHECK(eeprom[a] == 0xFF);                    // a fresh v2 block is blanked, leftovers too
 	CHECK(eeprom[0x1D00] == 1 && eeprom[0x1D01] == 0xFF);    // others untouched
 	CHECK(eeprom_writes_in_cal == 0);
 
