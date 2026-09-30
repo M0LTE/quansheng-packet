@@ -69,7 +69,7 @@
 <!-- ============================================================= step 2 -->
 <section id="step2" class="card step">
   <h2><span class="num">2</span> Flash the AIOC</h2>
-  <p>The packet AIOC firmware adds a transmit equaliser that makes a UV-K5's audio flat, which the radio firmware's default deviation expects. Flashing it <b>resets the AIOC's settings to the defaults</b>: PTT from the CM108 (HID) interface, and from the serial port with DTR high and RTS low.</p>
+  <p>The packet AIOC firmware adds a transmit equaliser that makes a UV-K5's audio flat, which the radio firmware's default deviation expects. Flashing it <b>resets the AIOC's settings to the defaults</b>: PTT from the CM108 (HID) interface, and from the serial port with DTR high and RTS low. To go back to the stock AIOC firmware and settings, use the <a href="https://g1lro.github.io/aioc-toolkit/" target="_blank" rel="noopener">AIOC toolkit</a>'s flasher (the Flash Firmware tab).</p>
   <div class="note">
     <p><b>Windows only, once per computer:</b> open <a href="https://zadig.akeo.ie/" target="_blank" rel="noopener">Zadig</a>, choose <b>Options, List All Devices</b>, pick <b>AIOC DFU Runtime (Interface 6)</b> (USB ID 1209 7388 06), check the driver on the right is <b>WinUSB</b>, and click <b>Install Driver</b>.</p>
     <p class="small">If the picker then shows no "STM32 BOOTLOADER" after the switch, do the same in Zadig for it.</p>
