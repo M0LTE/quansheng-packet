@@ -136,12 +136,25 @@ SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="df11", TAG+="uacce
       <button id="f-save" type="submit">Save to radio</button>
     </form>
     <p class="muted small">The radio transmits only from 136 to 174 MHz and from 400 to 470 MHz; the page will not save anything outside those. Low power is kinder to the radio on long packet transmissions.</p>
-    <h3>Receive level tone</h3>
-    <p>Plays a steady 1 kHz tone into the AIOC in place of received audio, so you can set the radio's volume knob against your soundmodem's input meter (step 4).</p>
+    <h3>Receive level</h3>
+    <p>Play the tone (or listen to a real packet signal) and turn the radio's volume knob until the bar sits in the green band.</p>
     <div class="actions">
       <button id="tone-start" class="secondary">Play tone for 10 s</button>
-      <button id="tone-stop" class="secondary">Stop</button>
+      <button id="tone-stop" class="secondary">Stop tone</button>
+      <button id="meter-toggle" class="secondary">Show the level</button>
     </div>
+    <div id="meter" class="meter" hidden>
+      <div class="meter-bar" aria-hidden="true">
+        <div class="meter-band"></div>
+        <div id="meter-fill" class="meter-fill"></div>
+        <div id="meter-rms" class="meter-rms"></div>
+      </div>
+      <div class="meter-scale small muted" aria-hidden="true"><span>-60</span><span>-18</span><span>-9</span><span>0 dBFS</span></div>
+      <p id="meter-text" class="small"></p>
+      <p id="meter-source" class="small muted" role="status" aria-live="polite"></p>
+      <label id="meter-pick" class="small" hidden>Sound card <select id="meter-device"></select></label>
+    </div>
+    <p class="muted small">The tone is a steady 1 kHz in place of received audio. How its level compares with a real signal's deviation is not calibrated yet, so check against real packets when you can. The browser asks to use a microphone: that is the AIOC's receive audio, and it stays on this computer.</p>
   </div>
 </section>
 
@@ -154,7 +167,7 @@ SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="df11", TAG+="uacce
     <tr><th>PTT</th><td><b>CM108</b> (the AIOC's HID interface, GPIO 3, the usual default). Or the serial port with DTR high and RTS low, the AIOC's other default.</td></tr>
     <tr><th>Transmit level</th><td>Near <b>full scale</b>, just short of clipping. Then set the deviation in the radio (menu <b>DevW</b>, or <b>DevN</b> on narrow): the default gives about 2.8 kHz at full scale. Never the other way round: a quiet TNC with a high deviation setting sends more hiss.</td></tr>
     <tr><th>TXDELAY</th><td>Start at <b>50 ms</b>. On the bench 30 ms was enough for AFSK 1200 and QPSK 3600, and FSK 9600 liked 50 ms. The station you talk to may need more.</td></tr>
-    <tr><th>Receive level</th><td>There is no squelch: audio is always on. Set the radio's <b>volume knob</b> so the strongest packets sit well below clipping on your soundmodem's input meter. The level tone in step 3 helps: turn up until it clips, then back off.</td></tr>
+    <tr><th>Receive level</th><td>There is no squelch: audio is always on. Set the radio's <b>volume knob</b> with the level meter in step 3: peaks in the green band, <b>-18 to -9 dBFS</b>.</td></tr>
   </table>
   <h3>Three rules</h3>
   <ul>

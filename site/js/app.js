@@ -10,6 +10,7 @@ import * as v2 from './v2.js';
 import { SerialSession, serialErrorText } from './serial.js';
 import { detachToBootloader, DfuseDevice, AIOC_RUNTIME, STM32_BOOTLOADER, AIOC_FLASH_START, AIOC_FLASH_SIZE, checkAiocImage } from './dfu.js';
 import { AIOC_HID, readEqState } from './aioc-hid.js';
+import { LevelMeter, levelVerdict, barFraction } from './level-meter.js';
 
 const $ = (id) => document.getElementById(id);
 function show(el, text, level = '') {
@@ -496,6 +497,7 @@ function stopRadio(message) {
   r.subscribed = false;
   r.freqHz = null;
   clearInterval(r.timer);
+  stopMeter();
   $('radio-panel').hidden = true;
   $('radio-connect').disabled = !support.serial;
   $('radio-disconnect').disabled = true;
@@ -673,9 +675,10 @@ $('radio-form').addEventListener('submit', async (ev) => {
 
 $('tone-start').addEventListener('click', async () => {
   if (!r.client) return;
+  if (!meterOn) startMeter();
   try {
     await r.client.levelTone({ hz: 1000, mode: 1, level: 64, durationMs: 10000 });
-    show($('radio-status'), 'Playing a 1 kHz tone for 10 seconds. Turn the volume knob so your soundmodem shows it just below clipping, then back off a little.', 'ok');
+    show($('radio-status'), 'Playing a 1 kHz tone for 10 seconds. Turn the volume knob until the bar sits in the green band.', 'ok');
   } catch (e) {
     show($('radio-status'), errText(e), 'error');
   }
@@ -689,5 +692,89 @@ $('tone-stop').addEventListener('click', async () => {
     show($('radio-status'), errText(e), 'error');
   }
 });
+
+// ------------------------------------------------------------------ step 3: the receive level meter
+
+const VERDICT_TEXT = {
+  low: 'below the green band: turn the volume up',
+  ok: 'in the green band',
+  high: 'above the green band: turn the volume down',
+  clip: 'clipping: turn the volume down',
+};
+const CLIP_HOLD_MS = 3000;
+let clipAt = 0;
+let meterOn = false;
+
+const meter = new LevelMeter({
+  onLevel: showLevel,
+  onEnded: () => {
+    meterStopped();
+    $('meter-source').textContent = 'The sound card went away (was the AIOC unplugged?). Press "Show the level" to start again.';
+  },
+});
+
+function showLevel(l) {
+  const now = Date.now();
+  if (l.clipped) clipAt = now;
+  const verdict = now - clipAt < CLIP_HOLD_MS ? 'clip' : levelVerdict(l);
+  $('meter-fill').style.width = `${(barFraction(l.peakDbfs) * 100).toFixed(1)}%`;
+  $('meter-fill').className = `meter-fill ${verdict}`;
+  $('meter-rms').style.left = `calc(${(barFraction(l.rmsDbfs) * 100).toFixed(1)}% - 1px)`;
+  const t = $('meter-text');
+  t.textContent = `Peak ${fmtDbfs(l.peakDbfs)}, RMS ${fmtDbfs(l.rmsDbfs)} dBFS: ${VERDICT_TEXT[verdict]}.`;
+  t.className = `small ${verdict === 'clip' ? 'clip' : ''}`;
+}
+
+const fmtDbfs = (d) => (d <= -100 ? 'below -100' : d.toFixed(1));
+
+async function startMeter(deviceId) {
+  meterOn = true;
+  $('meter').hidden = false;
+  $('meter-toggle').textContent = 'Stop the meter';
+  $('meter-text').textContent = '';
+  $('meter-source').textContent = 'Opening the AIOC sound card...';
+  try {
+    const m = await meter.start(deviceId);
+    if (!m) return; // stopped while opening
+    $('meter-source').textContent = `Listening to ${m.label || 'the sound card'}${m.isAioc ? '.' : ', which is not named as an AIOC: pick the AIOC below if it is there.'}`;
+    if (!m.isAioc || !$('meter-pick').hidden) await fillDevicePicker(m.deviceId);
+  } catch (e) {
+    meterStopped();
+    $('meter-source').textContent =
+      e?.name === 'NotAllowedError'
+        ? 'The browser was not allowed to use the sound card. Allow the microphone for this page (the icon in the address bar) and try again.'
+        : `Could not open the sound card: ${errText(e)}`;
+  }
+}
+
+async function fillDevicePicker(currentId) {
+  const sel = $('meter-device');
+  sel.replaceChildren();
+  for (const d of await meter.inputs()) {
+    const o = document.createElement('option');
+    o.value = d.deviceId;
+    o.textContent = d.label || 'unnamed input';
+    o.selected = d.deviceId === currentId;
+    sel.append(o);
+  }
+  $('meter-pick').hidden = false;
+}
+
+function meterStopped() {
+  meterOn = false;
+  $('meter-toggle').textContent = 'Show the level';
+  $('meter-fill').style.width = '0';
+}
+
+function stopMeter() {
+  meter.stop();
+  meterStopped();
+  $('meter').hidden = true;
+}
+
+$('meter-toggle').addEventListener('click', () => (meterOn ? stopMeter() : startMeter()));
+$('meter-device').addEventListener('change', () => startMeter($('meter-device').value));
+if (!LevelMeter.supported()) $('meter-toggle').disabled = true;
+window.addEventListener('pagehide', () => meter.stop());
 
 loadFiles();

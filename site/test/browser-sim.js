@@ -1,6 +1,7 @@
-// In-page fakes for navigator.serial, navigator.usb and navigator.hid, for browser-e2e.js only:
-// the radio (its bootloader, then the firmware answering protocol v2), the AIOC runtime and
-// bootloader over WebUSB, and the AIOC HID settings interface with the k5-red profile.
+// In-page fakes for navigator.serial, navigator.usb, navigator.hid and navigator.mediaDevices, for
+// browser-e2e.js only: the radio (its bootloader, then the firmware answering protocol v2), the
+// AIOC runtime and bootloader over WebUSB, the AIOC HID settings interface with the k5-red
+// profile, and the AIOC's sound card input.
 import { encodeLegacyReply, encodePayload, buildPayload, FrameDecoder, fromHex } from '/site/js/k5frame.js';
 import { SimBootloader } from '/site/test/sim-bootloader.js';
 import { FakeAiocRuntime, FakeStm32Bootloader } from '/site/test/fake-usb.js';
@@ -135,4 +136,40 @@ const hid = {
   async receiveFeatureReport() { const v = regs[cur] ?? 0; return new DataView(Uint8Array.of(0, cur, v & 255, (v >> 8) & 255, (v >> 16) & 255, v >>> 24).buffer); },
 };
 Object.defineProperty(navigator, 'hid', { value: { requestDevice: async () => [hid] } });
+// ---- audio input: the AIOC's sound card, carrying a 1 kHz tone at a quarter of full scale
+// (-12 dBFS peak). Its name is hidden until the page has asked for permission, as in a browser.
+let micGranted = false;
+const micDevices = [
+  { kind: 'audioinput', deviceId: 'default', groupId: 'g1', label: 'Default - Built-in Microphone' },
+  { kind: 'audioinput', deviceId: 'builtin', groupId: 'g1', label: 'Built-in Microphone' },
+  { kind: 'audioinput', deviceId: 'aioc', groupId: 'g2', label: 'All-In-One-Cable Mono' },
+];
+window.__micOpened = [];
+Object.defineProperty(navigator, 'mediaDevices', {
+  value: {
+    async enumerateDevices() {
+      return micDevices.map((d) => ({ ...d, label: micGranted ? d.label : '' }));
+    },
+    async getUserMedia({ audio }) {
+      micGranted = true;
+      const id = audio.deviceId?.exact || 'builtin';
+      window.__micOpened.push({ id, echoCancellation: audio.echoCancellation, noiseSuppression: audio.noiseSuppression, autoGainControl: audio.autoGainControl });
+      const ac = new AudioContext({ sampleRate: 48000 });
+      const osc = ac.createOscillator();
+      osc.frequency.value = 1000;
+      const gain = ac.createGain();
+      gain.gain.value = id === 'aioc' ? 0.25 : 0.01;
+      const dest = ac.createMediaStreamDestination();
+      osc.connect(gain).connect(dest);
+      osc.start();
+      const [track] = dest.stream.getAudioTracks();
+      Object.defineProperty(track, 'label', { value: micDevices.find((d) => d.deviceId === id).label });
+      Object.defineProperty(track, 'getSettings', { value: () => ({ deviceId: id, sampleRate: 48000 }) });
+      const stop = track.stop.bind(track);
+      track.stop = () => { stop(); ac.close(); window.__micOpened.find((o) => o.id === id && !o.stopped).stopped = true; };
+      return dest.stream;
+    },
+  },
+});
+
 window.__simReady = true;

@@ -5,7 +5,7 @@
 //
 // Needs site/files/ (the firmware files; see tools/build-manifest.js). Walks all four steps:
 // dry run, flash and check the radio, detach, backup, flash and check the AIOC, read the EQ,
-// connect, refuse and save a channel, play the level tone, disconnect.
+// connect, refuse and save a channel, play the level tone and read the level meter, disconnect.
 import { createRequire } from 'node:module';
 import { readFileSync, existsSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -23,7 +23,7 @@ const server = createServer((req, res) => {
 }).listen(0, '127.0.0.1');
 await new Promise((r) => server.on('listening', r));
 const base = `http://127.0.0.1:${server.address().port}`;
-const b = await chromium.launch({ executablePath: process.env.CHROME });
+const b = await chromium.launch({ executablePath: process.env.CHROME, args: ['--autoplay-policy=no-user-gesture-required'] });
 const ctx = await b.newContext({ acceptDownloads: true, viewport: { width: 1100, height: 900 } });
 const p = await ctx.newPage();
 const msgs = [];
@@ -87,10 +87,15 @@ await p.click('#f-save');
 console.log('3', await waitText('radio-status', /Saved/));
 await p.click('#tone-start');
 console.log('3', await waitText('radio-status', /tone/));
+console.log('3', await waitText('meter-text', /in the green band/), '|', await text('meter-source'));
+console.log('  mic opened', JSON.stringify(await p.evaluate(() => window.__micOpened)));
 await p.waitForTimeout(1500);
 console.log('  state', await text('r-state'));
 await p.click('#radio-disconnect');
 console.log('3', await waitText('radio-status', /Disconnected/));
+const micLeft = await p.evaluate(() => [document.getElementById('meter').hidden, window.__micOpened.every((o) => o.stopped)]);
+console.log('  meter hidden and every input stopped after disconnect:', micLeft);
+if (!micLeft.every(Boolean)) process.exitCode = 1;
 console.log('  wire ids', await p.evaluate(() => window.__simLog.join(' ')));
 console.log(msgs.join('\n') || 'no console messages');
 if (msgs.some((m) => /^(error|pageerror)/.test(m))) process.exitCode = 1;
