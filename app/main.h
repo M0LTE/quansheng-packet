@@ -24,6 +24,5 @@
 void MAIN_ProcessKeys(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld);
 void MAIN_ProcessSideKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld);
 void MAIN_Key_PTT(bool bKeyPressed);
-void MAIN_ToggleMonitor(void);
 
 #endif

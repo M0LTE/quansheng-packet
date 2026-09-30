@@ -50,7 +50,10 @@ enum {
 // that is out of range (0xFF when blank) means "use the default".
 //
 //   0x1D00  layout version (1)
-//   0x1D01  squelch level, 0 (open) to 9
+//   0x1D01  busy detector level, 1 to 9 (default 1): which row of the
+//           factory squelch tables the chip's carrier detector uses. There
+//           is no squelch: it never mutes the audio. (Until 30 September
+//           2026 this byte was the squelch level; 0 now means 1.)
 //   0x1D02  TX timeout, index into gTxTimeoutSeconds
 //   0x1D03  mic gain, REG_7D<4:0>, 0 to 31
 //   0x1D04  wide deviation, REG_40<11:0>, u16 little-endian, at most 0xA7F
@@ -73,7 +76,7 @@ enum {
 //
 //   +0  phase: bit 0 = after the TX set-up (every key-up),
 //              bit 1 = after the RX set-up (every return to receive and
-//              every squelch open); 0 or 0xFF ends the list
+//              every receive set-up); 0 or 0xFF ends the list
 //   +1  BK4819 register; 0xFF ends the list
 //   +2  AND mask, u16 little-endian
 //   +4  OR value, u16 little-endian
@@ -146,7 +149,7 @@ extern uint8_t       gRegOverrideRamCount;
 //
 //   0x1D60  layout version (1)
 //   0x1D61  serial PTT lock, 10 ms units, 0 to 150 (default 2 = 20 ms)
-//   0x1D62  busy source, 1 to 3 (default 1, squelch)
+//   0x1D62  busy source, 1 to 3 (default 1, the chip's squelch detector)
 //   0x1D63  busy hang, ms, 0 to 250 (default 20)
 //   0x1D64  busy RSSI open, u16, 0 to 511 (default 110)
 //   0x1D66  busy RSSI close, u16, at most open (default 104)
@@ -185,7 +188,7 @@ extern const uint8_t gTxTimeoutSeconds[7];
 #define TX_TIMEOUT_DEFAULT_INDEX  4u     // 30 s
 
 typedef struct {
-	uint8_t               SQUELCH_LEVEL;
+	uint8_t               BUSY_LEVEL;         // busy detector level, 1 to 9
 	uint8_t               TX_TIMEOUT;
 	uint8_t               MIC_GAIN;
 	uint16_t              DEVIATION_WIDE;

@@ -32,7 +32,7 @@ enum {
 	P_DEV_WIDE,
 	P_DEV_NARROW,
 	P_MIC_GAIN,
-	P_SQUELCH,
+	P_RETIRED_SQUELCH,     // 0x07: SQUELCH, gone (no squelch); replies UNSUPPORTED
 	P_RX_GAIN,
 	P_RX_DAC_GAIN,
 	P_TX_TIMEOUT_S,
@@ -45,16 +45,17 @@ enum {
 	P_BUSY_RSSI_OPEN,
 	P_BUSY_RSSI_CLOSE,
 	P_BUSY_HANG_MS,
-	P_SQL_RAW,
+	P_BUSY_SQL_RAW,        // 0x14: the busy detector's raw thresholds (was SQL_RAW)
 	P_AGC_FIX,
 	P_AFC,
 	P_BACKLIGHT,
 	P_KEY_LOCK,
-	P_LAST = P_KEY_LOCK
+	P_BUSY_SQL_LEVEL,      // 0x19: the busy detector level, 1 to 9
+	P_LAST = P_BUSY_SQL_LEVEL
 };
 
-#define PARAMS_SUPPORTED  (((1u << (P_LAST + 1)) - 1u) & ~1u)
-#define PARAMS_RAM_ONLY   ((1u << P_SQL_RAW) | (1u << P_AGC_FIX) | (1u << P_AFC))
+#define PARAMS_SUPPORTED  (((1u << (P_LAST + 1)) - 1u) & ~1u & ~(1u << P_RETIRED_SQUELCH))
+#define PARAMS_RAM_ONLY   ((1u << P_BUSY_SQL_RAW) | (1u << P_AGC_FIX) | (1u << P_AFC))
 
 // SET_PARAMS flags and result bits
 #define SETP_PERSIST      0x01u

@@ -47,8 +47,9 @@ void     MON_TxStarted(void);               // RF ready
 void     MON_TxEnded(uint8_t reason, uint32_t tRelease);   // receiver set up again
 void     MON_TxRefused(uint32_t tPress, uint8_t reason, uint16_t detail);
 void     MON_Slice500ms(void);
-void     MON_AfterRxSetup(void);            // after the chip's receive set-up or a squelch open
+void     MON_AfterRxSetup(void);            // after the chip's receive set-up
 bool     MON_Busy(void);
+bool     MON_DetectorOpen(void);            // the chip's squelch detector, now
 uint16_t MON_BusyAge(void);
 uint8_t  MON_AgcByte(uint16_t reg7e);
 

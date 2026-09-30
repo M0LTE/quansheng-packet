@@ -15,11 +15,14 @@
 
 // UART output queue (protocol v2, 9.1). Every byte the radio sends goes
 // through this ring, legacy replies included. The main loop is the only
-// producer. The 1 ms SysTick handler drains it into the UART's 8-byte
-// transmit FIFO (OUTQ_Drain), and the producer kicks the drain itself when
-// it queues a frame, so the first byte of a frame queued behind an empty
-// queue leaves at once. At 39 kbaud the FIFO lasts 2 ms, so refilling it
-// every 1 ms keeps the line busy while there is output.
+// producer. Three things drain it into the UART's transmit FIFO: the UART
+// TX interrupt, enabled only while the queue holds more than the FIFO
+// takes (it keeps the line busy at wire speed however shallow the FIFO
+// is); the main loop on every pass and whenever it queues a frame, so the
+// first byte of a frame leaves at once; and the 1 ms SysTick handler, the
+// fallback if the interrupt ever switches itself off. The bench measured
+// only 1 to 2.3 bytes/ms with the tick alone (line rate 3.9): the FIFO
+// takes about 2 bytes, not 8.
 //
 // Nothing here blocks except OUTQ_PutWait, used for legacy replies and
 // v2 replies, which waits for room (the SysTick drain empties the queue
@@ -38,6 +41,7 @@ uint16_t OUTQ_Free(void);
 bool     OUTQ_Put(const void *p, uint16_t n);       // false (nothing queued) if no room
 void     OUTQ_PutWait(const void *p, uint16_t n);   // waits for room
 void     OUTQ_Drain(void);                          // SysTick context
+void     OUTQ_Isr(void);                            // UART TX interrupt
 void     OUTQ_Kick(void);                           // main loop: drain now, interrupts off briefly
 bool     OUTQ_Idle(void);                           // queue empty and the UART has nothing left to send
 void     OUTQ_Reset(void);
@@ -46,5 +50,6 @@ void     OUTQ_Reset(void);
 bool     UART_TxReady(void);                        // transmit FIFO has room for a byte
 void     UART_TxPut(uint8_t b);
 bool     UART_TxEmpty(void);                        // transmit FIFO empty
+void     UART_TxIrq(bool on);                       // UART TX interrupt on or off
 
 #endif

@@ -36,6 +36,9 @@ if ! cmp -s "$out-vectors.json" tests/vectors/protocol-v2.json; then
 fi
 echo "golden vectors match tests/vectors/protocol-v2.json"
 
+gcc $CFLAGS -DHOST_TEST -o "$out-outq" tests/host/test_outq.c outq.c
+"$out-outq"
+
 gcc $CFLAGS -o "$out-pttarb" tests/host/test_pttarb.c pttarb.c
 "$out-pttarb"
 

@@ -67,78 +67,10 @@ void (*ProcessKeysFunctions[])(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld) 
 
 static_assert(ARRAY_SIZE(ProcessKeysFunctions) == DISPLAY_N_ELEM);
 
-// Carrier squelch only: no CTCSS/DCS, no tail tone, no scanning, no dual
-// watch. FOREGROUND -> INCOMING -> RECEIVE while the squelch is open, and
-// back to FOREGROUND (with a full receiver set-up) when it closes.
-
-static void CheckForIncoming(void)
-{
-	if (g_SquelchLost && gCurrentFunction != FUNCTION_INCOMING)
-		FUNCTION_Select(FUNCTION_INCOMING);
-}
-
-static void HandleIncoming(void)
-{
-	if (!g_SquelchLost) {	// squelch is closed
-		FUNCTION_Select(FUNCTION_FOREGROUND);
-		gUpdateDisplay = true;
-		return;
-	}
-
-	APP_StartListening(gMonitor ? FUNCTION_MONITOR : FUNCTION_RECEIVE);
-}
-
-static void HandleReceive(void)
-{
-	if (g_SquelchLost)
-		return;
-
-	// end of reception
-	RADIO_SetupRegisters(true);
-	gUpdateDisplay = true;
-}
-
-static void FunctionNop(void)
-{
-}
-
-static void (*HandleFunction_fn_table[])(void) = {
-	[FUNCTION_FOREGROUND] = &CheckForIncoming,
-	[FUNCTION_TRANSMIT]   = &FunctionNop,
-	[FUNCTION_MONITOR]    = &FunctionNop,
-	[FUNCTION_INCOMING]   = &HandleIncoming,
-	[FUNCTION_RECEIVE]    = &HandleReceive,
-};
-
-static_assert(ARRAY_SIZE(HandleFunction_fn_table) == FUNCTION_N_ELEM);
-
-void APP_StartListening(FUNCTION_Type_t function)
-{
-	AUDIO_AudioPathOn();
-	gEnableSpeaker = true;
-
-	RADIO_SetRxAudio();
-
-	BK4819_SetAF(BK4819_AF_FM);                  // flat FM demodulator output
-	BK4819_SetRegValue(afcDisableRegSpec, !gAfcOn);   // AFC on unless the AFC diagnostic says off
-	BK4819_WriteRegister(BK4819_REG_3D, PKT_REG_3D_RX);
-
-	// the squelch-open writes above would undo RX overrides of REG_47/48
-	RADIO_ApplyRegOverrides(REG_OVERRIDE_RX);
-	MON_AfterRxSetup();                          // and a running level tone
-
-	FUNCTION_Select(function);
-
-	if (function == FUNCTION_MONITOR)
-	{	// squelch is disabled
-		if (gScreenToDisplay != DISPLAY_MENU)     // 1of11 .. don't close the menu
-			GUI_SelectNextDisplay(DISPLAY_MAIN);
-	}
-	else
-		gUpdateDisplay = true;
-
-	gUpdateStatus = true;
-}
+// No squelch, no CTCSS/DCS, no tail tone, no scanning, no dual watch: the
+// radio receives with the audio open whenever it is not transmitting
+// (RADIO_SetupRegisters opens it). The chip's squelch result is only a
+// carrier detector for the protocol's busy events (app/monitor.c).
 
 uint32_t APP_SetFrequencyByStep(VFO_Info_t *pInfo, int8_t direction)
 {
@@ -154,38 +86,12 @@ uint32_t APP_SetFrequencyByStep(VFO_Info_t *pInfo, int8_t direction)
 	return Frequency;
 }
 
-static void CheckRadioInterrupts(void)
-{
-	while (BK4819_ReadRegister(BK4819_REG_0C) & 1u) { // BK chip interrupt request
-		// clear interrupts
-		BK4819_WriteRegister(BK4819_REG_02, 0);
-
-		// only the squelch interrupts are enabled (REG_3F)
-		const uint16_t interrupts = BK4819_ReadRegister(BK4819_REG_02);
-
-		if (interrupts & BK4819_REG_02_SQUELCH_LOST) {
-			g_SquelchLost = true;
-			BK4819_ToggleGpioOut(BK4819_GPIO6_PIN2_GREEN, true);
-		}
-
-		if (interrupts & BK4819_REG_02_SQUELCH_FOUND) {
-			g_SquelchLost = false;
-			BK4819_ToggleGpioOut(BK4819_GPIO6_PIN2_GREEN, false);
-		}
-	}
-}
-
 void APP_EndTransmission(uint8_t reason)
 {
 	// back to RX mode
 	gTxTimerCountdown_500ms = 0;
 	RADIO_SendEndOfTransmission();
 	MON_TxEnded(reason, gTxReleaseMs);
-
-	if (gMonitor) {
-		 //turn the monitor back on
-		gFlagReconfigureVfos = true;
-	}
 }
 
 // A valid frame from the host (protocol v2, 5.3 rule 1): the serial PTT
@@ -242,12 +148,6 @@ void APP_Update(void)
 
 		GUI_DisplayScreen();
 	}
-
-	if (gReducedService)
-		return;
-
-	if (gCurrentFunction != FUNCTION_TRANSMIT)
-		HandleFunction_fn_table[gCurrentFunction]();
 }
 
 // The protocol's own work, on every pass of the main loop: busy, streams
@@ -407,7 +307,6 @@ void APP_TimeSlice10ms(void)
 		gSqlRawActive  = false;
 		RADIO_ConfigureChannel();
 		RADIO_SetupRegisters(true);
-		gMonitor       = false;
 		// an open menu item would otherwise store its old value on MENU
 		gIsInSubMenu   = false;
 		if (gScreenToDisplay == DISPLAY_MENU)
@@ -417,8 +316,6 @@ void APP_TimeSlice10ms(void)
 		PARAMS_RefreshStored();
 		PARAMS_Changed(PSRC_RELOAD);
 	}
-
-	CheckRadioInterrupts();
 
 	if (gUpdateDisplay) {
 		gUpdateDisplay = false;
@@ -547,12 +444,8 @@ static void ProcessKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 		if (Key != KEY_PTT)
 			BACKLIGHT_TurnOn();
 
-		if (Key == KEY_EXIT && bKeyHeld) { // exit key held pressed
+		if (Key == KEY_EXIT && bKeyHeld) // exit key held pressed
 			cancelUserInputModes();
-
-			if (gMonitor && gCurrentFunction != FUNCTION_TRANSMIT)
-				MAIN_ToggleMonitor(); //turn off the monitor
-		}
 
 		if (gScreenToDisplay == DISPLAY_MENU)       // 1of11
 			gMenuCountdown = menu_timeout_500ms;
@@ -683,9 +576,6 @@ Skip:
 			RADIO_SetupRegisters(true);
 
 			gFlagReconfigureVfos = false;
-
-			if (gMonitor)
-				MAIN_ToggleMonitor();   // 1of11
 		}
 	}
 

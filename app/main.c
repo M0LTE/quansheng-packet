@@ -19,10 +19,10 @@
 //   0-9        enter a frequency
 //   UP/DOWN    step the frequency
 //   MENU       settings menu
-//   EXIT       delete the last digit; held: cancel input, monitor off
+//   EXIT       delete the last digit; held: cancel input
 //   F then 6   cycle the TX power
 //   F held     keypad lock on or off
-//   SIDE1      monitor (squelch open) on or off
+//   SIDE1      no function (there is no squelch to open)
 //   SIDE2      no function
 //   PTT        transmit (the AIOC normally keys the radio instead)
 
@@ -39,19 +39,6 @@
 #include "settings.h"
 #include "ui/inputbox.h"
 #include "ui/ui.h"
-
-void MAIN_ToggleMonitor(void)
-{
-	if (gCurrentFunction != FUNCTION_MONITOR) { // enable the monitor
-		RADIO_SetupRegisters(true);
-		APP_StartListening(FUNCTION_MONITOR);
-		return;
-	}
-
-	gMonitor = false;
-	RADIO_SetupRegisters(true);
-	gRequestDisplayScreen = gScreenToDisplay;
-}
 
 static void TogglePower(void)
 {
@@ -236,8 +223,7 @@ void MAIN_ProcessSideKey(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 	if (bKeyPressed || bKeyHeld)
 		return;
 
-	if (Key == KEY_SIDE1)
-		MAIN_ToggleMonitor();
+	(void)Key;          // the side keys have no function
 }
 
 void MAIN_ProcessKeys(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)

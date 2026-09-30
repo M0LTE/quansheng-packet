@@ -40,13 +40,13 @@ Flash for the firmware is 61440 bytes (60 KiB). All sizes are gcc 10.3.1 (Docker
 
 FM broadcast radio, spectrum, all scanning (frequency, channel, scan lists, CTCSS/DCS scan), dual watch and cross band, battery save (the receiver no longer sleeps between polls, which would miss the start of a packet), DTMF (calling, ANI, PTT ID, live decoder, side tones), VOX, flashlight, voice prompts, alarm and 1750 Hz tone, roger beep and every other beep (they would go to the TNC), CTCSS/DCS and tail tones, scrambler, compander, AM, USB and the FM voice mode, NOAA, aircopy, power-on password, AES challenge and lock, boot modes and the hidden menu, channel names, TX offset and reverse, the 60-item menu, and the SRAM overlay.
 
-CTCSS/DCS went because packet uses carrier squelch and dropping it removes the tone scanning, tail detection and interrupt handling with it.
+CTCSS/DCS went because packet needs no tone squelch, and dropping it removes the tone scanning, tail detection and interrupt handling with it. The squelch itself went on 30 September (Tom): the TNC decodes from open audio, and a squelch only cut the start of frames.
 
 ## What remains
 
-- One VFO, simplex (TX frequency = RX frequency), carrier squelch.
+- One VFO, simplex (TX frequency = RX frequency), no squelch: receive audio is always open, and the speaker amplifier (the K1 audio out) always on in receive. The chip's squelch result is kept only as a carrier detector for the protocol's busy events and the green LED ("RX" on the display); it never mutes anything.
 - One operating frequency, with its power, bandwidth and step, stored in this firmware's own settings (0x1D58); frequency entry on the keypad and up/down stepping. No memory channels, no band slots, no CHIRP compatibility (see "Operating channel" under Settings).
-- Power (low, mid, high from the factory calibration), bandwidth (wide, narrow), squelch (0 to 9 from the factory tables), TX timeout, battery monitoring (TX refused below about 6.3 V and above about 8.9 V, as upstream), backlight, key lock.
+- Power (low, mid, high from the factory calibration), bandwidth (wide, narrow), TX timeout, battery monitoring (TX refused below about 6.3 V and above about 8.9 V, as upstream), backlight, key lock.
 - Display: frequency, TX/RX, RSSI in dBm and S-units, and the settings in use.
 - UART: the upstream EEPROM protocol and the BK4819 register commands, plus the serial control protocol v2 (`docs/protocol-v2.md`): identification, status, events (busy, bursts, TX timing, heartbeats), parameters, register access and overrides, a level tone.
 
@@ -64,7 +64,8 @@ Always the upstream DIG path: no pre-emphasis or de-emphasis, no TX or RX audio 
 | REG_2B | `|0x0707`: RX and TX filters and emphasis off | `PKT_REG_2B_FLAT_MASK` |
 | REG_43 | upstream DIG wide and narrow values | `BK4819_SetFilterBandwidth` |
 | REG_31 | scrambler, VOX, compander bits cleared | `PKT_REG_31_OFF_MASK` |
-| REG_3D | `0x2AAB` on squelch open | `PKT_REG_3D_RX` |
+| REG_3D | `0x2AAB` on every receive set-up | `PKT_REG_3D_RX` |
+| REG_47 (RX) | `0x6140`: FM demodulator output, always (no squelch) | `RADIO_SetupRegisters` |
 
 ## Settings
 
@@ -73,7 +74,7 @@ Stored in a 16-byte block at EEPROM `0x1D00` (the old DTMF contacts area). The b
 | Address | Setting | Range | Default |
 |---|---|---|---|
 | 0x1D00 | layout version | 1 | |
-| 0x1D01 | squelch | 0 (open) to 9 | 1 |
+| 0x1D01 | busy detector level: the row of the factory squelch tables the chip's carrier detector uses (not a squelch; v2 parameter BUSY_SQL_LEVEL, not in the menu); was the squelch level, and 0 now means 1 | 1 to 9 | 1 |
 | 0x1D02 | TX timeout | 0 to 6 = 5, 10, 15, 20, 30, 60, 120 s | 4 (30 s) |
 | 0x1D03 | mic gain, REG_7D<4:0> | 0 to 31 | 31 |
 | 0x1D04 | wide deviation, REG_40<11:0>, u16 LE | 0 to 0xA7F | 0x856 (about 3 kHz at 0 dBFS with the bench AIOC EQ) |
@@ -96,7 +97,7 @@ For experiments without reflashing (TX filters and so on), 8 entries of 8 bytes 
 
 | Offset | Field |
 |---|---|
-| +0 | phase: bit 0 = after the TX set-up (every key-up), bit 1 = after the RX set-up (every return to receive and every squelch open); 0 or 0xFF ends the list |
+| +0 | phase: bit 0 = after the TX set-up (every key-up), bit 1 = after the RX set-up (every return to receive); 0 or 0xFF ends the list |
 | +1 | BK4819 register; 0xFF ends the list |
 | +2 | AND mask, u16 LE |
 | +4 | OR value, u16 LE |
@@ -120,9 +121,9 @@ If the frequency there is not receivable (a blank block, or a radio coming from 
 
 Other EEPROM the firmware reads: S-meter levels at `0x0EA0`, TX band limits at `0x0F40` (no menu). Calibration (`0x1E00` up) is read only.
 
-The same settings are in the menu (MENU, then UP/DOWN, MENU to edit and again to store, EXIT to cancel): Sql, Step, TxPwr, W/N, MicG, DevW, DevN, RxG, RxDAC, TxTOut, BackLt, BatTyp, plus the battery voltage and the version.
+The same settings are in the menu (MENU, then UP/DOWN, MENU to edit and again to store, EXIT to cancel): Step, TxPwr, W/N, MicG, DevW, DevN, RxG, RxDAC, TxTOut, BackLt, BatTyp, plus the battery voltage and the version.
 
-Keys on the main screen: digits enter a frequency, UP/DOWN step, F then 6 cycles power, F held locks the keypad, SIDE1 toggles monitor (squelch open).
+Keys on the main screen: digits enter a frequency, UP/DOWN step, F then 6 cycles power, F held locks the keypad. The side keys have no function (there is no squelch to open).
 
 ## Key-up and key-down
 
@@ -151,9 +152,9 @@ Timing settings, 8 bytes at `0x1D50` (one UART write; not in the menu; used only
 **Also moved out of the key-down path:** the LCD re-initialisation after transmit (`ST7565_FixInterfGlitch`) now runs just before the next redraw in the 10 ms slice.
 
 **Left in the release path, could be deferred later** (not changed, because each affects receive readiness or needs measuring):
-- `RADIO_SetupRegisters` does a full receive set-up after every transmission: bandwidth and filter registers, the squelch thresholds, frequency, and `BK4819_RX_TurnOn`, which writes REG_30 to 0 and back and so re-runs the VCO calibration. On a simplex frequency most of this is unchanged from before the transmission; skipping the unchanged parts could bring receive audio back sooner.
+- `RADIO_SetupRegisters` does a full receive set-up after every transmission: bandwidth and filter registers, the squelch-detector thresholds, frequency, and `BK4819_RX_TurnOn`, which writes REG_30 to 0 and back and so re-runs the VCO calibration. On a simplex frequency most of this is unchanged from before the transmission; skipping the unchanged parts could bring receive audio back sooner.
 - The loop that drains pending BK4819 interrupts (REG_0C, with a 1 ms delay per pass).
-- The same full set-up runs on every squelch close (end of each received frame), which matters for the next frame's turnaround.
+- (It no longer runs at the end of each received frame: there is no squelch to close.)
 - Postponed EEPROM saves (8 ms per 8-byte block) run after the transmission ends if a key was held during it; rare, and after RF is already off.
 - TX timeout and the battery ADC read are unaffected.
 
@@ -176,7 +177,7 @@ Timing settings, 8 bytes at `0x1D50` (one UART write; not in the menu; used only
 
 **PTT lock.** On the K1 connector the UART receive line shares a contact with PTT. Every valid frame, of any kind, ends any transmission before its command runs and starts the serial PTT lock: `SERIAL_LOCK_MS`, 20 ms by default (a v2 parameter, 0 to 1500 ms, stored at 0x1D61), counted every 1 ms. A press during the lock keys at most 30 ms late, when the lock runs out, or is refused until PTT is released and pressed again; v1 held PTT off for 1.0 to 1.5 s and keyed late when it ran out, eating the start of the frame. After a v2 command a host may key at `t_reply + lock_ms` (the lock is in every reply); after a legacy reply at `t_reply + SERIAL_LOCK_MS + 2 ms`. A transmission ended by a frame, a TX timeout or a refused press needs PTT released first. What stops serial data being taken as a press is the 280 us window, not the lock (`docs/protocol-v2.md` 1c).
 
-**Output and timing.** Everything the radio sends goes through a 512-byte queue drained by the 1 ms tick into the UART FIFO; the command handler no longer blocks with interrupts off. Frames are handled on every pass of the main loop (v1: one per 10 ms slice, so replies took 10 to 20 ms), all complete frames at once. The parser drops only the `AB` of anything that cannot be a frame and drops a frame still incomplete 5 ms after its last byte, so a frame cut short by PTT no longer leaves the radio deaf to hellos.
+**Output and timing.** Everything the radio sends goes through a 512-byte queue drained into the UART FIFO by the UART TX interrupt, the main loop and the 1 ms tick (the tick alone managed only 1 to 2.3 bytes/ms on the bench); the command handler no longer blocks with interrupts off. Frames are handled on every pass of the main loop (v1: one per 10 ms slice, so replies took 10 to 20 ms), all complete frames at once. The parser drops only the `AB` of anything that cannot be a frame and drops a frame still incomplete 5 ms after its last byte, so a frame cut short by PTT no longer leaves the radio deaf to hellos.
 
 **Protocol v2.** Commands 0x5000 to 0x507F, events 0x50C0 up, specified in `docs/protocol-v2.md` (section 13 lists what is implemented). A hello's 0x0515 reply carries the `PKT2` marker in its challenge field; the replies to legacy commands are otherwise byte-identical to v1. v2 settings (lock, busy detection, default subscription, tone calibration) live in the 16-byte block at 0x1D60, used only with a valid settings block and its own version byte, and blanked by the first menu save over foreign data. Nothing in v2 keys the transmitter.
 
@@ -192,7 +193,7 @@ Timing settings, 8 bytes at `0x1D50` (one UART write; not in the menu; used only
 ## Other differences from upstream DIG that a measurement could see
 
 - REG_24 (DTMF detector) is cleared at power-on, not only at the first key-up; the DTMF coefficient writes (REG_09) are gone.
-- REG_48 uses the RX DAC gain setting (default 15) at all times; upstream used the calibration value (usually 8) while the squelch was closed, when the audio is muted anyway.
+- REG_48 uses the RX DAC gain setting (default 15) at all times; upstream used the calibration value (usually 8) while its squelch was closed.
 - A blank EEPROM starts on 144.800 MHz (upstream: the bottom of the 2 m band slot, 137.000 MHz).
 - The first-power-on defaults differ from upstream: no dual watch, and a 30 s TX timeout instead of 1 minute.
 

@@ -32,14 +32,15 @@
 
 #define BIT(id)            (1u << (id))
 #define PARAMS_OPERATING   (BIT(P_FREQ_HZ) | BIT(P_POWER) | BIT(P_BANDWIDTH))
-#define PARAMS_RETUNE      (PARAMS_OPERATING | BIT(P_SQUELCH) | BIT(P_SQL_RAW) | BIT(P_AGC_FIX))
-#define PARAMS_BLOCK_A     (BIT(P_SQUELCH) | BIT(P_TX_TIMEOUT_S) | BIT(P_MIC_GAIN) | BIT(P_DEV_WIDE) | BIT(P_DEV_NARROW))
+#define PARAMS_RETUNE      (PARAMS_OPERATING | BIT(P_BUSY_SQL_LEVEL) | BIT(P_BUSY_SQL_RAW) | BIT(P_AGC_FIX))
+#define PARAMS_BLOCK_A     (BIT(P_BUSY_SQL_LEVEL) | BIT(P_TX_TIMEOUT_S) | BIT(P_MIC_GAIN) | BIT(P_DEV_WIDE) | BIT(P_DEV_NARROW))
 #define PARAMS_BLOCK_B     (BIT(P_RX_GAIN) | BIT(P_RX_DAC_GAIN) | BIT(P_BACKLIGHT) | BIT(P_KEY_LOCK))
 #define PARAMS_TIMING      (BIT(P_PTT_PRESS_MS) | BIT(P_PTT_RELEASE_MS) | BIT(P_PA_ENABLE_DELAY_MS) | BIT(P_PA_BIAS_DELAY_MS))
 #define PARAMS_V2          (BIT(P_SERIAL_LOCK_MS) | BIT(P_BUSY_SOURCE) | BIT(P_BUSY_RSSI_OPEN) | BIT(P_BUSY_RSSI_CLOSE) | BIT(P_BUSY_HANG_MS))
 
+// 0x07 (SQUELCH) is retired: size 0, not supported
 static const uint8_t kSize[P_LAST + 1] = {
-	0, 4, 1, 1, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 2, 2, 1, 6, 1, 1, 1, 1
+	0, 4, 1, 1, 2, 2, 1, 0, 1, 1, 1, 1, 1, 1, 1, 2, 1, 2, 2, 1, 6, 1, 1, 1, 1, 1
 };
 
 // EEPROM blocks waiting to be written, in this order (V2_B before V2_A,
@@ -87,7 +88,7 @@ static uint32_t Value(uint8_t id, const EEPROM_Config_t *e, const V2_Config_t *v
 		case P_DEV_WIDE:           return e->DEVIATION_WIDE;
 		case P_DEV_NARROW:         return e->DEVIATION_NARROW;
 		case P_MIC_GAIN:           return e->MIC_GAIN;
-		case P_SQUELCH:            return e->SQUELCH_LEVEL;
+		case P_BUSY_SQL_LEVEL:     return e->BUSY_LEVEL;
 		case P_RX_GAIN:            return e->RX_GAIN;
 		case P_RX_DAC_GAIN:        return e->RX_DAC_GAIN;
 		case P_TX_TIMEOUT_S:       return gTxTimeoutSeconds[e->TX_TIMEOUT];
@@ -100,7 +101,7 @@ static uint32_t Value(uint8_t id, const EEPROM_Config_t *e, const V2_Config_t *v
 		case P_BUSY_RSSI_OPEN:     return v->BUSY_RSSI_OPEN;
 		case P_BUSY_RSSI_CLOSE:    return v->BUSY_RSSI_CLOSE;
 		case P_BUSY_HANG_MS:       return v->BUSY_HANG_MS;
-		case P_SQL_RAW: {          // compared only: fold the six bytes
+		case P_BUSY_SQL_RAW: {          // compared only: fold the six bytes
 			uint8_t r[6];
 			SqlRaw(f, r);
 			return get32(r) ^ ((uint32_t)get16(r + 4) << 7);
@@ -126,7 +127,7 @@ static uint32_t Stored(uint8_t id)
 uint8_t PARAMS_Get(uint8_t id, bool stored, uint8_t *out)
 {
 	const uint8_t size = PARAMS_Size(id);
-	if (id == P_SQL_RAW)
+	if (id == P_BUSY_SQL_RAW)
 		SqlRaw(stored ? &gStored.vfo : gVfo, out);
 	else {
 		const uint32_t u = stored ? Stored(id) : Live(id);
@@ -229,7 +230,7 @@ static bool InRange(uint8_t id, uint32_t u, const uint8_t *raw)
 		case P_DEV_WIDE:
 		case P_DEV_NARROW:         return u <= PKT_DEVIATION_MAX;
 		case P_MIC_GAIN:           return u <= PKT_MIC_GAIN_MAX;
-		case P_SQUELCH:            return u <= 9;
+		case P_BUSY_SQL_LEVEL:     return u >= 1 && u <= 9;
 		case P_RX_GAIN:            return u <= PKT_RX_GAIN_MAX;
 		case P_RX_DAC_GAIN:        return u <= PKT_RX_DAC_GAIN_MAX;
 		case P_TX_TIMEOUT_S:       return TimeoutIndex(u) >= 0;
@@ -242,7 +243,7 @@ static bool InRange(uint8_t id, uint32_t u, const uint8_t *raw)
 		case P_BUSY_RSSI_OPEN:
 		case P_BUSY_RSSI_CLOSE:    return u <= 511;
 		case P_BUSY_HANG_MS:       return u <= 250;
-		case P_SQL_RAW:            return raw[2] <= 127 && raw[3] <= 127;
+		case P_BUSY_SQL_RAW:            return raw[2] <= 127 && raw[3] <= 127;
 		case P_AGC_FIX:            return u == 0xFF || u <= 7;
 		case P_AFC:
 		case P_KEY_LOCK:           return u <= 1;
@@ -294,7 +295,7 @@ static void Apply(uint32_t set, const uint32_t *val, const uint8_t *raw, uint32_
 			case P_DEV_WIDE:           gEeprom.DEVIATION_WIDE = u; break;
 			case P_DEV_NARROW:         gEeprom.DEVIATION_NARROW = u; break;
 			case P_MIC_GAIN:           gEeprom.MIC_GAIN = u; break;
-			case P_SQUELCH:            gEeprom.SQUELCH_LEVEL = u; gSqlRawActive = false; break;
+			case P_BUSY_SQL_LEVEL:     gEeprom.BUSY_LEVEL = u; gSqlRawActive = false; break;
 			case P_RX_GAIN:            gEeprom.RX_GAIN = u; break;
 			case P_RX_DAC_GAIN:        gEeprom.RX_DAC_GAIN = u; break;
 			case P_TX_TIMEOUT_S:       gEeprom.TX_TIMEOUT = TimeoutIndex(u); break;
@@ -307,7 +308,7 @@ static void Apply(uint32_t set, const uint32_t *val, const uint8_t *raw, uint32_
 			case P_BUSY_RSSI_OPEN:     gV2.BUSY_RSSI_OPEN = u; break;
 			case P_BUSY_RSSI_CLOSE:    gV2.BUSY_RSSI_CLOSE = u; break;
 			case P_BUSY_HANG_MS:       gV2.BUSY_HANG_MS = u; break;
-			case P_SQL_RAW:            memcpy(gSqlRaw, raw, 6); gSqlRawActive = true; break;
+			case P_BUSY_SQL_RAW:            memcpy(gSqlRaw, raw, 6); gSqlRawActive = true; break;
 			case P_AGC_FIX:            gAgcFix = u; break;
 			case P_AFC:                gAfcOn = u; break;
 			case P_BACKLIGHT:          gEeprom.BACKLIGHT_TIME = u; break;
@@ -436,7 +437,7 @@ void PARAMS_PersistService(bool allowed)
 		EEPROM_ReadBuffer(addr, b, 8);
 		switch (j) {
 			case J_SET_A:
-				Patch8(b + 1, P_SQUELCH);
+				Patch8(b + 1, P_BUSY_SQL_LEVEL);
 				if (Has(P_TX_TIMEOUT_S))
 					b[2] = TimeoutIndex(gPVal[P_TX_TIMEOUT_S]);
 				Patch8(b + 3, P_MIC_GAIN);
@@ -514,6 +515,8 @@ uint8_t PARAMS_Set(uint8_t flags, const uint8_t *rec, uint16_t n, uint8_t *detai
 		const uint8_t id   = rec[i++];
 		const uint8_t size = PARAMS_Size(id);
 		*detail = id;
+		if (id == P_RETIRED_SQUELCH)
+			return V2_UNSUPPORTED;   // there is no squelch
 		if (!size || (set & BIT(id)))
 			return V2_BAD_PARAM;
 		if (i + size > n)
@@ -521,7 +524,7 @@ uint8_t PARAMS_Set(uint8_t flags, const uint8_t *rec, uint16_t n, uint8_t *detai
 		uint32_t u = 0;
 		for (uint8_t k = 0; k < size && k < 4; k++)
 			u |= (uint32_t)rec[i + k] << (8 * k);
-		if (id == P_SQL_RAW)
+		if (id == P_BUSY_SQL_RAW)
 			memcpy(raw, rec + i, 6);
 		val[id] = u;
 		i += size;
@@ -564,7 +567,7 @@ uint8_t PARAMS_Set(uint8_t flags, const uint8_t *rec, uint16_t n, uint8_t *detai
 	uint32_t changed = 0;
 	for (uint8_t k = 0; k < count; k++) {
 		const uint8_t id = order[k];
-		if (id == P_SQL_RAW) {
+		if (id == P_BUSY_SQL_RAW) {
 			uint8_t now[6];
 			SqlRaw(gVfo, now);
 			if (!gSqlRawActive || memcmp(now, raw, 6) != 0)
@@ -595,7 +598,7 @@ uint8_t PARAMS_Set(uint8_t flags, const uint8_t *rec, uint16_t n, uint8_t *detai
 		const uint8_t id = order[k];
 		out[len++] = id;
 		if (flags & SETP_DRY_RUN) {
-			if (id == P_SQL_RAW)
+			if (id == P_BUSY_SQL_RAW)
 				memcpy(out + len, raw, 6);
 			else
 				for (uint8_t b = 0; b < kSize[id]; b++)

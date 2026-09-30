@@ -144,9 +144,9 @@ uint16_t CRC_Calculate(const void *pBuffer, uint16_t Size)
 // --------------------------------------------------- the rest of the app --
 
 FUNCTION_Type_t gCurrentFunction;
-void FUNCTION_Init(void) { g_SquelchLost = false; }
+void FUNCTION_Init(void) {}
 void FUNCTION_Select(FUNCTION_Type_t f) { gCurrentFunction = f; }
-bool FUNCTION_IsRx(void) { return gCurrentFunction == FUNCTION_MONITOR || gCurrentFunction == FUNCTION_INCOMING || gCurrentFunction == FUNCTION_RECEIVE; }
+bool FUNCTION_IsRx(void) { return gCurrentFunction != FUNCTION_TRANSMIT; }
 
 uint16_t gBatteryCalibration[6];
 uint8_t  gBatteryDisplayLevel = 5;
@@ -175,6 +175,7 @@ bool     tx_ready = true;
 bool UART_TxReady(void) { return tx_ready; }
 void UART_TxPut(uint8_t b) { if (out_len < OUT_MAX) out[out_len++] = b; }
 bool UART_TxEmpty(void) { return true; }
+void UART_TxIrq(bool on) { (void)on; }
 void UART_Send(const void *p, uint32_t n) { OUTQ_PutWait(p, (uint16_t)n); }
 
 // ------------------------------------------------------------- helpers --

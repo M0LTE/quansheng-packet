@@ -22,8 +22,7 @@
 
 // Packet firmware menu: only the settings a packet station needs.
 enum {
-	MENU_SQL = 0,   // squelch level
-	MENU_STEP,      // frequency step (the operating channel)
+	MENU_STEP = 0,  // frequency step (the operating channel)
 	MENU_TXP,       // TX power (the operating channel)
 	MENU_W_N,       // bandwidth (the operating channel)
 	MENU_MIC,       // mic gain, REG_7D<4:0>

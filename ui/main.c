@@ -16,10 +16,10 @@
 
 // Main screen (packet firmware):
 //
-//   lines 0-1  mode (frequency slot or channel), TX/RX, frequency
+//   lines 0-1  TX, or RX while a carrier is detected, and the frequency
 //   line  3    RSSI in dBm and S-units while receiving
-//   lines 4-6  the packet settings in use: power, bandwidth, squelch,
-//              TX timeout, mic gain, deviation, receive gains
+//   lines 4-6  the packet settings in use: power, bandwidth, TX timeout,
+//              mic gain, deviation, receive gains
 
 #include <string.h>
 
@@ -28,6 +28,7 @@
 #include "driver/st7565.h"
 #include "external/printf/printf.h"
 #include "functions.h"
+#include "app/monitor.h"
 #include "helper/battery.h"
 #include "misc.h"
 #include "radio.h"
@@ -171,7 +172,7 @@ void UI_DisplayMain(void)
 	// TX / RX indicator
 	if (gCurrentFunction == FUNCTION_TRANSMIT)
 		UI_PrintStringSmallBold("TX", 14, 0, 0);
-	else if (FUNCTION_IsRx())
+	else if (MON_Busy())
 		UI_PrintStringSmallBold("RX", 14, 0, 0);
 
 	const bool inputting = gInputBoxIndex != 0;
@@ -207,10 +208,9 @@ void UI_DisplayMain(void)
 	// the packet settings in use
 	static const char pwr[][5] = {"LOW", "MID", "HIGH"};
 	const bool narrow = vfo->CHANNEL_BANDWIDTH == BANDWIDTH_NARROW;
-	sprintf(String, "%s %s SQL%u TOT%u",
+	sprintf(String, "%s %s TOT%u",
 		pwr[vfo->OUTPUT_POWER % 3],
 		narrow ? "N" : "W",
-		gEeprom.SQUELCH_LEVEL,
 		gTxTimeoutSeconds[gEeprom.TX_TIMEOUT]);
 	UI_PrintStringSmallNormal(String, 2, 0, 4);
 

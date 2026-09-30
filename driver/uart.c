@@ -15,7 +15,9 @@
  */
 
 #include <stdbool.h>
+#include "ARMCM0.h"
 #include "bsp/dp32g030/dma.h"
+#include "bsp/dp32g030/irq.h"
 #include "bsp/dp32g030/syscon.h"
 #include "bsp/dp32g030/uart.h"
 #include "driver/uart.h"
@@ -45,7 +47,13 @@ void UART_Init(void)
 	UART1->RXTO = 4;
 	UART1->FC = 0;
 	UART1->FIFO = UART_FIFO_RF_LEVEL_BITS_8_BYTE | UART_FIFO_RF_CLR_BITS_ENABLE | UART_FIFO_TF_CLR_BITS_ENABLE;
-	UART1->IE = 0;
+	// The TX FIFO interrupt (FIFO level at or below TF_LEVEL, 0 here) is
+	// left enabled in the UART; the output queue gates it in the NVIC.
+	UART1->IE = UART_IE_TXFIFO_BITS_ENABLE;
+	NVIC_DisableIRQ((IRQn_Type)DP32_UART1_IRQn);
+	// the lowest priority, as SysTick: it never interrupts the PTT
+	// sampling, and the two never run at the same time
+	NVIC_SetPriority((IRQn_Type)DP32_UART1_IRQn, (1u << __NVIC_PRIO_BITS) - 1u);
 
 	DMA_CTR = (DMA_CTR & ~DMA_CTR_DMAEN_MASK) | DMA_CTR_DMAEN_BITS_DISABLE;
 
@@ -104,6 +112,24 @@ void UART_TxPut(uint8_t b)
 
 // Nothing left to send: the FIFO is empty and the last byte has left the
 // shift register.
+void UART_TxIrq(bool on)
+{
+	if (on)
+		NVIC_EnableIRQ((IRQn_Type)DP32_UART1_IRQn);
+	else
+		NVIC_DisableIRQ((IRQn_Type)DP32_UART1_IRQn);
+}
+
+void UART1Handler(void);
+
+void UART1Handler(void)
+{
+	OUTQ_Isr();
+	// write-1-to-clear, as UART_Init clears RXTO; if the flag is a level
+	// it sets again while the FIFO stays low, and the queue gate copes
+	UART1->IF = UART_IF_TXFIFO_BITS_SET;
+}
+
 bool UART_TxEmpty(void)
 {
 	const uint32_t f = UART1->IF;

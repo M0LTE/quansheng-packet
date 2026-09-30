@@ -67,24 +67,14 @@ void RADIO_ConfigureChannel(void)
 void RADIO_ConfigureSquelchAndOutputPower(VFO_Info_t *pInfo)
 {
 	// *******************************
-	// squelch, from the calibration tables
+	// the chip's squelch thresholds, from the calibration tables: only a
+	// carrier detector (the busy events); they never mute the audio
 
 	FREQUENCY_Band_t Band = FREQUENCY_GetBand(pInfo->Frequency);
 	uint16_t Base = (Band < BAND4_174MHz) ? 0x1E60 : 0x1E00;
 
-	if (gEeprom.SQUELCH_LEVEL == 0)
-	{	// squelch == 0 (off)
-		pInfo->SquelchOpenRSSIThresh    = 0;     // 0 ~ 255
-		pInfo->SquelchOpenNoiseThresh   = 127;   // 127 ~ 0
-		pInfo->SquelchCloseGlitchThresh = 255;   // 255 ~ 0
-
-		pInfo->SquelchCloseRSSIThresh   = 0;     // 0 ~ 255
-		pInfo->SquelchCloseNoiseThresh  = 127;   // 127 ~ 0
-		pInfo->SquelchOpenGlitchThresh  = 255;   // 255 ~ 0
-	}
-	else
-	{	// squelch >= 1
-		Base += gEeprom.SQUELCH_LEVEL;                                        // my eeprom squelch-1
+	{	// the busy detector level, 1 to 9, indexes the factory squelch tables
+		Base += gEeprom.BUSY_LEVEL;                                           // my eeprom squelch-1
 																			  // VHF   UHF
 		EEPROM_ReadBuffer(Base + 0x00, &pInfo->SquelchOpenRSSIThresh,    1);  //  50    10
 		EEPROM_ReadBuffer(Base + 0x10, &pInfo->SquelchCloseRSSIThresh,   1);  //  40     5
@@ -125,7 +115,8 @@ void RADIO_ConfigureSquelchAndOutputPower(VFO_Info_t *pInfo)
 		pInfo->SquelchCloseNoiseThresh  = (noise_close  > 127) ? 127 : noise_close;
 	}
 
-	// SQL_RAW (protocol v2) replaces the table values until SQUELCH is set
+	// BUSY_SQL_RAW (protocol v2) replaces the table values until
+	// BUSY_SQL_LEVEL is set
 	if (gSqlRawActive) {
 		pInfo->SquelchOpenRSSIThresh    = gSqlRaw[0];
 		pInfo->SquelchCloseRSSIThresh   = gSqlRaw[1];
@@ -152,7 +143,7 @@ void RADIO_ConfigureSquelchAndOutputPower(VFO_Info_t *pInfo)
 }
 
 // RX audio gains (REG_48) from the settings. Written on every return to
-// receive and on every squelch open.
+// receive.
 void RADIO_SetRxAudio(void)
 {
 	BK4819_WriteRegister(BK4819_REG_48,
@@ -182,8 +173,8 @@ void RADIO_ApplyRegOverrides(uint8_t phase)
 	ApplyTable(gRegOverridesRam, gRegOverrideRamCount, phase);
 }
 
-// Set the chip up to receive on gVfo. Called at power-on, after every
-// transmission, at every squelch close and after any setting change.
+// Set the chip up to receive on gVfo, audio open. Called at power-on, after
+// every transmission and after any setting change.
 void RADIO_SetupRegisters(bool switchToForeground)
 {
 	// The audio path (speaker amplifier) stays on in this firmware, as in
@@ -237,8 +228,12 @@ void RADIO_SetupRegisters(bool switchToForeground)
 	if (gAgcFix <= 7)   // AGC_FIX diagnostic (protocol v2)
 		BK4819_WriteRegister(BK4819_REG_7E, (BK4819_ReadRegister(BK4819_REG_7E) & ~0xF000u) | PKT_REG_7E_AGC_FIX | ((uint16_t)gAgcFix << 12));
 
-	// enable/disable BK4819 selected interrupts
-	BK4819_WriteRegister(BK4819_REG_3F, BK4819_REG_3F_SQUELCH_FOUND | BK4819_REG_3F_SQUELCH_LOST);
+	// No chip interrupts (REG_3F stays 0): the squelch result is polled as a
+	// detector and never gates anything. Receive audio is always open: the
+	// flat FM demodulator output to the AF output.
+	BK4819_SetAF(BK4819_AF_FM);
+	BK4819_SetRegValue(afcDisableRegSpec, !gAfcOn);   // AFC on unless the diagnostic says off
+	BK4819_WriteRegister(BK4819_REG_3D, PKT_REG_3D_RX);
 
 	RADIO_ApplyRegOverrides(REG_OVERRIDE_RX);
 
@@ -247,7 +242,7 @@ void RADIO_SetupRegisters(bool switchToForeground)
 	if (switchToForeground)
 		FUNCTION_Select(FUNCTION_FOREGROUND);
 
-	MON_AfterRxSetup();   // a running level tone survives the set-up
+	MON_AfterRxSetup();   // the speaker amplifier on; a running level tone survives
 }
 
 void RADIO_SetTxParameters(void)

@@ -49,17 +49,15 @@ void V2_Init(void)
 	EVT_Store(EV_PARAMS_CHANGED, g_ms, p, 5);
 }
 
+// 0 receiving, nothing detected; 1 receiving, busy; 2 transmitting;
+// 4 reduced service. (3, monitor, is gone with the squelch.)
 uint8_t V2_State(void)
 {
 	if (gReducedService)
 		return 4;
-	switch (gCurrentFunction) {
-		case FUNCTION_TRANSMIT: return 2;
-		case FUNCTION_MONITOR:  return 3;
-		case FUNCTION_INCOMING:
-		case FUNCTION_RECEIVE:  return 1;
-		default:                return 0;
-	}
+	if (gCurrentFunction == FUNCTION_TRANSMIT)
+		return 2;
+	return MON_Busy() ? 1 : 0;
 }
 
 uint8_t V2_Flags1(void)
@@ -67,7 +65,7 @@ uint8_t V2_Flags1(void)
 	PttState_t ptt;
 	PTT_GetState(&ptt);
 	const uint8_t arb = APP_PttArbState();
-	return (g_SquelchLost                          ? 0x01u : 0)
+	return (MON_DetectorOpen()                     ? 0x01u : 0)
 	     | (MON_Busy()                             ? 0x02u : 0)
 	     | (ptt.pressed                            ? 0x04u : 0)
 	     | (gSerialLockMs                          ? 0x08u : 0)
@@ -128,7 +126,7 @@ static uint16_t GetStatus(uint8_t *o)
 	      | (PARAMS_PersistPending()        ? 0x10u : 0);   // bit 5: no memory channels
 	o[11] = gVfo->OUTPUT_POWER;
 	o[12] = gVfo->CHANNEL_BANDWIDTH;
-	o[13] = gEeprom.SQUELCH_LEVEL;
+	o[13] = gEeprom.BUSY_LEVEL;                    // the busy detector level (no squelch)
 	put16(o + 14, narrow ? gEeprom.DEVIATION_NARROW : gEeprom.DEVIATION_WIDE);
 	put16(o + 16, chip ? (BK4819_ReadRegister(BK4819_REG_67) & 0x01FF) : 0);
 	o[18] = chip ? (BK4819_ReadRegister(BK4819_REG_65) & 0x007F) : 0;
@@ -182,6 +180,10 @@ static uint8_t GetParams(const uint8_t *r, uint16_t n, uint8_t *o, uint16_t *len
 
 	for (uint16_t i = 1; i < n; i++) {
 		const uint8_t id = r[i];
+		if (id == P_RETIRED_SQUELCH) {
+			*detail = id;
+			return V2_UNSUPPORTED;                // there is no squelch
+		}
 		if (!PARAMS_Size(id) || ((ids >> id) & 1u)) {
 			*detail = id;
 			return V2_BAD_PARAM;
@@ -193,7 +195,7 @@ static uint8_t GetParams(const uint8_t *r, uint16_t n, uint8_t *o, uint16_t *len
 	uint16_t l = 1;
 	for (uint16_t i = 0; i < ((n > 1) ? n - 1 : P_LAST); i++) {
 		const uint8_t id = (n > 1) ? r[1 + i] : i + 1;
-		if (stored && ((PARAMS_RAM_ONLY >> id) & 1u))
+		if (!((PARAMS_SUPPORTED >> id) & 1u) || (stored && ((PARAMS_RAM_ONLY >> id) & 1u)))
 			continue;
 		o[l++] = id;
 		l += PARAMS_Get(id, stored, o + l);

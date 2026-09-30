@@ -36,7 +36,6 @@ static bool MENU_GetLimits(uint8_t menu_id, int32_t *pMin, int32_t *pMax)
 	*pMin = 0;
 	switch (menu_id)
 	{
-		case MENU_SQL:    *pMax = 9;                                   break;
 		case MENU_STEP:   *pMax = STEP_N_ELEM - 1;                     break;
 		case MENU_TXP:    *pMax = OUTPUT_POWER_HIGH;                   break;
 		case MENU_W_N:    *pMax = BANDWIDTH_NARROW;                    break;
@@ -86,7 +85,6 @@ void MENU_AcceptSetting(void)
 			return;
 
 		// radio wide
-		case MENU_SQL:    gEeprom.SQUELCH_LEVEL    = gSubMenuSelection; break;
 		case MENU_MIC:    gEeprom.MIC_GAIN         = gSubMenuSelection; break;
 		case MENU_DEVW:   gEeprom.DEVIATION_WIDE   = gSubMenuSelection; break;
 		case MENU_DEVN:   gEeprom.DEVIATION_NARROW = gSubMenuSelection; break;
@@ -103,14 +101,13 @@ void MENU_AcceptSetting(void)
 	}
 
 	gRequestSaveSettings = true;
-	gVfoConfigureMode    = VFO_CONFIGURE;   // squelch, gains: set the chip up again
+	gVfoConfigureMode    = VFO_CONFIGURE;   // gains: set the chip up again
 }
 
 void MENU_ShowCurrentSetting(void)
 {
 	switch (gMenuCursor)
 	{
-		case MENU_SQL:    gSubMenuSelection = gEeprom.SQUELCH_LEVEL;    break;
 		case MENU_STEP:   gSubMenuSelection = FREQUENCY_GetSortedIdxFromStepIdx(gVfo->STEP_SETTING); break;
 		case MENU_TXP:    gSubMenuSelection = gVfo->OUTPUT_POWER;       break;
 		case MENU_W_N:    gSubMenuSelection = gVfo->CHANNEL_BANDWIDTH;  break;
