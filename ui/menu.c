@@ -93,11 +93,10 @@ void UI_DisplayMenu(void)
 			break;
 		}
 
-		case MENU_TXP: {
-			static const char txp[][5] = {"LOW", "MID", "HIGH"};
-			strcpy(String, txp[gSubMenuSelection % 3]);
+		case MENU_TXP:
+			strcpy(String, gPowerNames[gSubMenuSelection % 3]);
+			strcpy(Hint, "nominal");
 			break;
-		}
 
 		case MENU_W_N:
 			strcpy(String, gSubMenuSelection ? "NARROW" : "WIDE");

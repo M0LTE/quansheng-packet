@@ -18,8 +18,8 @@
 //
 //   lines 0-1  TX, or RX while a carrier is detected, and the frequency
 //   line  3    RSSI in dBm and S-units while receiving
-//   lines 4-6  the packet settings in use: power, bandwidth, TX timeout,
-//              mic gain, deviation, receive gains
+//   lines 4-6  the packet settings in use: power (nominal watts),
+//              bandwidth, TX timeout, mic gain, deviation, receive gains
 
 #include <string.h>
 
@@ -205,12 +205,12 @@ void UI_DisplayMain(void)
 	if (FUNCTION_IsRx())
 		DisplayRSSIBar(false);
 
-	// the packet settings in use
-	static const char pwr[][5] = {"LOW", "MID", "HIGH"};
+	// the packet settings in use; at most "~0.5W NARR TOT120", 17
+	// characters, which ends at column 120
 	const bool narrow = vfo->CHANNEL_BANDWIDTH == BANDWIDTH_NARROW;
 	sprintf(String, "%s %s TOT%u",
-		pwr[vfo->OUTPUT_POWER % 3],
-		narrow ? "N" : "W",
+		gPowerNames[vfo->OUTPUT_POWER % 3],
+		narrow ? "NARR" : "WIDE",
 		gTxTimeoutSeconds[gEeprom.TX_TIMEOUT]);
 	UI_PrintStringSmallNormal(String, 2, 0, 4);
 
