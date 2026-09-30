@@ -33,6 +33,7 @@ Flash for the firmware is 61440 bytes (60 KiB). All sizes are gcc 10.3.1 (Docker
 | Bench defaults: deviation 0x956/0x856, PA delays 1/2 ms | 23520 | 37920 |
 | Deviation defaults 0x856/0x756 (TNC at 0 dBFS) | 23520 | 37920 |
 | Serial control protocol v2 (`docs/protocol-v2.md`) | 36188 | 25252 |
+| Memory channels and band slots removed: one operating channel | 35136 | 26304 |
 
 ## What was removed
 
@@ -43,9 +44,9 @@ CTCSS/DCS went because packet uses carrier squelch and dropping it removes the t
 ## What remains
 
 - One VFO, simplex (TX frequency = RX frequency), carrier squelch.
-- Frequency entry on the keypad, up/down stepping, 200 memory channels and 7 band slots in the upstream EEPROM layout (CHIRP-compatible). Only frequency, power, bandwidth and step are read and saved; the other channel fields are left untouched.
+- One operating frequency, with its power, bandwidth and step, stored in this firmware's own settings (0x1D58); frequency entry on the keypad and up/down stepping. No memory channels, no band slots, no CHIRP compatibility (see "Operating channel" under Settings).
 - Power (low, mid, high from the factory calibration), bandwidth (wide, narrow), squelch (0 to 9 from the factory tables), TX timeout, battery monitoring (TX refused below about 6.3 V and above about 8.9 V, as upstream), backlight, key lock.
-- Display: frequency, memory or band slot, TX/RX, RSSI in dBm and S-units, and the settings in use.
+- Display: frequency, TX/RX, RSSI in dBm and S-units, and the settings in use.
 - UART: the upstream EEPROM protocol and the BK4819 register commands, plus the serial control protocol v2 (`docs/protocol-v2.md`): identification, status, events (busy, bursts, TX timing, heartbeats), parameters, register access and overrides, a level tone.
 
 ## The audio path
@@ -102,11 +103,25 @@ For experiments without reflashing (TX filters and so on), 8 entries of 8 bytes 
 
 The register becomes `(value & mask) | or`, written after all of the firmware's own writes for that phase, so it wins. Refused (skipped): 0x00 soft reset, 0x30 TX/RX enables, 0x33 GPIO outputs (PA enable, RX enable, LNA switch, LEDs), 0x36 PA bias and gain, 0x37 power and LDOs, 0x38 and 0x39 frequency, 0x3B and 0x3C crystal trim, and anything above 0x7F. A REG_40 result is clamped to 0xA7F. The table is read at power-on and after a UART write session, like the settings; each entry is one 8-byte UART write. Example: `01 2B F8 FF 00 00 FF FF` clears REG_2B<2:0> on every key-up, which turns the TX HPF300, LPF and pre-emphasis back on.
 
-Other EEPROM the firmware reads: channel indices at `0x0E80` (and writes them), S-meter levels at `0x0EA0`, TX band limits at `0x0F40` (no menu), channel attributes at `0x0D60`. Calibration (`0x1E00` up) is read only.
+### Operating channel
+
+There are no memory channels or band slots, and the upstream channel layout (CHIRP's) is not used. The one frequency the radio works on, with its power, bandwidth and step, is an 8-byte block at `0x1D58`, used only with a valid settings block and blanked with the others by the first menu save over foreign data. The keypad, the menu (Step, TxPwr, W/N) and the v2 protocol store it; a keypad or menu save over foreign data at `0x1D00` writes the settings block first, so the frequency sticks.
+
+| Address | Setting | Range | Default |
+|---|---|---|---|
+| 0x1D58 | frequency, u32 LE, 10 Hz units | receivable (inside the band table; 350 to 400 MHz only if enabled) | 144.800 MHz |
+| 0x1D5C | power | 0 low, 1 mid, 2 high | 0 |
+| 0x1D5D | bandwidth | 0 wide, 1 narrow | 0 |
+| 0x1D5E | step, index into the step table | 0 to 23 | 12.5 kHz |
+| 0x1D5F | reserved, 0xFF | | |
+
+If the frequency there is not receivable (a blank block, or a radio coming from another firmware or from the channel-memory builds of this one), the frequency the old upstream layout had in use (channel indices at `0x0E80` and the memory channel or band slot record they point at) is taken once if it is receivable, else 144.800 MHz. With a valid settings block it is then written to `0x1D58` at once and the old layout is never read again; without one nothing is written until the first save.
+
+Other EEPROM the firmware reads: S-meter levels at `0x0EA0`, TX band limits at `0x0F40` (no menu). Calibration (`0x1E00` up) is read only.
 
 The same settings are in the menu (MENU, then UP/DOWN, MENU to edit and again to store, EXIT to cancel): Sql, Step, TxPwr, W/N, MicG, DevW, DevN, RxG, RxDAC, TxTOut, BackLt, BatTyp, plus the battery voltage and the version.
 
-Keys on the main screen: digits enter a frequency (or a channel number in memory mode), UP/DOWN step, F then 3 switches frequency and memory mode, F then 6 cycles power, F held locks the keypad, SIDE1 toggles monitor (squelch open).
+Keys on the main screen: digits enter a frequency, UP/DOWN step, F then 6 cycles power, F held locks the keypad, SIDE1 toggles monitor (squelch open).
 
 ## Key-up and key-down
 
@@ -172,13 +187,12 @@ Timing settings, 8 bytes at `0x1D50` (one UART write; not in the menu; used only
 - **TX timeout** returns to receive at once, and the next transmission needs PTT released first. It has 0.5 s resolution.
 - **Nothing is saved during a transmission.** Saves postponed while UP/DOWN was held, menu changes and the receiver set-up that follows them wait until TX ends; EXIT held does not turn the monitor off mid-transmission.
 - **Settings reload after UART writes** closes an open menu item, so MENU cannot store the value it showed before the reload.
-- **Blank channel records**: the first save to a never-written band slot or channel writes zeros (no offset, no tones, FM, no scrambler) rather than leaving 0xFF in the fields this firmware does not use.
 
 ## Other differences from upstream DIG that a measurement could see
 
 - REG_24 (DTMF detector) is cleared at power-on, not only at the first key-up; the DTMF coefficient writes (REG_09) are gone.
 - REG_48 uses the RX DAC gain setting (default 15) at all times; upstream used the calibration value (usually 8) while the squelch was closed, when the audio is muted anyway.
-- A blank 2 m band slot starts at 144.800 MHz (upstream: 137.000 MHz); a blank 70 cm slot at 433.500 MHz. The default slot is 2 m.
+- A blank EEPROM starts on 144.800 MHz (upstream: the bottom of the 2 m band slot, 137.000 MHz).
 - The first-power-on defaults differ from upstream: no dual watch, and a 30 s TX timeout instead of 1 minute.
 
 ## Left for measurement to decide

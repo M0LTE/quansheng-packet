@@ -31,8 +31,8 @@
 #include "settings.h"
 
 #define BIT(id)            (1u << (id))
-#define PARAMS_IN_CHANNEL  (BIT(P_FREQ_HZ) | BIT(P_POWER) | BIT(P_BANDWIDTH))
-#define PARAMS_RETUNE      (PARAMS_IN_CHANNEL | BIT(P_SQUELCH) | BIT(P_SQL_RAW) | BIT(P_AGC_FIX))
+#define PARAMS_OPERATING   (BIT(P_FREQ_HZ) | BIT(P_POWER) | BIT(P_BANDWIDTH))
+#define PARAMS_RETUNE      (PARAMS_OPERATING | BIT(P_SQUELCH) | BIT(P_SQL_RAW) | BIT(P_AGC_FIX))
 #define PARAMS_BLOCK_A     (BIT(P_SQUELCH) | BIT(P_TX_TIMEOUT_S) | BIT(P_MIC_GAIN) | BIT(P_DEV_WIDE) | BIT(P_DEV_NARROW))
 #define PARAMS_BLOCK_B     (BIT(P_RX_GAIN) | BIT(P_RX_DAC_GAIN) | BIT(P_BACKLIGHT) | BIT(P_KEY_LOCK))
 #define PARAMS_TIMING      (BIT(P_PTT_PRESS_MS) | BIT(P_PTT_RELEASE_MS) | BIT(P_PA_ENABLE_DELAY_MS) | BIT(P_PA_BIAS_DELAY_MS))
@@ -44,7 +44,7 @@ static const uint8_t kSize[P_LAST + 1] = {
 
 // EEPROM blocks waiting to be written, in this order (V2_B before V2_A,
 // so a fresh v2 block is blanked before its version byte makes it count)
-enum { J_SET_A, J_SET_B, J_TIMING, J_V2_B, J_V2_A, J_CH_HEAD, J_CH_TAIL, J_VFO_IDX, J_OVR0 };
+enum { J_SET_A, J_SET_B, J_TIMING, J_OPERATING, J_V2_B, J_V2_A, J_OVR0 };
 
 static struct {
 	EEPROM_Config_t e;
@@ -57,7 +57,7 @@ static uint32_t gLast[P_LAST + 1];    // values at the last PARAMS_Changed
 static uint32_t gJobs;
 static uint32_t gPMask;               // parameters with a value in gPVal
 static uint32_t gPVal[P_LAST + 1];
-static uint8_t  gPChannel, gPStep, gPScreen, gPMr, gPFreqCh;
+static uint8_t  gPStep;
 static bool     gPSub;
 static uint32_t gPSubMask;
 static uint16_t gPSubHeartbeat;
@@ -153,22 +153,11 @@ void PARAMS_RefreshStored(void)
 	EEPROM_ReadBuffer(SETTINGS_V2_BLOCK, d, 16);
 	SETTINGS_DecodeV2(d, valid, &gStored.v);
 
-	// the channel as a power-on would load it, through the same code
-	const VFO_Info_t live = *gVfo;
-	const uint8_t    s = gEeprom.ScreenChannel, m = gEeprom.MrChannel, fc = gEeprom.FreqChannel;
-	EEPROM_ReadBuffer(0x0E80, d, 8);
-	gEeprom.ScreenChannel = IS_VALID_CHANNEL(d[0]) ? d[0] : (FREQ_CHANNEL_FIRST + BAND3_137MHz);
-	gEeprom.MrChannel     = IS_MR_CHANNEL(d[1])    ? d[1] : MR_CHANNEL_FIRST;
-	gEeprom.FreqChannel   = IS_FREQ_CHANNEL(d[2])  ? d[2] : (FREQ_CHANNEL_FIRST + BAND3_137MHz);
-	const bool sql = gSqlRawActive;
-	gSqlRawActive = false;
-	RADIO_ConfigureChannel();
-	gSqlRawActive = sql;
-	gStored.vfo = *gVfo;
-	*gVfo = live;
-	gEeprom.ScreenChannel = s;
-	gEeprom.MrChannel     = m;
-	gEeprom.FreqChannel   = fc;
+	// the operating channel as a power-on would load it
+	EEPROM_ReadBuffer(SETTINGS_OPERATING, d, 8);
+	memset(&gStored.vfo, 0, sizeof(gStored.vfo));
+	if (!valid || !SETTINGS_DecodeOperating(d, &gStored.vfo))
+		SETTINGS_ImportOldFrequency(&gStored.vfo);
 }
 
 static void Snapshot(uint32_t *v)
@@ -214,14 +203,6 @@ bool PARAMS_PersistPending(void)
 
 // ------------------------------------------------------ validation --
 
-static bool Receivable(uint32_t f10)
-{
-	const FREQUENCY_Band_t b = FREQUENCY_GetBand(f10);
-	if (f10 < frequencyBandTable[b].lower || f10 > frequencyBandTable[b].upper)
-		return false;
-	return gSetting_350EN || b != BAND5_350MHz;
-}
-
 static int8_t TimeoutIndex(uint32_t s)
 {
 	for (uint8_t i = 0; i < ARRAY_SIZE(gTxTimeoutSeconds); i++)
@@ -233,7 +214,7 @@ static int8_t TimeoutIndex(uint32_t s)
 static bool InRange(uint8_t id, uint32_t u, const uint8_t *raw)
 {
 	switch (id) {
-		case P_FREQ_HZ:            return u >= 50000000u && u <= 600000000u && (u % 10u) == 0 && Receivable(u / 10u);
+		case P_FREQ_HZ:            return u >= 50000000u && u <= 600000000u && (u % 10u) == 0 && FREQUENCY_IsReceivable(u / 10u);
 		case P_POWER:              return u <= OUTPUT_POWER_HIGH;
 		case P_BANDWIDTH:          return u <= BANDWIDTH_NARROW;
 		case P_DEV_WIDE:
@@ -275,17 +256,10 @@ static uint8_t Lowest(uint32_t mask)
 
 static void SetFrequency(uint32_t f10)
 {
-	// the band slot for the frequency, as a keypad entry in frequency mode
-	const FREQUENCY_Band_t band = FREQUENCY_GetBand(f10);
-	const uint8_t          ch   = FREQ_CHANNEL_FIRST + band;
+	gVfo->Frequency = f10;
+	gVfo->Band      = FREQUENCY_GetBand(f10);
 
-	gEeprom.ScreenChannel = ch;
-	gEeprom.FreqChannel   = ch;
-	gVfo->CHANNEL_SAVE    = ch;
-	gVfo->Band            = band;
-	gVfo->Frequency       = f10;
-
-	// a step that holds the frequency, so a reload does not round it
+	// a step that holds the frequency, so a keypad step starts from it
 	if (FREQUENCY_RoundToStep(f10, gVfo->StepFrequency) != f10) {
 		for (int i = STEP_N_ELEM - 1; i >= 0; i--) {
 			const STEP_Setting_t s = FREQUENCY_GetStepIdxFromSortedIdx(i);
@@ -357,23 +331,16 @@ static void Apply(uint32_t set, const uint32_t *val, const uint8_t *raw, uint32_
 // they were applied, so live is what was asked for).
 static void QueuePersist(uint32_t mask)
 {
-	if (mask & BIT(P_FREQ_HZ)) {
-		// as the keypad does: frequency, power, bandwidth and step together
-		mask |= BIT(P_POWER) | BIT(P_BANDWIDTH);
-		gJobs |= BIT(J_CH_HEAD) | BIT(J_VFO_IDX);
-		gPScreen = gEeprom.ScreenChannel;
-		gPMr     = gEeprom.MrChannel;
-		gPFreqCh = gEeprom.FreqChannel;
-	}
+	if (mask & BIT(P_FREQ_HZ))
+		mask |= BIT(P_POWER) | BIT(P_BANDWIDTH);   // stored together, with the step
 	for (uint8_t id = 1; id <= P_LAST; id++)
 		if (mask & BIT(id))
 			gPVal[id] = Live(id);
 	gPMask |= mask;
 
-	if (mask & PARAMS_IN_CHANNEL) {
-		gPChannel = gVfo->CHANNEL_SAVE;
-		gPStep    = gVfo->STEP_SETTING;
-		gJobs    |= BIT(J_CH_TAIL);
+	if (mask & PARAMS_OPERATING) {
+		gPStep = gVfo->STEP_SETTING;
+		gJobs |= BIT(J_OPERATING);
 	}
 	if (mask & PARAMS_BLOCK_A) gJobs |= BIT(J_SET_A);
 	if (mask & PARAMS_BLOCK_B) gJobs |= BIT(J_SET_B);
@@ -450,43 +417,8 @@ void PARAMS_PersistService(bool allowed)
 			put16(b + 4, o->orValue);
 		}
 	}
-	else if (j == J_CH_HEAD || j == J_CH_TAIL) {
-		// the channel record, as SETTINGS_SaveChannel writes it
-		uint16_t rec = gPChannel * 16u;
-		if (IS_FREQ_CHANNEL(gPChannel))
-			rec = 0x0C80 + (gPChannel - FREQ_CHANNEL_FIRST) * 32u;
-		uint8_t tail[8];
-		EEPROM_ReadBuffer(rec + 8, tail, 8);
-		const bool blank = tail[4] == 0xFF;
-		if (j == J_CH_HEAD) {
-			addr = rec;
-			EEPROM_ReadBuffer(addr, b, 8);
-			if (blank)
-				memset(b, 0, sizeof(b));
-			if (Has(P_FREQ_HZ))
-				put32(b, gPVal[P_FREQ_HZ] / 10u);
-		}
-		else {
-			addr = rec + 8;
-			memcpy(b, tail, 8);
-			if (blank)
-				memset(b, 0, sizeof(b));
-			if (Has(P_POWER))
-				b[4] = (b[4] & ~(3u << 2)) | ((gPVal[P_POWER] & 3u) << 2);
-			if (Has(P_BANDWIDTH))
-				b[4] = (b[4] & ~(1u << 1)) | ((gPVal[P_BANDWIDTH] & 1u) << 1);
-			b[6] = gPStep;
-		}
-	}
-	else if (j == J_VFO_IDX) {
-		addr = 0x0E80;
-		EEPROM_ReadBuffer(addr, b, 8);
-		b[0] = gPScreen;
-		b[1] = gPMr;
-		b[2] = gPFreqCh;
-	}
 	else {
-		static const uint16_t kAddr[] = { 0x1D00, 0x1D08, SETTINGS_TIMING, SETTINGS_V2_BLOCK + 8, SETTINGS_V2_BLOCK };
+		static const uint16_t kAddr[] = { 0x1D00, 0x1D08, SETTINGS_TIMING, SETTINGS_OPERATING, SETTINGS_V2_BLOCK + 8, SETTINGS_V2_BLOCK };
 		addr = kAddr[j];
 		if (!blockValid)
 			goto done;               // the settings block went away meanwhile
@@ -505,6 +437,15 @@ void PARAMS_PersistService(bool allowed)
 				Patch8(b + 1, P_RX_DAC_GAIN);
 				Patch8(b + 2, P_BACKLIGHT);
 				Patch8(b + 4, P_KEY_LOCK);
+				break;
+			case J_OPERATING:
+				if (!Has(P_FREQ_HZ) && !FREQUENCY_IsReceivable(get32(b)))
+					put32(b, gVfo->Frequency);   // never leave the block unusable
+				if (Has(P_FREQ_HZ))
+					put32(b, gPVal[P_FREQ_HZ] / 10u);
+				Patch8(b + 4, P_POWER);
+				Patch8(b + 5, P_BANDWIDTH);
+				b[6] = gPStep;
 				break;
 			case J_TIMING:
 				Patch8(b + 0, P_PTT_PRESS_MS);
@@ -596,8 +537,8 @@ uint8_t PARAMS_Set(uint8_t flags, const uint8_t *rec, uint16_t n, uint8_t *detai
 			*detail = Lowest(set & PARAMS_RAM_ONLY);
 			return V2_NOT_PERSISTABLE;
 		}
-		if ((set & ~PARAMS_IN_CHANNEL) && !gSettingsBlockValid) {
-			*detail = Lowest(set & ~PARAMS_IN_CHANNEL);
+		if (!gSettingsBlockValid) {
+			*detail = Lowest(set);
 			return V2_EEPROM;
 		}
 	}

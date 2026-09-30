@@ -68,21 +68,21 @@ void MENU_AcceptSetting(void)
 
 	switch (gMenuCursor)
 	{
-		// per channel or band slot
+		// the operating channel (settings.h, 0x1D58)
 		case MENU_STEP:
-			gVfo->STEP_SETTING  = FREQUENCY_GetStepIdxFromSortedIdx(gSubMenuSelection);
-			gVfo->StepFrequency = gStepFrequencyTable[gVfo->STEP_SETTING];
-			gRequestSaveChannel = true;
+			gVfo->STEP_SETTING    = FREQUENCY_GetStepIdxFromSortedIdx(gSubMenuSelection);
+			gVfo->StepFrequency   = gStepFrequencyTable[gVfo->STEP_SETTING];
+			gRequestSaveOperating = true;
 			return;
 
 		case MENU_TXP:
-			gVfo->OUTPUT_POWER  = gSubMenuSelection;
-			gRequestSaveChannel = true;
+			gVfo->OUTPUT_POWER    = gSubMenuSelection;
+			gRequestSaveOperating = true;
 			return;
 
 		case MENU_W_N:
 			gVfo->CHANNEL_BANDWIDTH = gSubMenuSelection;
-			gRequestSaveChannel     = true;
+			gRequestSaveOperating   = true;
 			return;
 
 		// radio wide

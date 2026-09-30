@@ -33,8 +33,6 @@ uint8_t           gSetting_F_LOCK;
 
 bool              gMonitor = false;           // true opens the squelch
 
-ChannelAttributes_t gMR_ChannelAttributes[FREQ_CHANNEL_LAST + 1];
-
 volatile uint32_t g_ms;
 volatile uint16_t gSerialLockMs;
 volatile uint16_t gReloadQuietMs;
@@ -56,8 +54,7 @@ bool              gPttWasReleased;
 uint8_t           gKeypadLocked;
 bool              gFlagReconfigureVfos;
 uint8_t           gVfoConfigureMode;
-bool              gRequestSaveVFO;
-bool              gRequestSaveChannel;
+bool              gRequestSaveOperating;
 bool              gRequestSaveSettings;
 bool              gFlagPrepareTX;
 

@@ -23,11 +23,6 @@
 #include "frequencies.h"
 
 enum {
-	RADIO_CHANNEL_UP   = 0x01u,
-	RADIO_CHANNEL_DOWN = 0xFFu,
-};
-
-enum {
 	BANDWIDTH_WIDE = 0,
 	BANDWIDTH_NARROW
 };
@@ -43,17 +38,16 @@ enum VfoState_t
 };
 typedef enum VfoState_t VfoState_t;
 
-// Packet firmware: one VFO, simplex only (TX frequency = RX frequency), no
-// CTCSS/DCS, no modulation choice. Channel memories keep the upstream EEPROM
-// layout; the offset, tone, modulation and scrambler fields in them are
-// ignored and left as they are.
+// Packet firmware: one operating frequency, simplex only (TX frequency = RX
+// frequency), no CTCSS/DCS, no modulation choice, no memory channels.
+// Frequency, power, bandwidth and step are stored in the settings
+// (settings.h, 0x1D58).
 typedef struct VFO_Info_t
 {
 	uint32_t       Frequency;
 	uint16_t       StepFrequency;
 	STEP_Setting_t STEP_SETTING;
 
-	uint8_t        CHANNEL_SAVE;   // memory channel (0-199) or band slot (200-206)
 	uint8_t        Band;
 
 	uint8_t        SquelchOpenRSSIThresh;
@@ -77,8 +71,8 @@ extern uint8_t        gAgcFix;
 extern bool           gAfcOn;
 extern uint32_t       gTxCarrierOffMs;
 
-bool     RADIO_CheckValidChannel(uint16_t channel);
-uint8_t  RADIO_FindNextChannel(uint8_t ChNum, int8_t Direction);
+#define  RADIO_DEFAULT_FREQUENCY  14480000u   // 144.800 MHz, 10 Hz units
+
 void     RADIO_ConfigureChannel(void);
 void     RADIO_ConfigureSquelchAndOutputPower(VFO_Info_t *pInfo);
 void     RADIO_SetupRegisters(bool switchToForeground);

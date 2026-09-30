@@ -155,12 +155,6 @@ void SETTINGS_InitEEPROM(void)
 	EEPROM_ReadBuffer(SETTINGS_V2_BLOCK, Data, 16);
 	SETTINGS_DecodeV2(Data, blockValid, &gV2);
 
-	// 0E80..0E87: channel indices (upstream layout, VFO A)
-	EEPROM_ReadBuffer(0x0E80, Data, 8);
-	gEeprom.ScreenChannel = IS_VALID_CHANNEL(Data[0]) ? Data[0] : (FREQ_CHANNEL_FIRST + BAND3_137MHz);
-	gEeprom.MrChannel     = IS_MR_CHANNEL(Data[1])    ? Data[1] : MR_CHANNEL_FIRST;
-	gEeprom.FreqChannel   = IS_FREQ_CHANNEL(Data[2])  ? Data[2] : (FREQ_CHANNEL_FIRST + BAND3_137MHz);
-
 	// 0EA0..0EA7: S-meter levels
 	EEPROM_ReadBuffer(0x0EA0, Data, 8);
 	if((Data[1] < 200 && Data[1] > 90) && (Data[2] < Data[1]-9 && Data[1] < 160  && Data[2] > 50)) {
@@ -180,15 +174,61 @@ void SETTINGS_InitEEPROM(void)
 	gSetting_500TX             = (Data[4] < 2) ? Data[4] : false;
 	gSetting_350EN             = (Data[5] < 2) ? Data[5] : true;
 
-	// 0D60..0E27: memory channel attributes
-	EEPROM_ReadBuffer(0x0D60, gMR_ChannelAttributes, sizeof(gMR_ChannelAttributes));
-	for(uint16_t i = 0; i < sizeof(gMR_ChannelAttributes); i++) {
-		ChannelAttributes_t *att = &gMR_ChannelAttributes[i];
-		if(att->__val == 0xff){
-			att->__val = 0;
-			att->band = 0xf;
-		}
+	// 1D58..1D5F: the operating channel (after the 350 MHz setting, which
+	// decides what is receivable)
+	memset(&gEeprom.Vfo, 0, sizeof(gEeprom.Vfo));
+	EEPROM_ReadBuffer(SETTINGS_OPERATING, Data, 8);
+	if (!blockValid || !SETTINGS_DecodeOperating(Data, &gEeprom.Vfo)) {
+		SETTINGS_ImportOldFrequency(&gEeprom.Vfo);
+		if (blockValid)
+			SETTINGS_SaveOperating();   // once: the old layout is not read again
 	}
+}
+
+bool SETTINGS_DecodeOperating(const uint8_t b[8], VFO_Info_t *v)
+{
+	const uint32_t f = b[0] | (b[1] << 8) | ((uint32_t)b[2] << 16) | ((uint32_t)b[3] << 24);
+	if (!FREQUENCY_IsReceivable(f))
+		return false;
+	v->Frequency         = f;
+	v->OUTPUT_POWER      = ByteOr(b[4], OUTPUT_POWER_HIGH, OUTPUT_POWER_LOW);
+	v->CHANNEL_BANDWIDTH = ByteOr(b[5], BANDWIDTH_NARROW, BANDWIDTH_WIDE);
+	v->STEP_SETTING      = ByteOr(b[6], STEP_N_ELEM - 1, STEP_12_5kHz);
+	return true;
+}
+
+// The frequency the radio used in the upstream layout (the channel indices
+// at 0x0E80 and the memory channel or band slot record they point at), if
+// it is receivable; else 144.800 MHz. Nothing is written.
+void SETTINGS_ImportOldFrequency(VFO_Info_t *v)
+{
+	uint8_t  d[8];
+	uint32_t f;
+	uint16_t base;
+
+	v->Frequency         = RADIO_DEFAULT_FREQUENCY;
+	v->OUTPUT_POWER      = OUTPUT_POWER_LOW;
+	v->CHANNEL_BANDWIDTH = BANDWIDTH_WIDE;
+	v->STEP_SETTING      = STEP_12_5kHz;
+
+	EEPROM_ReadBuffer(0x0E80, d, 8);
+	if (d[0] <= 199)
+		base = d[0] * 16u;                        // memory channel
+	else if (d[0] <= 206)
+		base = 0x0C80 + (d[0] - 200) * 32u;       // band slot, VFO A
+	else
+		return;
+
+	EEPROM_ReadBuffer(base, &f, sizeof(f));
+	if (!FREQUENCY_IsReceivable(f))
+		return;
+	EEPROM_ReadBuffer(base + 8, d, 8);
+	v->Frequency = f;
+	if (d[4] != 0xFF) {
+		v->CHANNEL_BANDWIDTH = (d[4] >> 1) & 1u;
+		v->OUTPUT_POWER      = ByteOr((d[4] >> 2) & 3u, OUTPUT_POWER_HIGH, OUTPUT_POWER_LOW);
+	}
+	v->STEP_SETTING = ByteOr(d[6], STEP_N_ELEM - 1, STEP_12_5kHz);
 }
 
 void SETTINGS_LoadCalibration(void)
@@ -221,17 +261,6 @@ void SETTINGS_LoadCalibration(void)
 	BK4819_WriteRegister(BK4819_REG_3B, 22656 + gEeprom.BK4819_XTAL_FREQ_LOW);
 }
 
-void SETTINGS_SaveVfoIndices(void)
-{
-	uint8_t State[8];
-
-	EEPROM_ReadBuffer(0x0E80, State, sizeof(State));
-	State[0] = gEeprom.ScreenChannel;
-	State[1] = gEeprom.MrChannel;
-	State[2] = gEeprom.FreqChannel;
-	EEPROM_WriteBuffer(0x0E80, State);
-}
-
 void SETTINGS_SaveSettings(void)
 {
 	uint8_t State[16];
@@ -244,6 +273,7 @@ void SETTINGS_SaveSettings(void)
 		for (unsigned int i = 0; i < REG_OVERRIDE_MAX; i++)
 			EEPROM_WriteBuffer(SETTINGS_REG_OVERRIDES + i * 8, State);
 		EEPROM_WriteBuffer(SETTINGS_TIMING, State);
+		EEPROM_WriteBuffer(SETTINGS_OPERATING, State);
 		EEPROM_WriteBuffer(SETTINGS_V2_BLOCK + 0, State);
 		EEPROM_WriteBuffer(SETTINGS_V2_BLOCK + 8, State);
 	}
@@ -267,35 +297,21 @@ void SETTINGS_SaveSettings(void)
 	gSettingsBlockValid = true;
 }
 
-// Store frequency, power, bandwidth and step for the channel or band slot in
-// use. The other fields of the 16-byte record (offset, tones, modulation,
-// scrambler, name) are left as they are.
-void SETTINGS_SaveChannel(const VFO_Info_t *pVFO)
+// Store the operating frequency, power, bandwidth and step. Over foreign
+// data at 0x1D00 the settings block is written first (with the settings in
+// use), as the first menu save does, so the operating channel counts.
+void SETTINGS_SaveOperating(void)
 {
-	const uint8_t Channel = pVFO->CHANNEL_SAVE;
-	uint16_t Offset = Channel * 16;
-	uint8_t  Head[8];
-	uint8_t  Tail[8];
+	uint8_t b[8];
 
-	if (IS_FREQ_CHANNEL(Channel)) // a band slot, VFO A
-		Offset = 0x0C80 + (Channel - FREQ_CHANNEL_FIRST) * 32;
+	EEPROM_ReadBuffer(SETTINGS_PKT_BLOCK, b, 1);
+	if (b[0] != SETTINGS_PKT_VERSION)
+		SETTINGS_SaveSettings();
 
-	EEPROM_ReadBuffer(Offset + 0, Head, 8);
-	EEPROM_ReadBuffer(Offset + 8, Tail, 8);
-
-	// A record never written before (flags byte 0xFF) gets zeros in the
-	// fields this firmware does not use: no offset, no tones, FM, no
-	// scrambler, so it reads cleanly in other firmwares and CHIRP.
-	const bool blank = Tail[4] == 0xFF;
-	if (blank) {
-		memset(Head, 0, sizeof(Head));
-		memset(Tail, 0, sizeof(Tail));
-	}
-
-	memcpy(Head, &pVFO->Frequency, 4);
-	EEPROM_WriteBuffer(Offset + 0, Head);
-
-	Tail[4] = (Tail[4] & ~((3u << 2) | (1u << 1))) | (pVFO->OUTPUT_POWER << 2) | (pVFO->CHANNEL_BANDWIDTH << 1);
-	Tail[6] = pVFO->STEP_SETTING;
-	EEPROM_WriteBuffer(Offset + 8, Tail);
+	memset(b, 0xFF, sizeof(b));
+	memcpy(b, &gVfo->Frequency, 4);
+	b[4] = gVfo->OUTPUT_POWER;
+	b[5] = gVfo->CHANNEL_BANDWIDTH;
+	b[6] = gVfo->STEP_SETTING;
+	EEPROM_WriteBuffer(SETTINGS_OPERATING, b);
 }

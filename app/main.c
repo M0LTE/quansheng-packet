@@ -16,11 +16,10 @@
 
 // Main screen keys (packet firmware):
 //
-//   0-9        enter a frequency (band slot) or a channel number (memory)
-//   UP/DOWN    step the frequency, or go to the next memory channel
+//   0-9        enter a frequency
+//   UP/DOWN    step the frequency
 //   MENU       settings menu
 //   EXIT       delete the last digit; held: cancel input, monitor off
-//   F then 3   switch between frequency and memory channel mode
 //   F then 6   cycle the TX power
 //   F held     keypad lock on or off
 //   SIDE1      monitor (squelch open) on or off
@@ -60,27 +59,8 @@ static void TogglePower(void)
 		gVfo->OUTPUT_POWER = OUTPUT_POWER_LOW;
 
 	RADIO_ConfigureSquelchAndOutputPower(gVfo);
-	gRequestSaveChannel   = true;
+	gRequestSaveOperating = true;
 	gRequestDisplayScreen = gScreenToDisplay;
-}
-
-static void SwitchVfoMode(void)
-{
-	if (IS_MR_CHANNEL(gVfo->CHANNEL_SAVE))
-	{	// swap to frequency mode
-		gEeprom.ScreenChannel = gEeprom.FreqChannel;
-		gRequestSaveVFO       = true;
-		gVfoConfigureMode     = VFO_CONFIGURE_RELOAD;
-		return;
-	}
-
-	const uint8_t Channel = RADIO_FindNextChannel(gEeprom.MrChannel, RADIO_CHANNEL_UP);
-	if (Channel != 0xFF)
-	{	// swap to channel mode
-		gEeprom.ScreenChannel = Channel;
-		gRequestSaveVFO       = true;
-		gVfoConfigureMode     = VFO_CONFIGURE_RELOAD;
-	}
 }
 
 static void ToggleKeypadLock(void)
@@ -98,9 +78,7 @@ static void MAIN_Key_DIGITS(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 		gWasFKeyPressed = false;
 		gUpdateStatus   = true;
 
-		if (Key == KEY_3)
-			SwitchVfoMode();
-		else if (Key == KEY_6)
+		if (Key == KEY_6)
 			TogglePower();
 		return;
 	}
@@ -108,24 +86,6 @@ static void MAIN_Key_DIGITS(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 	gKeyInputCountdown = key_input_timeout_500ms;
 	INPUTBOX_Append(Key);
 	gRequestDisplayScreen = DISPLAY_MAIN;
-
-	if (IS_MR_CHANNEL(gVfo->CHANNEL_SAVE)) { // user is entering channel number
-		if (gInputBoxIndex != 3)
-			return;
-
-		gInputBoxIndex = 0;
-
-		const uint16_t Channel = ((gInputBox[0] * 100) + (gInputBox[1] * 10) + gInputBox[2]) - 1;
-
-		if (!RADIO_CheckValidChannel(Channel))
-			return;
-
-		gEeprom.MrChannel     = (uint8_t)Channel;
-		gEeprom.ScreenChannel = (uint8_t)Channel;
-		gRequestSaveVFO       = true;
-		gVfoConfigureMode     = VFO_CONFIGURE_RELOAD;
-		return;
-	}
 
 	// user is entering a frequency
 	const bool isGigaF = gVfo->Frequency >= _1GHz_in_KHz;
@@ -147,16 +107,6 @@ static void MAIN_Key_DIGITS(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 		Frequency = frequencyBandTable[BAND_N_ELEM - 1].upper;
 	}
 
-	const FREQUENCY_Band_t band = FREQUENCY_GetBand(Frequency);
-
-	if (gVfo->Band != band) {
-		// switch to that band's slot first
-		gEeprom.ScreenChannel = band + FREQ_CHANNEL_FIRST;
-		gEeprom.FreqChannel   = band + FREQ_CHANNEL_FIRST;
-		SETTINGS_SaveVfoIndices();
-		RADIO_ConfigureChannel();
-	}
-
 	Frequency = FREQUENCY_RoundToStep(Frequency, gVfo->StepFrequency);
 
 	if (Frequency >= BX4819_band1.upper && Frequency < BX4819_band2.lower)
@@ -165,8 +115,11 @@ static void MAIN_Key_DIGITS(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
 		Frequency = (Frequency < center) ? BX4819_band1.upper - gVfo->StepFrequency : BX4819_band2.lower;
 	}
 
-	gVfo->Frequency     = Frequency;
-	gRequestSaveChannel = true;
+	if (!FREQUENCY_IsReceivable(Frequency))
+		return;                 // in a gap of the band table
+
+	gVfo->Frequency       = Frequency;
+	gRequestSaveOperating = true;    // stored, and the channel set up again
 }
 
 static void MAIN_Key_EXIT(bool bKeyPressed, bool bKeyHeld)
@@ -231,30 +184,17 @@ static void MAIN_Key_UP_DOWN(bool bKeyPressed, bool bKeyHeld, int8_t Direction)
 	if (gInputBoxIndex > 0)
 		return;
 
-	const uint8_t Channel = gEeprom.ScreenChannel;
+	// step up/down in frequency, wrapping inside the band
+	const uint32_t frequency = APP_SetFrequencyByStep(gVfo, Direction);
 
-	if (IS_FREQ_CHANNEL(Channel)) { // step up/down in frequency
-		const uint32_t frequency = APP_SetFrequencyByStep(gVfo, Direction);
+	if (RX_freq_check(frequency) < 0 || !FREQUENCY_IsReceivable(frequency))
+		return;                   // frequency not allowed
 
-		if (RX_freq_check(frequency) < 0) // frequency not allowed
-			return;
-
-		gVfo->Frequency = frequency;
-		BK4819_SetFrequency(frequency);
-		BK4819_RX_TurnOn();
-		gRequestSaveChannel = true;
-		(void)bKeyHeld;
-		return;
-	}
-
-	const uint8_t Next = RADIO_FindNextChannel(Channel + Direction, Direction);
-	if (Next == 0xFF || Channel == Next)
-		return;
-
-	gEeprom.MrChannel     = Next;
-	gEeprom.ScreenChannel = Next;
-	gRequestSaveVFO       = true;
-	gVfoConfigureMode     = VFO_CONFIGURE_RELOAD;
+	gVfo->Frequency = frequency;
+	BK4819_SetFrequency(frequency);
+	BK4819_RX_TurnOn();
+	gRequestSaveOperating = true;
+	(void)bKeyHeld;
 }
 
 void MAIN_Key_PTT(bool bKeyPressed)

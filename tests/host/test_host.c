@@ -15,7 +15,7 @@
 
 // Host-side tests of the pure logic: the EEPROM write guard (through the
 // real driver/eeprom.c on an emulated 24C64), settings load and save,
-// channel loading and saving, frequency rounding and TX limits.
+// the operating channel, frequency rounding and TX limits.
 //
 // Build and run: tests/host/run.sh (plain gcc, no hardware).
 
@@ -155,7 +155,7 @@ static void test_settings_defaults_and_roundtrip(void)
 	CHECK(gEeprom.MIC_GAIN == 31);
 	CHECK(gEeprom.RX_GAIN == 50);
 	CHECK(gEeprom.RX_DAC_GAIN == PKT_RX_DAC_GAIN_DEFAULT);
-	CHECK(gEeprom.ScreenChannel == FREQ_CHANNEL_FIRST + BAND3_137MHz);
+	CHECK(gEeprom.Vfo.Frequency == RADIO_DEFAULT_FREQUENCY);
 
 	gEeprom.SQUELCH_LEVEL    = 0;
 	gEeprom.TX_TIMEOUT       = 1;
@@ -264,77 +264,95 @@ static void test_v2_block(void)
 	CHECK(!gV2.valid && gV2.SERIAL_LOCK_MS == 20);
 }
 
-static void test_channel_load_save(void)
+// The one operating channel (0x1D58), and the one-time import of the
+// frequency in use from the old upstream layout.
+static void test_operating_channel(void)
 {
+	// blank EEPROM: 144.800 MHz, low, wide, 12.5 kHz; nothing written
 	memset(eeprom, 0xFF, sizeof(eeprom));
 	SETTINGS_InitEEPROM();
 	SETTINGS_LoadCalibration();
-
 	RADIO_ConfigureChannel();
-	CHECK(gVfo->CHANNEL_SAVE == FREQ_CHANNEL_FIRST + BAND3_137MHz);
-	CHECK(gVfo->Frequency == 14480000);
-	CHECK(gVfo->CHANNEL_BANDWIDTH == BANDWIDTH_WIDE);
-	CHECK(gVfo->OUTPUT_POWER == OUTPUT_POWER_LOW);
+	CHECK(gVfo->Frequency == 14480000 && gVfo->Band == BAND3_137MHz);
+	CHECK(gVfo->CHANNEL_BANDWIDTH == BANDWIDTH_WIDE && gVfo->OUTPUT_POWER == OUTPUT_POWER_LOW);
+	CHECK(gVfo->StepFrequency == 1250);
+	CHECK(eeprom[SETTINGS_OPERATING] == 0xFF);
 
-	// saving a blank slot writes zeros in the fields this firmware does not use
-	{
-		const uint16_t b = 0x0C80 + BAND3_137MHz * 32;
-		gVfo->OUTPUT_POWER = OUTPUT_POWER_HIGH;
-		SETTINGS_SaveChannel(gVfo);
-		uint32_t fs; memcpy(&fs, &eeprom[b], 4);
-		CHECK(fs == 14480000);
-		CHECK(eeprom[b + 4] == 0 && eeprom[b + 7] == 0);            // offset
-		CHECK(eeprom[b + 8] == 0 && eeprom[b + 9] == 0);            // tone codes
-		CHECK(eeprom[b + 10] == 0 && eeprom[b + 11] == 0);          // tone types, FM, no offset
-		CHECK(eeprom[b + 12] == (OUTPUT_POWER_HIGH << 2));
-		CHECK(eeprom[b + 13] == 0 && eeprom[b + 15] == 0);          // PTT ID, scrambler
-		CHECK(eeprom[b + 14] == gVfo->STEP_SETTING);
-		memset(&eeprom[b], 0xFF, 16);
-		gVfo->OUTPUT_POWER = OUTPUT_POWER_LOW;
-	}
-
-	// a CHIRP-style record for the 2 m slot with tones and an offset set
-	const uint16_t base = 0x0C80 + BAND3_137MHz * 32;
-	const uint32_t f = 14493750;
+	// an old band slot record in use (indices at 0x0E80): taken, read only
+	const uint16_t base = 0x0C80 + BAND6_400MHz * 32;
+	const uint32_t f = 43362500;
 	memcpy(&eeprom[base], &f, 4);
-	eeprom[base + 4] = 0x11; eeprom[base + 5] = 0x22; eeprom[base + 6] = 0x33; eeprom[base + 7] = 0x44; // offset
-	eeprom[base + 8]  = 0x05;                 // RX tone code
-	eeprom[base + 10] = 0x11;                 // tone types
-	eeprom[base + 11] = 0x01;                 // FM, offset +
-	eeprom[base + 12] = (1u << 4) | (2u << 2) | (1u << 1) | 1u;   // BCL, HIGH, narrow, reverse
+	eeprom[base + 12] = (2u << 2) | (1u << 1);           // HIGH, narrow
 	eeprom[base + 14] = STEP_6_25kHz;
+	eeprom[0x0E80] = 200 + BAND6_400MHz;
+	SETTINGS_InitEEPROM();
 	RADIO_ConfigureChannel();
-	CHECK(gVfo->Frequency == f);
-	CHECK(gVfo->CHANNEL_BANDWIDTH == BANDWIDTH_NARROW);
-	CHECK(gVfo->OUTPUT_POWER == OUTPUT_POWER_HIGH);
-	CHECK(gVfo->StepFrequency == 625);
+	CHECK(gVfo->Frequency == f && gVfo->OUTPUT_POWER == OUTPUT_POWER_HIGH);
+	CHECK(gVfo->CHANNEL_BANDWIDTH == BANDWIDTH_NARROW && gVfo->StepFrequency == 625);
+	CHECK(eeprom[SETTINGS_OPERATING] == 0xFF);           // no settings block: nothing written
 
-	// save changes only frequency, power, bandwidth and step
-	gVfo->Frequency = 14480000;
+	// an old memory channel in use, but not receivable: the default
+	const uint32_t bad = 8000000;                        // 80 MHz, in no band
+	memcpy(&eeprom[5 * 16], &bad, 4);
+	eeprom[0x0E80] = 5;
+	SETTINGS_InitEEPROM();
+	CHECK(gVfo->Frequency == 14480000);
+	const uint32_t ok = 14550000;
+	memcpy(&eeprom[5 * 16], &ok, 4);
+	SETTINGS_InitEEPROM();
+	CHECK(gVfo->Frequency == ok);
+
+	// with a valid settings block the import happens once and is written
+	eeprom[SETTINGS_PKT_BLOCK] = SETTINGS_PKT_VERSION;
+	SETTINGS_InitEEPROM();
+	uint32_t fs;
+	memcpy(&fs, &eeprom[SETTINGS_OPERATING], 4);
+	CHECK(fs == ok && eeprom[SETTINGS_OPERATING + 4] == OUTPUT_POWER_LOW);
+	memset(&eeprom[0x0C80], 0x00, 0x100);                // the old layout changes: ignored now
+	memset(&eeprom[0x0000], 0x00, 0x100);
+	eeprom[0x0E80] = 200;
+	SETTINGS_InitEEPROM();
+	CHECK(gVfo->Frequency == ok);
+
+	// save and reload; out-of-range bytes mean the defaults
+	gVfo->Frequency = 43350000;
 	gVfo->OUTPUT_POWER = OUTPUT_POWER_MID;
-	gVfo->CHANNEL_BANDWIDTH = BANDWIDTH_WIDE;
-	SETTINGS_SaveChannel(gVfo);
-	uint32_t f2; memcpy(&f2, &eeprom[base], 4);
-	CHECK(f2 == 14480000);
-	CHECK(eeprom[base + 4] == 0x11 && eeprom[base + 7] == 0x44);
-	CHECK(eeprom[base + 8] == 0x05 && eeprom[base + 10] == 0x11 && eeprom[base + 11] == 0x01);
-	CHECK(eeprom[base + 12] == ((1u << 4) | (1u << 2) | (0u << 1) | 1u));
-	CHECK(eeprom[base + 14] == STEP_6_25kHz);
+	gVfo->CHANNEL_BANDWIDTH = BANDWIDTH_NARROW;
+	gVfo->STEP_SETTING = STEP_25kHz;
+	SETTINGS_SaveOperating();
+	SETTINGS_InitEEPROM();
+	RADIO_ConfigureChannel();
+	CHECK(gVfo->Frequency == 43350000 && gVfo->OUTPUT_POWER == OUTPUT_POWER_MID);
+	CHECK(gVfo->CHANNEL_BANDWIDTH == BANDWIDTH_NARROW && gVfo->StepFrequency == 2500);
+	CHECK(eeprom[SETTINGS_OPERATING + 7] == 0xFF);
+	eeprom[SETTINGS_OPERATING + 4] = 3;
+	eeprom[SETTINGS_OPERATING + 5] = 2;
+	eeprom[SETTINGS_OPERATING + 6] = STEP_N_ELEM;
+	SETTINGS_InitEEPROM();
+	RADIO_ConfigureChannel();
+	CHECK(gVfo->OUTPUT_POWER == OUTPUT_POWER_LOW && gVfo->CHANNEL_BANDWIDTH == BANDWIDTH_WIDE && gVfo->StepFrequency == 1250);
 
-	// memory channel 5 valid only once its attribute byte names a band
-	gEeprom.ScreenChannel = 4;
-	const uint32_t f3 = 43362500;
-	memcpy(&eeprom[4 * 16], &f3, 4);
+	// a keypad save over foreign data writes the settings block first
+	memset(eeprom, 0xFF, sizeof(eeprom));
+	eeprom[SETTINGS_PKT_BLOCK] = 0x41;
+	memset(&eeprom[SETTINGS_TIMING], 0x03, 8);
 	SETTINGS_InitEEPROM();
-	gEeprom.ScreenChannel = 4;
-	RADIO_ConfigureChannel();
-	CHECK(IS_FREQ_CHANNEL(gVfo->CHANNEL_SAVE));   // no attribute: falls back
-	eeprom[0x0D60 + 4] = BAND6_400MHz;
+	gVfo->Frequency = 14500000;
+	SETTINGS_SaveOperating();
+	CHECK(eeprom[SETTINGS_PKT_BLOCK] == SETTINGS_PKT_VERSION);
+	CHECK(eeprom[SETTINGS_TIMING] == 0xFF);              // foreign data blanked
+	memcpy(&fs, &eeprom[SETTINGS_OPERATING], 4);
+	CHECK(fs == 14500000);
+
+	// 350 to 400 MHz is receivable only when enabled (0x0F45)
+	CHECK(FREQUENCY_IsReceivable(37000000));
+	eeprom[0x0F45] = 0;
+	memcpy(&eeprom[SETTINGS_OPERATING], &(uint32_t){ 37000000 }, 4);
 	SETTINGS_InitEEPROM();
-	gEeprom.ScreenChannel = 4;
-	RADIO_ConfigureChannel();
-	CHECK(gVfo->CHANNEL_SAVE == 4);
-	CHECK(gVfo->Frequency == f3);
+	CHECK(!FREQUENCY_IsReceivable(37000000));
+	CHECK(gVfo->Frequency != 37000000);
+	gSetting_350EN = true;
+	CHECK(eeprom_writes_in_cal == 0);
 }
 
 static void test_frequency(void)
@@ -449,7 +467,7 @@ int main(void)
 	test_timing_block();
 	test_settings_defaults_and_roundtrip();
 	test_v2_block();
-	test_channel_load_save();
+	test_operating_channel();
 	test_frequency();
 	test_tx_rx_registers();
 	if (failures) {

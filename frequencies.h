@@ -17,6 +17,7 @@
 #ifndef FREQUENCIES_H
 #define FREQUENCIES_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #define _1GHz_in_KHz 100000000
@@ -86,5 +87,6 @@ uint32_t		 FREQUENCY_GetSortedIdxFromStepIdx(uint8_t step);
 
 int32_t          TX_freq_check(uint32_t Frequency);
 int32_t          RX_freq_check(uint32_t Frequency);
+bool             FREQUENCY_IsReceivable(uint32_t Frequency);   // inside the band table
 
 #endif

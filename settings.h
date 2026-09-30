@@ -97,6 +97,26 @@ enum {
 //   0x1D53  delay after the PA bias, ms, 0 to 20 (default 2; upstream 10)
 //   0x1D54  reserved (0xFF)
 #define SETTINGS_TIMING           0x1D50u
+
+// The operating channel, 8 bytes at 0x1D58 (after the timing), used only
+// with a valid settings block. There are no memory channels or band slots:
+// this is the one frequency the radio uses, with its power, bandwidth and
+// step, as the keypad, the menu or the protocol last stored them.
+//
+//   0x1D58  frequency, u32 little-endian, 10 Hz units; must be receivable
+//           (inside the band table), else the whole block is unused
+//   0x1D5C  power, 0 low, 1 mid, 2 high (default 0)
+//   0x1D5D  bandwidth, 0 wide, 1 narrow (default 0)
+//   0x1D5E  step, index into gStepFrequencyTable (default 12.5 kHz)
+//   0x1D5F  reserved (0xFF)
+//
+// When the block is unused (a radio coming from another firmware, or from
+// the channel-memory builds of this one), the frequency in use in the old
+// upstream layout (channel indices at 0x0E80 and the record they point at)
+// is taken once if it is receivable, else 144.800 MHz; with a valid
+// settings block it is then written here, and the old layout is never read
+// again.
+#define SETTINGS_OPERATING        0x1D58u
 #define PA_DELAY_MAX_MS           20u
 #define PA_ENABLE_DELAY_MIN_MS    1u
 #define PA_ENABLE_DELAY_DEFAULT   1u
@@ -165,10 +185,6 @@ extern const uint8_t gTxTimeoutSeconds[7];
 #define TX_TIMEOUT_DEFAULT_INDEX  4u     // 30 s
 
 typedef struct {
-	uint8_t               ScreenChannel;  // channel in use (memory or band slot)
-	uint8_t               FreqChannel;    // last band slot used
-	uint8_t               MrChannel;      // last memory channel used
-
 	uint8_t               SQUELCH_LEVEL;
 	uint8_t               TX_TIMEOUT;
 	uint8_t               MIC_GAIN;
@@ -205,8 +221,9 @@ void SETTINGS_Decode(const uint8_t Data[16], const uint8_t T[8], EEPROM_Config_t
 void SETTINGS_DecodeV2(const uint8_t b[16], bool valid, V2_Config_t *v);
 uint8_t SETTINGS_FactoryRxGain(void);
 void SETTINGS_LoadCalibration(void);
-void SETTINGS_SaveVfoIndices(void);
 void SETTINGS_SaveSettings(void);
-void SETTINGS_SaveChannel(const VFO_Info_t *pVFO);
+void SETTINGS_SaveOperating(void);                  // gVfo's frequency, power, bandwidth, step
+bool SETTINGS_DecodeOperating(const uint8_t b[8], VFO_Info_t *v);
+void SETTINGS_ImportOldFrequency(VFO_Info_t *v);    // read only: the old upstream layout
 
 #endif

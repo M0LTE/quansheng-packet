@@ -231,7 +231,7 @@ Request: empty. Reply (34 bytes):
 | 4 | u32 | frequency | Hz |
 | 8 | u8 | state | 0 idle, 1 receiving (squelch open), 2 transmitting, 3 monitor, 4 reduced service |
 | 9 | u8 | flags1 | bit 0 squelch open, bit 1 busy (8.2), bit 2 PTT pressed, bit 3 lock active, bit 4 TX allowed at this frequency, bit 5 TX latched (release needed), bit 6 level tone running, bit 7 late key pending |
-| 10 | u8 | flags2 | bit 0 live params differ from stored, bit 1 RAM overrides active, bit 2 EEPROM overrides active, bit 3 LIVE_TX on, bit 4 persist in progress, bit 5 memory-channel mode |
+| 10 | u8 | flags2 | bit 0 live params differ from stored, bit 1 RAM overrides active, bit 2 EEPROM overrides active, bit 3 LIVE_TX on, bit 4 persist in progress, bit 5 reserved (was memory-channel mode; the firmware has no memory channels), 0 |
 | 11 | u8 | power | 0 low, 1 mid, 2 high |
 | 12 | u8 | bandwidth | 0 wide, 1 narrow |
 | 13 | u8 | squelch level | 0 to 9 |
@@ -246,7 +246,7 @@ Request: empty. Reply (34 bytes):
 | 26 | u16 | TX time left | 100 ms units until TX timeout; 0xFFFF if not transmitting |
 | 28 | u16 | busy age | ms since the last busy edge, saturating at 65535 |
 | 30 | u16 | next event seq | |
-| 32 | u8 | channel | 0 to 199 memory channel, 200 to 206 band slot |
+| 32 | u8 | channel | 0xFF (the firmware has one operating channel and no memory channels or band slots) |
 | 33 | u8 | TX timeout | s |
 
 ### 6.3 SUBSCRIBE (0x5002)
@@ -285,7 +285,7 @@ Offset estimate (host clock minus radio clock), with `t0` the host write time, `
 
 ### 6.5 GET_PARAMS (0x5004)
 
-Request: `u8 flags` (bit 0 STORED: return the stored EEPROM value, or the default a blank would load, instead of the live one), then zero or more `u8 param_id` (none = all supported). Reply: `u8 flags`, then `(u8 id, value)` records in request order, each value in the size the parameter table gives. With STORED, RAM-only parameters are omitted, also when asked for by id. An unknown or repeated id gives `BAD_PARAM` (detail = id). STORED values for FREQ_HZ, POWER and BANDWIDTH are those the radio would load at power-on (the channel indices at 0x0E80 and the record they point at).
+Request: `u8 flags` (bit 0 STORED: return the stored EEPROM value, or the default a blank would load, instead of the live one), then zero or more `u8 param_id` (none = all supported). Reply: `u8 flags`, then `(u8 id, value)` records in request order, each value in the size the parameter table gives. With STORED, RAM-only parameters are omitted, also when asked for by id. An unknown or repeated id gives `BAD_PARAM` (detail = id). STORED values for FREQ_HZ, POWER and BANDWIDTH are those of the operating-channel block (0x1D58), or what a power-on would take when it is not in use (7).
 
 ### 6.6 SET_PARAMS (0x5005)
 
@@ -297,7 +297,7 @@ Semantics:
 - Otherwise all values are applied together, then the receiver is set up once (`RADIO_ConfigureSquelchAndOutputPower` if frequency, power or squelch changed, then `RADIO_SetupRegisters`). A retune closes an open squelch (`CD` cause RETUNE). Values that only matter at key-up (deviation, mic gain, PA delays) take effect at the next key-up.
 - A transmission never sees a change: the frame's lock has already ended any transmission (5.3).
 - In reduced service (critical battery) a change that needs the receiver set up (frequency, power, bandwidth, squelch, SQL_RAW, AGC_FIX, AFC, RX gains) is refused with `STATE` (detail = the lowest such id); other changes apply.
-- FREQ_HZ keeps the live power, bandwidth and step when it moves from a memory channel to the band slot; if the step does not hold the frequency, the largest step that does is chosen, so a reload never rounds it.
+- FREQ_HZ keeps the live power and bandwidth; if the step does not hold the frequency, the largest step that does is chosen, so the keypad steps from it.
 - BUSY_RSSI_CLOSE must not exceed BUSY_RSSI_OPEN after the command (`RANGE`, detail = the one that was sent, CLOSE if both).
 - PERSIST writes the changed values to EEPROM after the reply is sent, one 8-byte block per main-loop pass, never during a transmission (a press defers the rest). Each block takes about 8 ms and can delay a key-up by up to 10 ms, so persist only when idle.
 
@@ -364,9 +364,9 @@ Ids for `GET_PARAMS` and `SET_PARAMS`. "Stored" is the EEPROM home when persiste
 
 | Id | Name | Type | Range | Default | Stored |
 |---|---|---|---|---|---|
-| 0x01 | FREQ_HZ | u32 | 50 000 000 to 600 000 000, multiple of 10 | band slot | channel record |
-| 0x02 | POWER | u8 | 0 low, 1 mid, 2 high | 0 | channel record |
-| 0x03 | BANDWIDTH | u8 | 0 wide, 1 narrow | 0 | channel record |
+| 0x01 | FREQ_HZ | u32 | 50 000 000 to 600 000 000, multiple of 10 | 144 800 000 | 0x1D58 (10 Hz units) |
+| 0x02 | POWER | u8 | 0 low, 1 mid, 2 high | 0 | 0x1D5C |
+| 0x03 | BANDWIDTH | u8 | 0 wide, 1 narrow | 0 | 0x1D5D |
 | 0x04 | DEV_WIDE | u16 | 0 to 0x0A7F | 0x0856 | 0x1D04 |
 | 0x05 | DEV_NARROW | u16 | 0 to 0x0A7F | 0x0756 | 0x1D06 |
 | 0x06 | MIC_GAIN | u8 | 0 to 31 | 31 | 0x1D03 |
@@ -390,8 +390,8 @@ Ids for `GET_PARAMS` and `SET_PARAMS`. "Stored" is the EEPROM home when persiste
 | 0x18 | KEY_LOCK | u8 | 0, 1 | 0 | 0x1D0C |
 
 Notes:
-- FREQ_HZ: the radio must be able to receive it (inside the band table). It switches the radio from memory-channel mode to the band slot for that frequency. REQUIRE_TX_OK rejects a frequency the TX band plan forbids; otherwise the reply's result bit 0 says whether TX would be allowed. PERSIST stores frequency, power, bandwidth and step in the band slot record and the channel indices, as the keypad does.
-- POWER and BANDWIDTH in memory-channel mode apply to that channel; PERSIST writes its record.
+- FREQ_HZ: the radio must be able to receive it (inside the band table, and not 350 to 400 MHz unless the band is enabled at 0x0F45). The firmware has one operating channel, no memory channels or band slots: frequency, power, bandwidth and step live in an 8-byte block at 0x1D58 in the settings family (`0x1D58` u32 frequency in 10 Hz units, `0x1D5C` power, `0x1D5D` bandwidth, `0x1D5E` step index, `0x1D5F` reserved), used only with a valid settings block. REQUIRE_TX_OK rejects a frequency the TX band plan forbids; otherwise the reply's result bit 0 says whether TX would be allowed. PERSIST of any of the three writes the block with all of them and the step, as the keypad does, and like every other stored parameter needs a valid settings block (else `EEPROM`).
+- When the block is not in use (a radio coming from another firmware or from the channel-memory builds), the frequency the old upstream layout had in use (channel indices at 0x0E80 and the record they point at) is taken once if receivable, else 144.800 MHz; with a valid settings block it is then written to 0x1D58 and the old layout is never read again.
 - SQL_RAW overrides the thresholds from the squelch level table and survives retunes; setting SQUELCH or rebooting drops it. Reading it returns the thresholds in use.
 - AGC_FIX and AFC are diagnostics.
 
@@ -555,7 +555,7 @@ Busy is forced closed when a transmission starts and when the receiver is set up
 6. The settings reload after legacy EEPROM writes has its own 1.0 s quiet timer and never runs during a transmission.
 7. EEPROM writes: one 8-byte block per main-loop pass, never during a transmission, deferred while a press is pending; never 0x1E00 and up.
 8. Stored events are kept serialized in the ring, so replay re-sends the same bytes with REPLAY set (and a fresh CRC).
-9. Budget: at most 8 KB of flash (about 38 KB free) and 2 KB of RAM (about 13 KB free). Measured: the full implementation costs about 12.7 KB of flash (23 520 to 36 188 bytes, 25 252 bytes left) and 2.2 KB of RAM (bss 2116 to about 4300 bytes). Over the estimate but well inside the flash and RAM left; the memory-channel removal planned next will win some back.
+9. Budget: at most 8 KB of flash (about 38 KB free) and 2 KB of RAM (about 13 KB free). Measured: the full implementation costs about 12.7 KB of flash (23 520 to 36 188 bytes) and 2.2 KB of RAM (bss 2116 to about 4300 bytes), over the estimate but well inside what is left. With the memory channels removed as well the image is 35 136 bytes (26 304 left) and bss 4092 bytes.
 
 ## 10. Frame and MCU budget
 

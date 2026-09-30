@@ -277,7 +277,7 @@ static void test_status(void)
 	CHECK(f && f->id == 0x5081 && status(f) == V2_OK && f->body_len == 38);
 	const uint8_t *o = rb(f);
 	CHECK(get32(o) == g_ms);
-	CHECK(get32(o + 4) == 144800000u);             // blank 2 m band slot
+	CHECK(get32(o + 4) == 144800000u);             // blank EEPROM: the default frequency
 	CHECK(o[8] == 0);                              // idle
 	CHECK(o[9] == (0x08 | 0x10));                  // lock active, TX allowed
 	CHECK(o[10] == 0);                             // blank EEPROM: live equals stored defaults
@@ -289,7 +289,7 @@ static void test_status(void)
 	CHECK(get16(o + 24) == 20);
 	CHECK(get16(o + 26) == 0xFFFF);
 	CHECK(get16(o + 30) == EVT_NextSeq());
-	CHECK(o[32] == 202 && o[33] == 30);
+	CHECK(o[32] == 0xFF && o[33] == 30);
 	vec("get_status", "fresh boot, blank EEPROM; REG_67=0x0123 REG_65=0x2F49 REG_63=0x005B REG_7E=0xB7C0; battery 7.80 V level 5; clock 1000 ms");
 }
 
@@ -619,10 +619,10 @@ static void test_params(void)
 	CHECK(rb(f)[0] == (SETR_TX_ALLOWED | SETR_RETUNED));
 	CHECK(rb(f)[1] == P_FREQ_HZ && get32(rb(f) + 2) == 433500000u);
 	CHECK(gVfo->Frequency == 43350000 && gEeprom.SQUELCH_LEVEL == 3 && gEeprom.DEVIATION_WIDE == 0x0800);
-	CHECK(gEeprom.ScreenChannel == FREQ_CHANNEL_FIRST + BAND6_400MHz);
+	CHECK(gVfo->Band == BAND6_400MHz);
 	CHECK(regs[0x38] == (43350000 & 0xFFFF) && regs[0x39] == (43350000 >> 16));
 	CHECK(reg_writes[0x3F] - setups == 2);           // one RADIO_SetupRegisters (it writes REG_3F twice)
-	CHECK(eeprom[0x0C80 + 5 * 32] == 0xFF);           // RAM only: nothing written
+	CHECK(eeprom[SETTINGS_OPERATING] == 0xFF);        // RAM only: nothing written
 	vec("set_params", "fresh boot; SET_PARAMS flags 0: FREQ_HZ 433.5 MHz, SQUELCH 3, DEV_WIDE 0x0800 (RAM)");
 
 	// a PARAMS_CHANGED would go to a subscriber
@@ -674,7 +674,7 @@ static void test_params(void)
 	s[0] = 0;
 	f = v2(V2_SET_PARAMS, 0x51, s, n);
 	CHECK(status(f) == V2_OK && !(rb(f)[0] & SETR_TX_ALLOWED) && gVfo->Frequency == 12000000);
-	CHECK(gEeprom.ScreenChannel == FREQ_CHANNEL_FIRST + BAND2_108MHz);
+	CHECK(gVfo->Band == BAND2_108MHz);
 
 	// DRY_RUN validates and reads back without applying
 	n = 0; s[n++] = SETP_DRY_RUN; s[n++] = P_POWER; s[n++] = 2;
@@ -794,16 +794,16 @@ static void test_persist(void)
 	op = 2;
 	CHECK(status(v2(V2_SAVE_PARAMS, 0x68, &op, 1)) == V2_RANGE);
 
-	// frequency persist: band slot record and channel indices, as the keypad
+	// frequency persist: the operating channel block, power, bandwidth and step with it
 	n = 0; s[n++] = SETP_PERSIST; s[n++] = P_FREQ_HZ; put32(s + n, 145012500u); n += 4; s[n++] = P_POWER; s[n++] = 2;
 	f = v2(V2_SET_PARAMS, 0x69, s, n);
 	CHECK(status(f) == V2_OK);
 	host_advance(10);
-	uint32_t fq;
-	memcpy(&fq, &eeprom[0x0C80 + 2 * 32], 4);
-	CHECK(fq == 14501250);
-	CHECK(((eeprom[0x0C80 + 2 * 32 + 12] >> 2) & 3) == 2);
-	CHECK(eeprom[0x0E80] == FREQ_CHANNEL_FIRST + BAND3_137MHz);
+	CHECK(get32(&eeprom[SETTINGS_OPERATING]) == 14501250);
+	CHECK(eeprom[SETTINGS_OPERATING + 4] == 2 && eeprom[SETTINGS_OPERATING + 5] == 0);
+	CHECK(eeprom[SETTINGS_OPERATING + 6] == gVfo->STEP_SETTING && gVfo->StepFrequency == 1250);
+	for (unsigned a = 0x0C80; a < 0x0E90; a++)
+		if (eeprom[a] != 0xFF) { CHECK(eeprom[a] == 0xFF); break; }   // the old layout is not written
 	host_boot_keep_eeprom();
 	CHECK(gVfo->Frequency == 14501250 && gVfo->OUTPUT_POWER == 2);
 

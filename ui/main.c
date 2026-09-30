@@ -174,24 +174,14 @@ void UI_DisplayMain(void)
 	else if (FUNCTION_IsRx())
 		UI_PrintStringSmallBold("RX", 14, 0, 0);
 
-	// channel or band slot
 	const bool inputting = gInputBoxIndex != 0;
-	if (IS_MR_CHANNEL(gEeprom.ScreenChannel)) {
-		if (!inputting)
-			sprintf(String, "M%u", gEeprom.ScreenChannel + 1);
-		else
-			sprintf(String, "M%.3s", INPUTBOX_GetAscii());  // show the input text
-	}
-	else
-		sprintf(String, "F%u", 1 + gEeprom.ScreenChannel - FREQ_CHANNEL_FIRST);
-	UI_PrintStringSmallNormal(String, 2, 0, 1);
 
 	// frequency, or the reason TX was refused
 	if (gVfoState != VFO_STATE_NORMAL && gVfoState < ARRAY_SIZE(VfoStateStr))
 	{
 		UI_PrintString(VfoStateStr[gVfoState], 31, 0, 0, 8);
 	}
-	else if (inputting && IS_FREQ_CHANNEL(gEeprom.ScreenChannel))
+	else if (inputting)
 	{	// user entering a frequency
 		const char * ascii = INPUTBOX_GetAscii();
 		sprintf(String, "%.3s.%.5s", ascii, ascii + 3);

@@ -227,3 +227,13 @@ int32_t RX_freq_check(const uint32_t Frequency)
 
 	return 0;   // OK frequency
 }
+
+// The radio can receive this frequency (10 Hz units): inside one of the
+// bands of frequencyBandTable, and not 350 to 400 MHz unless enabled.
+bool FREQUENCY_IsReceivable(uint32_t Frequency)
+{
+	const FREQUENCY_Band_t b = FREQUENCY_GetBand(Frequency);
+	if (Frequency < frequencyBandTable[b].lower || Frequency > frequencyBandTable[b].upper)
+		return false;
+	return gSetting_350EN || b != BAND5_350MHz;
+}

@@ -125,8 +125,7 @@ static uint16_t GetStatus(uint8_t *o)
 	      | (gRegOverrideRamCount           ? 0x02u : 0)
 	      | (gRegOverrideCount              ? 0x04u : 0)
 	      | ((gSub.options & SUB_LIVE_TX)   ? 0x08u : 0)
-	      | (PARAMS_PersistPending()        ? 0x10u : 0)
-	      | (IS_MR_CHANNEL(gEeprom.ScreenChannel) ? 0x20u : 0);
+	      | (PARAMS_PersistPending()        ? 0x10u : 0);   // bit 5: no memory channels
 	o[11] = gVfo->OUTPUT_POWER;
 	o[12] = gVfo->CHANNEL_BANDWIDTH;
 	o[13] = gEeprom.SQUELCH_LEVEL;
@@ -141,7 +140,7 @@ static uint16_t GetStatus(uint8_t *o)
 	put16(o + 26, tx ? gTxTimerCountdown_500ms * 5u : 0xFFFF);
 	put16(o + 28, MON_BusyAge());
 	put16(o + 30, EVT_NextSeq());
-	o[32] = gEeprom.ScreenChannel;
+	o[32] = 0xFF;                                  // no channels any more
 	o[33] = gTxTimeoutSeconds[gEeprom.TX_TIMEOUT];
 	return 34;
 }

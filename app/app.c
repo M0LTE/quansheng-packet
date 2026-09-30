@@ -51,9 +51,8 @@
 #include "ui/status.h"
 #include "ui/ui.h"
 
-static bool flagSaveVfo;
 static bool flagSaveSettings;
-static bool flagSaveChannel;
+static bool flagSaveOperating;
 
 static PttArb_t gArb;           // what the PTT line may do (pttarb.h)
 static bool     gBusyAtPress;
@@ -519,19 +518,14 @@ static void FlushHeldKeySaves(void)
 	if (gCurrentFunction == FUNCTION_TRANSMIT)
 		return;
 
-	if (flagSaveVfo) {
-		SETTINGS_SaveVfoIndices();
-		flagSaveVfo = false;
-	}
-
 	if (flagSaveSettings) {
 		SETTINGS_SaveSettings();
 		flagSaveSettings = false;
 	}
 
-	if (flagSaveChannel) {
-		SETTINGS_SaveChannel(gVfo);
-		flagSaveChannel = false;
+	if (flagSaveOperating) {
+		SETTINGS_SaveOperating();
+		flagSaveOperating = false;
 
 		if (gVfoConfigureMode == VFO_CONFIGURE_NONE)
 			gVfoConfigureMode = VFO_CONFIGURE;
@@ -658,29 +652,21 @@ Skip:
 			gUpdateStatus        = true;
 		}
 
-		if (gRequestSaveVFO) {
-			gRequestSaveVFO = false;
-			if (!bKeyHeld)
-				SETTINGS_SaveVfoIndices();
-			else
-				flagSaveVfo = true;
-		}
-
-		if (gRequestSaveChannel) {
+		if (gRequestSaveOperating) {
 			if (!bKeyHeld) {
-				SETTINGS_SaveChannel(gVfo);
+				SETTINGS_SaveOperating();
 
 				if (gVfoConfigureMode == VFO_CONFIGURE_NONE)
 					gVfoConfigureMode = VFO_CONFIGURE;
 			}
 			else { // save when the up/down button is released
-				flagSaveChannel = true;
+				flagSaveOperating = true;
 
 				if (gRequestDisplayScreen == DISPLAY_INVALID)
 					gRequestDisplayScreen = DISPLAY_MAIN;
 			}
 
-			gRequestSaveChannel = false;
+			gRequestSaveOperating = false;
 		}
 
 		if (gVfoConfigureMode != VFO_CONFIGURE_NONE) {

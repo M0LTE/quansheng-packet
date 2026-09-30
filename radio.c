@@ -40,126 +40,26 @@ uint8_t        gAgcFix = 0xFF;      // 0xFF automatic, else REG_7E<14:12> fixed
 bool           gAfcOn  = true;
 uint32_t       gTxCarrierOffMs;     // g_ms when the carrier went off
 
-bool RADIO_CheckValidChannel(uint16_t channel)
-{
-	// return true if the memory channel appears valid
-	if (!IS_MR_CHANNEL(channel))
-		return false;
-
-	return gMR_ChannelAttributes[channel].band <= BAND7_470MHz;
-}
-
-uint8_t RADIO_FindNextChannel(uint8_t Channel, int8_t Direction)
-{
-	for (unsigned int i = 0; IS_MR_CHANNEL(i); i++, Channel += Direction) {
-		if (Channel == 0xFF) {
-			Channel = MR_CHANNEL_LAST;
-		} else if (!IS_MR_CHANNEL(Channel)) {
-			Channel = MR_CHANNEL_FIRST;
-		}
-
-		if (RADIO_CheckValidChannel(Channel)) {
-			return Channel;
-		}
-	}
-
-	return 0xFF;
-}
-
-// Frequency for a band slot that has never been stored. Upstream used the
-// bottom of the band (137.000 MHz on 2 m); a packet station is better off
-// starting inside the amateur allocations.
-static uint32_t DefaultFrequency(const uint8_t band)
-{
-	switch (band) {
-		case BAND3_137MHz: return 14480000;   // 144.800 MHz
-		case BAND6_400MHz: return 43350000;   // 433.500 MHz
-		default:           return frequencyBandTable[band].lower;
-	}
-}
-
-// Load the channel (memory channel or band slot) that gEeprom.ScreenChannel
-// points at into gVfo.
+// The operating channel: gVfo's frequency, power, bandwidth and step, as
+// loaded from the settings (or set by the keypad, menu or protocol), made
+// valid, with the band, the squelch thresholds and the TX power worked out
+// from the factory calibration.
 void RADIO_ConfigureChannel(void)
 {
 	VFO_Info_t *pVfo = gVfo;
 
-	if (!gSetting_350EN) {
-		if (gEeprom.FreqChannel == FREQ_CHANNEL_FIRST + BAND5_350MHz)
-			gEeprom.FreqChannel = FREQ_CHANNEL_FIRST + BAND6_400MHz;
+	if (pVfo->STEP_SETTING >= STEP_N_ELEM)
+		pVfo->STEP_SETTING = STEP_12_5kHz;
+	pVfo->StepFrequency = gStepFrequencyTable[pVfo->STEP_SETTING];
 
-		if (gEeprom.ScreenChannel == FREQ_CHANNEL_FIRST + BAND5_350MHz)
-			gEeprom.ScreenChannel = FREQ_CHANNEL_FIRST + BAND6_400MHz;
-	}
-
-	uint8_t channel = gEeprom.ScreenChannel;
-
-	if (IS_MR_CHANNEL(channel)) {
-		channel = RADIO_FindNextChannel(channel, RADIO_CHANNEL_UP);
-		if (channel == 0xFF) {
-			channel = gEeprom.FreqChannel;
-		} else {
-			gEeprom.MrChannel = channel;
-		}
-	}
-	else if (!IS_FREQ_CHANNEL(channel)) {
-		channel = gEeprom.FreqChannel;
-	}
-	gEeprom.ScreenChannel = channel;
-
-	uint8_t band;
-	uint16_t base;
-	if (IS_MR_CHANNEL(channel)) {
-		band = gMR_ChannelAttributes[channel].band;
-		base = channel * 16;
-	}
-	else {
-		band = channel - FREQ_CHANNEL_FIRST;
-		base = 0x0C80 + ((channel - FREQ_CHANNEL_FIRST) * 32);   // VFO A
-	}
-
-	memset(pVfo, 0, sizeof(*pVfo));
-	pVfo->CHANNEL_SAVE = channel;
-
-	uint8_t data[8];
-	EEPROM_ReadBuffer(base + 8, data, sizeof(data));
-
-	uint8_t tmp = data[6];
-	if (tmp >= STEP_N_ELEM)
-		tmp = STEP_12_5kHz;
-	pVfo->STEP_SETTING  = tmp;
-	pVfo->StepFrequency = gStepFrequencyTable[tmp];
-
-	if (data[4] == 0xFF) {
+	if (pVfo->OUTPUT_POWER > OUTPUT_POWER_HIGH)
+		pVfo->OUTPUT_POWER = OUTPUT_POWER_LOW;
+	if (pVfo->CHANNEL_BANDWIDTH > BANDWIDTH_NARROW)
 		pVfo->CHANNEL_BANDWIDTH = BANDWIDTH_WIDE;
-		pVfo->OUTPUT_POWER      = OUTPUT_POWER_LOW;
-	}
-	else {
-		pVfo->CHANNEL_BANDWIDTH = (data[4] >> 1) & 1u;
-		pVfo->OUTPUT_POWER      = (data[4] >> 2) & 3u;
-		if (pVfo->OUTPUT_POWER > OUTPUT_POWER_HIGH)
-			pVfo->OUTPUT_POWER = OUTPUT_POWER_LOW;
-	}
 
-	uint32_t frequency;
-	EEPROM_ReadBuffer(base, &frequency, sizeof(frequency));
-	if (frequency == 0xFFFFFFFF)
-		frequency = DefaultFrequency(band);
-
-	// fix a previously stored frequency outside its band
-	band = FREQUENCY_GetBand(frequency);
-	if (frequency < frequencyBandTable[band].lower)
-		frequency = frequencyBandTable[band].lower;
-	else if (frequency > frequencyBandTable[band].upper)
-		frequency = frequencyBandTable[band].upper;
-	else if (IS_FREQ_CHANNEL(channel))
-		frequency = FREQUENCY_RoundToStep(frequency, pVfo->StepFrequency);
-
-	if (!gSetting_350EN && frequency >= 35000000 && frequency < 40000000)
-		frequency = 43300000;
-
-	pVfo->Band      = FREQUENCY_GetBand(frequency);
-	pVfo->Frequency = frequency;
+	if (!FREQUENCY_IsReceivable(pVfo->Frequency))
+		pVfo->Frequency = RADIO_DEFAULT_FREQUENCY;
+	pVfo->Band = FREQUENCY_GetBand(pVfo->Frequency);
 
 	RADIO_ConfigureSquelchAndOutputPower(pVfo);
 }

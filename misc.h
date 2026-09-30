@@ -32,24 +32,9 @@
 	#define MIN(a, b) ({ __typeof__ (a) _a = (a); __typeof__ (b) _b = (b); _a < _b ? _a : _b; })
 #endif
 
-#define IS_MR_CHANNEL(x)       ((x) <= MR_CHANNEL_LAST)
-#define IS_FREQ_CHANNEL(x)     ((x) >= FREQ_CHANNEL_FIRST && (x) <= FREQ_CHANNEL_LAST)
-#define IS_VALID_CHANNEL(x)    ((x) < LAST_CHANNEL)
-
-// Channel numbers, as in the upstream EEPROM layout: 200 memory channels,
-// then one frequency (VFO) slot per band.
-enum {
-	MR_CHANNEL_FIRST   = 0,
-	MR_CHANNEL_LAST    = 199u,
-	FREQ_CHANNEL_FIRST = 200u,
-	FREQ_CHANNEL_LAST  = 206u,
-	LAST_CHANNEL
-};
-
 enum {
 	VFO_CONFIGURE_NONE = 0,
-	VFO_CONFIGURE,
-	VFO_CONFIGURE_RELOAD
+	VFO_CONFIGURE
 };
 
 extern const uint8_t         vfo_state_resume_countdown_500ms;
@@ -81,19 +66,6 @@ extern uint8_t               gSetting_F_LOCK;
 
 extern bool                  gMonitor;
 
-typedef union {
-    struct {
-        uint8_t
-            band : 4,
-            compander : 2,
-            scanlist2 : 1,
-            scanlist1 : 1;
-    };
-    uint8_t __val;
-} ChannelAttributes_t;
-
-extern ChannelAttributes_t   gMR_ChannelAttributes[FREQ_CHANNEL_LAST + 1];
-
 extern volatile uint32_t     g_ms;               // ms since boot, SysTick
 extern volatile uint16_t     gSerialLockMs;      // serial PTT lock remaining, ms
 extern volatile uint16_t     gReloadQuietMs;     // quiet time left before the reload, ms
@@ -116,8 +88,7 @@ extern uint16_t              gMenuCountdown;
 extern bool                  gPttWasReleased;
 extern bool                  gFlagReconfigureVfos;
 extern uint8_t               gVfoConfigureMode;
-extern bool                  gRequestSaveVFO;
-extern bool                  gRequestSaveChannel;
+extern bool                  gRequestSaveOperating;   // frequency, power, bandwidth, step
 extern bool                  gRequestSaveSettings;
 extern uint8_t               gKeypadLocked;
 extern bool                  gFlagPrepareTX;
