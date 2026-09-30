@@ -38,6 +38,11 @@
 #include "ui/main.h"
 #include "ui/ui.h"
 
+// S-meter scale, -dBm at S0 and at S9: fixed (the upstream defaults). Other
+// firmwares keep their own at EEPROM 0x0EA0; this one never reads it.
+#define SMETER_S0_LEVEL  130
+#define SMETER_S9_LEVEL  76
+
 static const int8_t dBmCorrTable[7] = {
 			-15, // band 1
 			-25, // band 2
@@ -106,12 +111,12 @@ static void DisplayRSSIBar(const bool now)
 	if (now)
 		memset(p_line, 0, LCD_WIDTH);
 
-	const int16_t s0_dBm   = -gEeprom.S0_LEVEL;                  // S0 .. base level
+	const int16_t s0_dBm   = -SMETER_S0_LEVEL;                   // S0 .. base level
 	const int16_t rssi_dBm = BK4819_GetRSSI_dBm() + dBmCorrTable[gVfo->Band];
 
-	int s0_9 = gEeprom.S0_LEVEL - gEeprom.S9_LEVEL;
+	int s0_9 = SMETER_S0_LEVEL - SMETER_S9_LEVEL;
 	const uint8_t s_level = MIN(MAX((int32_t)(rssi_dBm - s0_dBm)*100 / (s0_9*100/9), 0), 9); // S0 - S9
-	uint8_t overS9dBm = MIN(MAX(rssi_dBm + gEeprom.S9_LEVEL, 0), 99);
+	uint8_t overS9dBm = MIN(MAX(rssi_dBm + SMETER_S9_LEVEL, 0), 99);
 	uint8_t overS9Bars = MIN(overS9dBm/10, 4);
 
 	if(overS9Bars == 0) {

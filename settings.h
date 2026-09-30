@@ -195,10 +195,8 @@ typedef struct {
 	uint8_t               BACKLIGHT_MIN;
 	uint8_t               BACKLIGHT_MAX;
 
-	// read only, from calibration and upstream settings
+	// read only, from the factory calibration
 	int16_t               BK4819_XTAL_FREQ_LOW;
-	uint8_t               S0_LEVEL;
-	uint8_t               S9_LEVEL;
 
 	VFO_Info_t            Vfo;
 } EEPROM_Config_t;

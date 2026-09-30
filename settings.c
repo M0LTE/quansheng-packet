@@ -128,17 +128,6 @@ void SETTINGS_InitEEPROM(void)
 	EEPROM_ReadBuffer(SETTINGS_V2_BLOCK, Data, 16);
 	SETTINGS_DecodeV2(Data, blockValid, &gV2);
 
-	// 0EA0..0EA7: S-meter levels
-	EEPROM_ReadBuffer(0x0EA0, Data, 8);
-	if((Data[1] < 200 && Data[1] > 90) && (Data[2] < Data[1]-9 && Data[1] < 160  && Data[2] > 50)) {
-		gEeprom.S0_LEVEL = Data[1];
-		gEeprom.S9_LEVEL = Data[2];
-	}
-	else {
-		gEeprom.S0_LEVEL = 130;
-		gEeprom.S9_LEVEL = 76;
-	}
-
 	// 0F40..0F47: TX frequency limits (no menu; set them over UART)
 	EEPROM_ReadBuffer(0x0F40, Data, 8);
 	gSetting_F_LOCK            = (Data[0] < F_LOCK_LEN) ? Data[0] : F_LOCK_DEF;
