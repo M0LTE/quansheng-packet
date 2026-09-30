@@ -539,24 +539,38 @@ function showBattery(mv) {
   $('r-batt').textContent = `${(mv / 1000).toFixed(2)} V`;
 }
 
+/** The radio's state: from its TX_START, TX_END and heartbeats (the client follows them). */
 function tick() {
-  if (!r.client) return;
-  if (quiet()) {
-    $('r-state').textContent = 'quiet: probably transmitting (commands wait until it is back)';
-    return;
+  const c = r.client;
+  if (!c) return;
+  let t;
+  if (c.tx) {
+    t = c.tx.frequencyHz === undefined ? 'Transmitting' : `Transmitting on ${v2.formatMHz(c.tx.frequencyHz)} MHz, ${v2.POWER_NAMES[c.tx.power] || 'power unknown'}`;
+  } else if (quiet()) {
+    t = 'Quiet, probably transmitting (the page waits until it is back)';
+  } else {
+    t = $('r-state').dataset.base || 'Receiving';
+    const lock = c.msUntilSafeToKey();
+    if (lock > 0) t += `; PTT is ignored for ${lock} ms after the page's last command`;
+    if (c.lastTx) t += `. Last transmission ${(c.lastTx.onAirMs / 1000).toFixed(1)} s${c.lastTx.reason === 1 ? ', stopped by the TX timeout' : ''}`;
   }
-  const lock = r.client.msUntilSafeToKey();
-  if (lock > 0) $('r-state').textContent = `${$('r-state').dataset.base || 'receiving'}; PTT is ignored for ${lock} ms after the page's last command`;
-  else $('r-state').textContent = $('r-state').dataset.base || 'receiving';
+  $('r-state').textContent = t;
 }
 
 function onRadioEvent(e) {
   switch (e.type) {
     case 'heartbeat':
       r.lastHeartbeat = Date.now();
-      if (e.state !== 2) showSignal(e.rssiRaw);
+      if (e.state !== v2.STATE_TRANSMITTING) {
+        showSignal(e.rssiRaw);
+        $('r-state').dataset.base = v2.STATE_NAMES[e.state] || 'Receiving';
+      }
       showBattery(e.batteryMv);
-      $('r-state').dataset.base = (v2.STATE_NAMES[e.state] || 'receiving').toLowerCase();
+      tick();
+      break;
+    case 'tx_start':
+    case 'tx_end':
+      tick();
       break;
     case 'tx_refused':
       show($('radio-status'), `The radio refused to transmit: ${v2.TX_REFUSED_REASONS[e.reason] || `reason ${e.reason}`}.`, 'warn');
@@ -565,7 +579,7 @@ function onRadioEvent(e) {
       showBattery(e.mv);
       break;
     case 'params_changed':
-      if (e.source === 0 && !quiet()) readParams().catch(() => {});
+      if (e.source === 0 && !quiet() && !r.client.transmitting) readParams().catch(() => {});
       break;
     case 'tone_end':
       show($('radio-status'), 'The level tone has finished; the radio is back to received audio.', 'ok');
@@ -610,12 +624,12 @@ $('radio-connect').addEventListener('click', async () => {
     $('r-fw').textContent = `${r.info.version}, protocol ${h.protocolText}`;
     showSignal(st.rssiRaw);
     showBattery(st.batteryMv);
-    $('r-state').dataset.base = (v2.STATE_NAMES[st.state] || 'receiving').toLowerCase();
+    $('r-state').dataset.base = v2.STATE_NAMES[st.state] || 'Receiving';
     $('tone-start').disabled = $('tone-stop').disabled = !r.info.canLevelToneRaw;
-    await client.subscribe({
-      mask: (1 << v2.EVENT.TX_REFUSED) | (1 << v2.EVENT.HEARTBEAT) | (1 << v2.EVENT.BATTERY) | (1 << v2.EVENT.PARAMS_CHANGED) | (1 << v2.EVENT.TONE_END),
-      heartbeatMs: 1000,
-    });
+    // LIVE_TX: events keep coming while the radio transmits from its own PTT key. When the AIOC
+    // keys the radio it drops the radio's bytes; the client fetches what it missed afterwards.
+    const events = [v2.EVENT.TX_START, v2.EVENT.TX_END, v2.EVENT.TX_REFUSED, v2.EVENT.HEARTBEAT, v2.EVENT.BATTERY, v2.EVENT.PARAMS_CHANGED, v2.EVENT.TONE_END];
+    await client.subscribe({ mask: events.reduce((m, n) => m | (1 << n), 0), liveTx: r.info.canLiveTx, heartbeatMs: 1000 });
     r.subscribed = true;
     r.lastHeartbeat = Date.now();
     client.guard = () => (quiet() ? 'The radio has gone quiet for a moment (it may be transmitting). Try again when it is back.' : null);
@@ -634,7 +648,7 @@ $('radio-connect').addEventListener('click', async () => {
 
 $('radio-disconnect').addEventListener('click', async () => {
   const c = r.client;
-  if (c && r.subscribed && !quiet()) {
+  if (c && r.subscribed && !quiet() && !c.transmitting) {
     try {
       await c.subscribe({ mask: 0 });
     } catch {}

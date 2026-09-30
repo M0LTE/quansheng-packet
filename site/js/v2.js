@@ -1,6 +1,6 @@
 // Protocol v2 message bodies (docs/protocol-v2.md): pure encoding and decoding, no I/O.
 // Only what the setup page needs: identification, GET_INFO, GET_STATUS, GET/SET_PARAMS,
-// SUBSCRIBE, LEVEL_TONE and the events a status display uses.
+// SUBSCRIBE, LEVEL_TONE, EVENT_REPLAY and the events a status display uses.
 
 import { u16, u32 } from './k5frame.js';
 
@@ -16,6 +16,7 @@ export const CMD = {
   SET_PARAMS: 0x5005,
   SAVE_PARAMS: 0x5006,
   LEVEL_TONE: 0x5007,
+  EVENT_REPLAY: 0x500b,
 };
 export const REPLY_OFFSET = 0x80;
 export const isV2 = (id) => id >= 0x5000 && id <= 0x50ff;
@@ -147,6 +148,7 @@ export function parseInfo(r) {
     settingsLayout: r[37],
     v2BlockLayout: r[38],
     burstPeriodMs: r[39],
+    canLiveTx: (u32(r, 18) & 1) !== 0,
     canLevelToneRaw: (u32(r, 18) & (1 << 2)) !== 0,
     canPersist: (u32(r, 18) & (1 << 9)) !== 0,
   };
@@ -264,6 +266,15 @@ export function parseSubscribe(r) {
   return { nextSeq: u16(r, 0), oldestSeq: u16(r, 2), tMs: u32(r, 4) };
 }
 
+/** EVENT_REPLAY body after the tag: the first seq wanted. */
+export function encodeEventReplay(fromSeq) {
+  return Uint8Array.from([fromSeq & 0xff, (fromSeq >> 8) & 0xff]);
+}
+
+export function parseEventReplay(r) {
+  return { firstSent: u16(r, 0), countSent: r[2], oldestAvailable: u16(r, 3), nextSeq: u16(r, 5) };
+}
+
 /** mode 0 deviation-equivalent (level in Hz), mode 1 raw gain code 0..127. durationMs 0 stops. */
 export function encodeLevelTone({ hz = 1000, mode = 1, level = 64, durationMs = 10000 } = {}) {
   const b = new Uint8Array(7);
@@ -281,21 +292,35 @@ export function parseLevelTone(r) {
 
 // ---------------------------------------------------------------- events
 
+/** Event header flags (4.4). */
+export const EVENT_FLAG = { REPLAY: 1, DEFERRED: 2, QUEUED: 4, EPHEMERAL: 8, TIME_EXACT: 16 };
+
 export function parseEvent(id, body) {
   const n = id - 0x50c0;
-  const head = { event: n, seq: u16(body, 0), tMs: u32(body, 2), flags: body[6] };
+  const flags = body[6];
+  const head = {
+    event: n,
+    seq: u16(body, 0),
+    tMs: u32(body, 2),
+    flags,
+    replay: (flags & EVENT_FLAG.REPLAY) !== 0,
+    deferred: (flags & EVENT_FLAG.DEFERRED) !== 0,
+    ephemeral: (flags & EVENT_FLAG.EPHEMERAL) !== 0,
+  };
   const e = body.subarray(7);
   switch (n) {
     case EVENT.CD:
       return { ...head, type: 'cd', busy: e[0] === 1, rssiRaw: u16(e, 3) };
     case EVENT.TX_START:
-      return { ...head, type: 'tx_start', frequencyHz: u32(e, 4), power: e[8], lockDelayMs: u16(e, 12), lateKey: (e[14] & 2) !== 0 };
-    case EVENT.TX_END:
-      return { ...head, type: 'tx_end', reason: e[12] };
+      return { ...head, type: 'tx_start', frequencyHz: u32(e, 4), power: e[8], bandwidth: e[9], lockDelayMs: u16(e, 12), lateKey: (e[14] & 2) !== 0 };
+    case EVENT.TX_END: {
+      const tStartMs = u32(e, 0);
+      return { ...head, type: 'tx_end', tStartMs, onAirMs: (head.tMs - tStartMs) >>> 0, reason: e[12] };
+    }
     case EVENT.TX_REFUSED:
       return { ...head, type: 'tx_refused', reason: e[4], detail: u16(e, 5) };
     case EVENT.HEARTBEAT:
-      return { ...head, type: 'heartbeat', flags1: e[2], state: e[3], rssiRaw: u16(e, 4), batteryMv: u16(e, 6), lockMs: u16(e, 10) };
+      return { ...head, type: 'heartbeat', flags1: e[2], pttPressed: (e[2] & 0x04) !== 0, state: e[3], rssiRaw: u16(e, 4), batteryMv: u16(e, 6), lockMs: u16(e, 10) };
     case EVENT.BATTERY:
       return { ...head, type: 'battery', batteryClass: e[0], level: e[1], mv: u16(e, 2) };
     case EVENT.PARAMS_CHANGED:
@@ -309,9 +334,13 @@ export function parseEvent(id, body) {
   }
 }
 
+export const STATE_TRANSMITTING = 2;
+
+export const TX_END_REASONS = ['PTT released', 'stopped by the TX timeout', 'stopped by a serial frame', 'ended'];
+
 export const TX_REFUSED_REASONS = {
   1: 'the serial lock was running (the page had just sent something)',
-  2: 'the frequency is outside the transmit bands',
+  2: 'the frequency is outside the transmit bands (136 to 174 MHz and 400 to 470 MHz)',
   3: 'the battery is flat',
   4: 'the supply voltage is too high',
   5: 'the battery is nearly flat',

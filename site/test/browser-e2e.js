@@ -5,7 +5,8 @@
 //
 // Needs site/files/ (the firmware files; see tools/build-manifest.js). Walks all four steps:
 // dry run, flash and check the radio, detach, backup, flash and check the AIOC, read the EQ,
-// connect, refuse and save a channel, play the level tone and read the level meter, disconnect.
+// connect, refuse and save a channel, play the level tone and read the level meter, key the
+// radio with its own PTT (the page shows it and sends nothing meanwhile), a refused TX, disconnect.
 import { createRequire } from 'node:module';
 import { readFileSync, existsSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -91,6 +92,23 @@ console.log('3', await waitText('meter-text', /in the green band/), '|', await t
 console.log('  mic opened', JSON.stringify(await p.evaluate(() => window.__micOpened)));
 await p.waitForTimeout(1500);
 console.log('  state', await text('r-state'));
+const liveTx = await p.evaluate(() => window.__liveTx);
+console.log('  subscribed with LIVE_TX:', liveTx);
+const wireBefore = await p.evaluate(() => window.__simLog.length);
+await p.evaluate(() => window.__sideKey(true));
+console.log('3', await waitText('r-state', /^Transmitting on 145\.500 MHz, high/));
+await p.fill('#f-freq', '145.6');
+await p.click('#f-save');
+console.log('3', await waitText('radio-status', /is transmitting/));
+await p.waitForTimeout(1200); // a heartbeat or two while transmitting
+console.log('  state', await text('r-state'));
+const sentWhileTx = (await p.evaluate(() => window.__simLog.length)) - wireBefore;
+console.log('  frames sent while transmitting:', sentWhileTx);
+await p.evaluate(() => window.__sideKey(false));
+console.log('3', await waitText('r-state', /^Receiving.*Last transmission 1\.5 s/));
+await p.evaluate(() => window.__refuse(2));
+console.log('3', await waitText('radio-status', /refused to transmit/));
+if (!liveTx || sentWhileTx !== 0) process.exitCode = 1;
 await p.click('#radio-disconnect');
 console.log('3', await waitText('radio-status', /Disconnected/));
 const micLeft = await p.evaluate(() => [document.getElementById('meter').hidden, window.__micOpened.every((o) => o.stopped)]);

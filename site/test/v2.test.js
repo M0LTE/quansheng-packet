@@ -160,6 +160,14 @@ test('SUBSCRIBE and LEVEL_TONE replies', () => {
   assert.deepEqual(v2.parseLevelTone(replyRest('level_tone_raw')), { gainCode: 64, word: 0x2854 });
 });
 
+test('EVENT_REPLAY request and reply', () => {
+  assert.equal(hex(encodeFrame(v2.CMD.EVENT_REPLAY, withTag(0x21, v2.encodeEventReplay(2)), false)), hex(vector('event_replay').request));
+  assert.deepEqual(v2.parseEventReplay(replyRest('event_replay', 4)), { firstSent: 2, countSent: 4, oldestAvailable: 0, nextSeq: 6 });
+  const again = vector('event_replay').frames[0];
+  const e = v2.parseEvent(again.id, again.body);
+  assert.deepEqual([e.type, e.seq, e.replay, e.ephemeral], ['tx_refused', 2, true, false]);
+});
+
 test('events', () => {
   const ev = (name, i = 0) => {
     const f = vector(name).frames[i];
@@ -177,7 +185,13 @@ test('events', () => {
   assert.equal(start.frequencyHz, 144_800_000);
   assert.equal(start.lockDelayMs, 12);
   assert.equal(start.lateKey, true);
-  assert.equal(ev('event_tx_start_and_end', 1).reason, 0);
+  assert.equal(start.deferred, true);
+  const end = ev('event_tx_start_and_end', 1);
+  assert.equal(end.reason, 0);
+  assert.equal(end.onAirMs, 100);
+  assert.equal(hb.ephemeral, true);
+  assert.equal(hb.state, 0);
+  assert.equal(hb.pttPressed, false);
   const refused = ev('event_tx_refused');
   assert.deepEqual([refused.reason, refused.detail], [1, 1234]);
   assert.equal(ev('event_boot').type, 'boot');
@@ -255,6 +269,8 @@ class FakeRadio {
     this.link = new FrameLink({ write: async (b) => this.fromHost(b) });
     this.requests = [];
     Object.assign(this, { silent, bootloader, dropFirst });
+    this.nextSeq = 0;
+    this.ring = []; // stored events: { id, seq, tMs, payload }
     this.params = new Map([
       [1, 144_800_000],
       [2, 0],
@@ -289,6 +305,20 @@ class FakeRadio {
       return;
     }
     const tag = f.body[0];
+    if (f.id === v2.CMD.SUBSCRIBE) {
+      this.subscribed = f.body.subarray(1);
+      this.send(encodeFrame(f.id + 0x80, Uint8Array.from([tag, 0, 20, 0, this.nextSeq & 0xff, this.nextSeq >> 8, 0, 0, 0, 0, 0, 0]), true));
+      return;
+    }
+    if (f.id === v2.CMD.EVENT_REPLAY) {
+      const from = f.body[1] | (f.body[2] << 8);
+      const again = this.ring.filter((e) => e.seq >= from);
+      for (const e of again) this.sendEvent(e, v2.EVENT_FLAG.REPLAY);
+      const first = again.length ? again[0].seq : this.nextSeq;
+      const oldest = this.ring.length ? this.ring[0].seq : this.nextSeq;
+      this.send(encodeFrame(f.id + 0x80, Uint8Array.from([tag, 0, 20, 0, first & 0xff, first >> 8, again.length, oldest & 0xff, oldest >> 8, this.nextSeq & 0xff, this.nextSeq >> 8]), true));
+      return;
+    }
     if (f.id === v2.CMD.SET_PARAMS) {
       // echo the records back, TX allowed, persist queued if asked
       const flags = f.body[1];
@@ -309,7 +339,47 @@ class FakeRadio {
       return;
     }
   }
+
+  sendEvent({ id, seq, tMs, payload }, flags) {
+    const body = new Uint8Array(7 + payload.length);
+    const dv = new DataView(body.buffer);
+    dv.setUint16(0, seq, true);
+    dv.setUint32(2, tMs, true);
+    body[6] = flags;
+    body.set(payload, 7);
+    this.send(encodePayload(buildPayload(id, body), true));
+  }
+
+  /** A stored event: takes the next seq; lost = the AIOC dropped it on the way (it stays in the ring). */
+  stored(event, payload, { tMs = 1000, flags = 0, lost = false } = {}) {
+    const e = { id: 0x50c0 + event, seq: this.nextSeq, tMs, payload: Uint8Array.from(payload) };
+    this.nextSeq = (this.nextSeq + 1) & 0xffff;
+    this.ring.push(e);
+    if (!lost) this.sendEvent(e, flags);
+  }
+
+  heartbeat(state, { flags1 = 0 } = {}) {
+    this.sendEvent({ id: 0x50c6, seq: this.nextSeq, tMs: 2000, payload: [0, 0, flags1, state, 0x77, 0, 0x78, 0x1e, 0, 0, 0, 0] }, v2.EVENT_FLAG.EPHEMERAL);
+  }
+
+  txStart(opts) {
+    // t_press 0, 145.5 MHz, high power, wide, deviation 0x856, no lock delay, no flags
+    const p = new Uint8Array(15);
+    new DataView(p.buffer).setUint32(4, 145_500_000, true);
+    p.set([2, 0, 0x56, 0x08], 8);
+    this.stored(v2.EVENT.TX_START, p, opts);
+  }
+
+  txEnd(onAirMs, reason = 0, opts = {}) {
+    const p = new Uint8Array(19);
+    new DataView(p.buffer).setUint32(0, 1000, true); // t_start (RF ready)
+    p[12] = reason;
+    this.stored(v2.EVENT.TX_END, p, { ...opts, tMs: 1000 + onAirMs });
+  }
 }
+
+const settle = (ms = 15) => new Promise((r) => setTimeout(r, ms));
+const TX_EVENTS = (1 << v2.EVENT.TX_START) | (1 << v2.EVENT.TX_END) | (1 << v2.EVENT.TX_REFUSED) | (1 << v2.EVENT.HEARTBEAT);
 
 test('client: hello, GET_INFO, GET_STATUS and GET_PARAMS against the vectors', async () => {
   const radio = new FakeRadio();
@@ -390,4 +460,114 @@ test('client: events reach onEvent', async () => {
   const hb = vector('event_heartbeat').frames[0];
   radio.link.receive(encodePayload(buildPayload(hb.id, hb.body), true));
   assert.deepEqual(got, ['heartbeat']);
+});
+
+test('client: follows TX_START, heartbeats and TX_END, and sends nothing while the radio transmits', async () => {
+  const radio = new FakeRadio();
+  const c = new RadioClient(radio.link);
+  const got = [];
+  c.onEvent = (e) => got.push(e.type);
+  await c.subscribe({ mask: TX_EVENTS, liveTx: true, heartbeatMs: 1000 });
+  assert.equal(radio.subscribed[4] & 1, 1, 'subscribed with LIVE_TX');
+  radio.heartbeat(0);
+  await settle();
+  assert.equal(c.transmitting, false);
+  radio.txStart();
+  await settle();
+  assert.equal(c.transmitting, true);
+  assert.deepEqual(c.tx, { frequencyHz: 145_500_000, power: 2, bandwidth: 0 });
+  const before = radio.requests.length;
+  await assert.rejects(c.getStatus(), (e) => e instanceof K5SafetyError && /transmitting/.test(e.message));
+  await assert.rejects(c.saveChannel({ frequencyHz: 144_800_000 }), K5SafetyError);
+  radio.heartbeat(v2.STATE_TRANSMITTING, { flags1: 0x04 });
+  await settle();
+  assert.equal(c.transmitting, true);
+  assert.equal(radio.requests.length, before, 'nothing sent while transmitting');
+  radio.txEnd(2400);
+  await settle();
+  assert.equal(c.transmitting, false);
+  assert.deepEqual(c.lastTx, { onAirMs: 2400, reason: 0 });
+  assert.equal((await c.getStatus()).batteryMv, 7800);
+  assert.deepEqual(got, ['heartbeat', 'tx_start', 'heartbeat', 'tx_end']);
+  assert.deepEqual(c.missing, []);
+});
+
+test('client: a heartbeat alone says when the radio transmits and when it has stopped', async () => {
+  const radio = new FakeRadio();
+  const c = new RadioClient(radio.link);
+  await c.subscribe({ mask: TX_EVENTS, liveTx: true, heartbeatMs: 1000 });
+  radio.heartbeat(v2.STATE_TRANSMITTING);
+  await settle();
+  assert.equal(c.transmitting, true);
+  assert.deepEqual(c.tx, {});
+  await assert.rejects(c.getStatus(), K5SafetyError);
+  radio.heartbeat(1);
+  await settle();
+  assert.equal(c.transmitting, false);
+});
+
+test('client: TX_REFUSED reaches onEvent with its reason; a deferred TX_START does not count as transmitting', async () => {
+  const radio = new FakeRadio();
+  const c = new RadioClient(radio.link);
+  const got = [];
+  c.onEvent = (e) => got.push(e);
+  await c.subscribe({ mask: TX_EVENTS, heartbeatMs: 1000 });
+  radio.stored(v2.EVENT.TX_REFUSED, [0, 0, 0, 0, 2, 0, 0]);
+  await settle();
+  assert.equal(got[0].type, 'tx_refused');
+  assert.match(v2.TX_REFUSED_REASONS[got[0].reason], /outside the transmit bands/);
+  assert.equal(c.transmitting, false);
+  // without LIVE_TX both arrive after the release, flagged DEFERRED
+  radio.txStart({ flags: v2.EVENT_FLAG.DEFERRED });
+  await settle();
+  assert.equal(c.transmitting, false);
+  radio.txEnd(30000, 1, { flags: v2.EVENT_FLAG.DEFERRED });
+  await settle();
+  assert.equal(c.transmitting, false);
+  assert.deepEqual(c.lastTx, { onAirMs: 30000, reason: 1 });
+});
+
+test('client: events the AIOC dropped are fetched with EVENT_REPLAY once a heartbeat says the radio is idle', async () => {
+  const radio = new FakeRadio();
+  const c = new RadioClient(radio.link);
+  const got = [];
+  c.onEvent = (e) => got.push(`${e.type}${e.replay ? ' (replay)' : ''}`);
+  await c.subscribe({ mask: TX_EVENTS, liveTx: true, heartbeatMs: 1000 });
+  // The AIOC keys the radio and drops what the radio says meanwhile.
+  radio.txStart({ lost: true });
+  radio.stored(v2.EVENT.TX_REFUSED, [0, 0, 0, 0, 2, 0, 0], { lost: true });
+  radio.txEnd(1500);
+  await settle();
+  assert.equal(c.transmitting, false);
+  assert.deepEqual(c.missing, [0, 1]);
+  const before = radio.requests.length;
+  radio.heartbeat(0);
+  await settle(40);
+  const replay = radio.requests.slice(before);
+  assert.deepEqual(replay.map((f) => f.id), [v2.CMD.EVENT_REPLAY]);
+  assert.deepEqual(Array.from(replay[0].body.subarray(1)), [0, 0]);
+  // The missed two arrive as history; the TX_END already seen is not repeated.
+  assert.deepEqual(got, ['tx_end', 'heartbeat', 'tx_start (replay)', 'tx_refused (replay)']);
+  assert.equal(c.transmitting, false, 'a replayed TX_START is history');
+  assert.deepEqual(c.missing, []);
+  // nothing more to fetch: the next heartbeat sends nothing
+  radio.heartbeat(0);
+  await settle(40);
+  assert.equal(radio.requests.length, before + 1);
+});
+
+test('client: no replay while the radio transmits or its PTT is held', async () => {
+  const radio = new FakeRadio();
+  const c = new RadioClient(radio.link);
+  await c.subscribe({ mask: TX_EVENTS, liveTx: true, heartbeatMs: 1000 });
+  radio.stored(v2.EVENT.TX_REFUSED, [0, 0, 0, 0, 1, 10, 0], { lost: true });
+  radio.heartbeat(v2.STATE_TRANSMITTING);
+  radio.heartbeat(0, { flags1: 0x04 });
+  await settle(40);
+  assert.deepEqual(c.missing, [0]);
+  assert.equal(radio.requests.filter((f) => f.id === v2.CMD.EVENT_REPLAY).length, 0);
+  radio.heartbeat(0);
+  await settle(40);
+  assert.equal(radio.requests.filter((f) => f.id === v2.CMD.EVENT_REPLAY).length, 1);
+  assert.deepEqual(c.missing, []);
 });

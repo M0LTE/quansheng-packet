@@ -24,6 +24,44 @@ let hb = null;
 function reply(id, tag, rest) {
   toHost(encodePayload(buildPayload(id + 0x80, Uint8Array.from([tag, 0, 20, 0, ...rest])), true));
 }
+// Events: stored ones take the next seq, heartbeats carry it and the radio's state.
+let seq = 0;
+let txState = 0;
+function event(n, payload, flags = 0, s = seq) {
+  const b = new Uint8Array(7 + payload.length);
+  new DataView(b.buffer).setUint16(0, s, true);
+  new DataView(b.buffer).setUint32(2, performance.now() >>> 0, true);
+  b[6] = flags;
+  b.set(payload, 7);
+  toHost(encodePayload(buildPayload(0x50c0 + n, b), true));
+}
+function stored(n, payload) {
+  event(n, payload);
+  seq = (seq + 1) & 0xffff;
+}
+function heartbeat() {
+  const p = vbody('event_heartbeat').slice(7);
+  p[3] = txState;
+  if (txState === 2) p[2] |= 0x04; // PTT pressed
+  event(6, p, 0x18);
+}
+// The radio's own PTT key: TX_START at 145.5 MHz, high power, then TX_END 1.5 s of RF later.
+window.__sideKey = (down) => {
+  const p = new Uint8Array(down ? 15 : 19);
+  const dv = new DataView(p.buffer);
+  if (down) {
+    dv.setUint32(4, params.get(1), true);
+    p[8] = params.get(2);
+    p[9] = params.get(3);
+    txState = 2;
+    stored(2, p);
+  } else {
+    txState = 0;
+    dv.setUint32(0, (performance.now() - 1500) >>> 0, true);
+    stored(3, p);
+  }
+};
+window.__refuse = (reason) => stored(4, [0, 0, 0, 0, reason, 0, 0]);
 function firmware(bytes) {
   for (const f of dec.feed(bytes)) {
     log.push(f.id.toString(16));
@@ -75,13 +113,11 @@ function firmware(bytes) {
         break;
       }
       case 0x5002: {
-        reply(f.id, tag, [0, 0, 0, 0, 0, 0, 0, 0]);
+        reply(f.id, tag, [seq & 0xff, seq >> 8, seq & 0xff, seq >> 8, 0, 0, 0, 0]);
         clearInterval(hb);
         const mask = rest[0] | (rest[1] << 8);
-        if (mask & (1 << 6)) {
-          const body = vbody('event_heartbeat');
-          hb = setInterval(() => toHost(encodePayload(buildPayload(0x50c6, body), true)), 1000);
-        }
+        window.__liveTx = (rest[4] & 1) === 1;
+        if (mask & (1 << 6)) hb = setInterval(heartbeat, 1000);
         break;
       }
       case 0x5007:

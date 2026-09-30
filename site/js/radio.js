@@ -5,6 +5,12 @@
 // sends ends any transmission and starts the radio's serial PTT lock. The client records when
 // a key-up would be honoured again (safeAt), and asks guard() before every send so the page can
 // refuse to send while the radio may be transmitting.
+//
+// The client also follows the radio's transmitter from its events (TX_START, TX_END and the
+// heartbeat's state, subscribed with LIVE_TX so they arrive during a transmission) and never
+// sends while it believes the radio is transmitting. It keeps the event sequence: events missed
+// (the AIOC drops the radio's bytes while the AIOC itself keys the radio) are fetched with
+// EVENT_REPLAY once a heartbeat says the radio is idle again.
 
 import { BEACON_IDS, K5ProtocolError, K5SafetyError, K5TimeoutError } from './k5link.js';
 import * as v2 from './v2.js';
@@ -41,7 +47,17 @@ export class RadioClient {
     this.guard = null;
     this.hello = null;
     this.info = null;
+    this.tx = null; // while the radio transmits: { frequencyHz, power, bandwidth } (empty if only a heartbeat said so)
+    this.lastTx = null; // the last live TX_END: { onAirMs, reason }
+    this.nextSeq = null; // the seq the next stored event should carry, once subscribed
+    this.missing = []; // stored event seqs missed, oldest first
+    this.catchingUp = false;
     link.onFrame = (f) => this._onFrame(f);
+  }
+
+  /** True while the radio is transmitting, as far as its events tell. */
+  get transmitting() {
+    return this.tx !== null;
   }
 
   /** ms until a PTT press would key at once (0 if now). */
@@ -60,12 +76,80 @@ export class RadioClient {
       this.pending.done(f);
       return;
     }
-    if (v2.isEvent(f.id) && f.crc === 'valid' && this.onEvent) {
+    if (v2.isEvent(f.id) && f.crc === 'valid') {
+      let e;
       try {
-        this.onEvent(v2.parseEvent(f.id, f.body));
+        e = v2.parseEvent(f.id, f.body);
       } catch {
-        // a short or odd event is not worth failing over
+        return; // a short or odd event is not worth failing over
       }
+      if (!this._track(e)) return;
+      try {
+        if (this.onEvent) this.onEvent(e);
+      } catch {
+        // nor is a display that failed over one
+      }
+    }
+  }
+
+  /** Sequence and transmitter state from an event; false if it is a replayed duplicate to drop. */
+  _track(e) {
+    if (e.replay) {
+      const i = this.missing.indexOf(e.seq);
+      if (i < 0) return false;
+      this.missing.splice(i, 1);
+      return true; // history: it does not change the transmitter state
+    }
+    if (this.nextSeq !== null) {
+      const ahead = (e.seq - this.nextSeq) & 0xffff;
+      if (ahead < 0x8000) {
+        for (let s = this.nextSeq; s !== e.seq && this.missing.length < 64; s = (s + 1) & 0xffff) this.missing.push(s);
+        this.nextSeq = e.ephemeral ? e.seq : (e.seq + 1) & 0xffff;
+      } else if (!e.ephemeral) {
+        this.missing = this.missing.filter((s) => s !== e.seq); // late, but here after all
+      }
+    }
+    if (e.type === 'tx_start') {
+      // A deferred one arrives after the transmission, just before its TX_END: old news.
+      if (!e.deferred) this.tx = { frequencyHz: e.frequencyHz, power: e.power, bandwidth: e.bandwidth };
+    } else if (e.type === 'tx_end') {
+      this.tx = null;
+      this.lastTx = { onAirMs: e.onAirMs, reason: e.reason };
+    } else if (e.type === 'heartbeat' && !e.deferred) {
+      if (e.state === v2.STATE_TRANSMITTING) this.tx = this.tx || {};
+      else {
+        this.tx = null;
+        if (this.missing.length && !e.pttPressed) setTimeout(() => this.catchUp().catch(() => {}), 0);
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Fetches missed events with EVENT_REPLAY; they reach onEvent with replay set. Does nothing
+   * while the radio transmits (the guard) or if nothing was missed.
+   */
+  async catchUp() {
+    if (this.catchingUp || !this.missing.length || this.tx) return;
+    this.catchingUp = true;
+    try {
+      await this._replayMissing();
+    } catch (e) {
+      if (!(e instanceof K5SafetyError)) this.missing = []; // the radio cannot help: give up rather than ask every second
+      throw e;
+    } finally {
+      this.catchingUp = false;
+    }
+  }
+
+  async _replayMissing() {
+    const before = (s, limit) => ((s - limit) & 0xffff) >= 0x8000;
+    for (let round = 0; round < 8 && this.missing.length; round++) {
+      const r = v2.parseEventReplay(await this.command(v2.CMD.EVENT_REPLAY, v2.encodeEventReplay(this.missing[0])));
+      // Anything older than the ring, or in the range just sent but not among it, is gone; with
+      // nothing sent, what is left was never stored or is still on its way.
+      const end = (r.firstSent + r.countSent) & 0xffff;
+      this.missing = this.missing.filter((s) => r.countSent > 0 && !before(s, r.oldestAvailable) && !before(s, end));
     }
   }
 
@@ -98,6 +182,7 @@ export class RadioClient {
   }
 
   async _exchange(id, body, match, timeoutMs, what) {
+    if (this.tx) throw new K5SafetyError('The radio is transmitting. Try again when it has finished.');
     const reason = this.guard ? this.guard() : null;
     if (reason) throw new K5SafetyError(reason);
     let lastError;
@@ -184,7 +269,10 @@ export class RadioClient {
   }
 
   async subscribe(opts) {
-    return v2.parseSubscribe(await this.command(v2.CMD.SUBSCRIBE, v2.encodeSubscribe(opts)));
+    const r = v2.parseSubscribe(await this.command(v2.CMD.SUBSCRIBE, v2.encodeSubscribe(opts)));
+    this.nextSeq = opts.mask ? r.nextSeq : null;
+    this.missing = [];
+    return r;
   }
 
   async levelTone(opts) {
