@@ -152,10 +152,12 @@ void RADIO_SetRxAudio(void)
 		((gEeprom.RX_DAC_GAIN & PKT_RX_DAC_GAIN_MAX) << 0));
 }
 
-static void ApplyTable(const RegOverride_t *t, uint8_t n, uint8_t phase)
+// The RAM register overrides (settings.h), last word on the registers for
+// this phase.
+void RADIO_ApplyRegOverrides(uint8_t phase)
 {
-	for (unsigned int i = 0; i < n; i++) {
-		const RegOverride_t *o = &t[i];
+	for (unsigned int i = 0; i < gRegOverrideRamCount; i++) {
+		const RegOverride_t *o = &gRegOverridesRam[i];
 		if (!(o->phase & phase))
 			continue;
 		uint16_t v = (BK4819_ReadRegister(o->reg) & o->andMask) | o->orValue;
@@ -163,14 +165,6 @@ static void ApplyTable(const RegOverride_t *t, uint8_t n, uint8_t phase)
 			v = (v & ~PKT_REG_40_DEV_MASK) | PKT_DEVIATION_MAX;
 		BK4819_WriteRegister(o->reg, v);
 	}
-}
-
-// The register override tables (settings.h), last word on the registers
-// for this phase: the EEPROM table, then the RAM trial table.
-void RADIO_ApplyRegOverrides(uint8_t phase)
-{
-	ApplyTable(gRegOverrides, gRegOverrideCount, phase);
-	ApplyTable(gRegOverridesRam, gRegOverrideRamCount, phase);
 }
 
 // Set the chip up to receive on gVfo, audio open. Called at power-on, after

@@ -120,8 +120,7 @@ static uint16_t GetStatus(uint8_t *o)
 	o[8]  = V2_State();
 	o[9]  = V2_Flags1();
 	o[10] = (PARAMS_LiveDiffers()           ? 0x01u : 0)
-	      | (gRegOverrideRamCount           ? 0x02u : 0)
-	      | (gRegOverrideCount              ? 0x04u : 0)
+	      | (gRegOverrideRamCount           ? 0x02u : 0)   // bit 2: no stored overrides
 	      | ((gSub.options & SUB_LIVE_TX)   ? 0x08u : 0)
 	      | (PARAMS_PersistPending()        ? 0x10u : 0);   // bit 5: no memory channels
 	o[11] = gVfo->OUTPUT_POWER;
@@ -316,6 +315,10 @@ static uint8_t RegOverride(const uint8_t *r, uint16_t n, uint8_t *o, uint16_t *l
 	if (op != 1 && count)         { *detail = 4; return V2_RANGE; }
 
 	switch (op) {
+		case 3:     // COMMIT and CLEAR_EEPROM: retired with the stored table
+		case 4:
+			*detail = 0;
+			return V2_UNSUPPORTED;
 		case 1: {   // ADD
 			if (gRegOverrideRamCount + count > REG_OVERRIDE_MAX) { *detail = 4; return V2_RANGE; }
 			for (uint8_t i = 0; i < count; i++) {
@@ -342,20 +345,6 @@ static uint8_t RegOverride(const uint8_t *r, uint16_t n, uint8_t *o, uint16_t *l
 			OVR_ClearRam();
 			Resetup();
 			break;
-		case 3:     // COMMIT: the RAM table becomes the EEPROM table
-		case 4:     // CLEAR_EEPROM
-			if (!gSettingsBlockValid)
-				return V2_EEPROM;
-			if (op == 3) {
-				memcpy(gRegOverrides, gRegOverridesRam, sizeof(gRegOverrides));
-				gRegOverrideCount = gRegOverrideRamCount;
-			}
-			else
-				gRegOverrideCount = 0;
-			OVR_ClearRam();
-			PARAMS_PersistOverrides();
-			Resetup();
-			break;
 		default:    // LIST
 			break;
 	}
@@ -366,7 +355,7 @@ static uint8_t RegOverride(const uint8_t *r, uint16_t n, uint8_t *o, uint16_t *l
 	put16(o + 1, gRegOverrideRamCount ? OVR_SecondsLeft() : 0xFFFF);
 	o[3] = gRegOverrideRamCount ? OVR_KeyupsLeft() : 0xFF;
 	l += 3;
-	l += ListOverrides(o + l, gRegOverrides, gRegOverrideCount);
+	o[l++] = 0;                                   // n_eeprom: there is no stored table
 	*len = l;
 	return V2_OK;
 }

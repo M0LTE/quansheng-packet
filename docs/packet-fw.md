@@ -50,7 +50,7 @@ CTCSS/DCS went because packet needs no tone squelch, and dropping it removes the
 - Display: frequency, TX/RX, RSSI in dBm and S-units, and the settings in use (for example `~5W WIDE TOT30`).
 
 **The watts are nominal, not measured.** The screen and the menu show the usual UV-K5 figures for the three power levels, the same on VHF and UHF, with a tilde because nothing measures them. What the radio really puts out depends on its factory PA calibration (0x1ED0 up), which varies from radio to radio: the bench K5's VHF high row is 105, 116 and 123 across 137 to 174 MHz, against 135 in most dumps, so at 145 MHz its high (about 110) is barely above its mid (105) and likely less than 5 W. Measure a radio's output before relying on the figure.
-- UART: the upstream EEPROM protocol and the BK4819 register commands, plus the serial control protocol v2 (`docs/protocol-v2.md`): identification, status, events (busy, bursts, TX timing, heartbeats), parameters, register access and overrides, a level tone.
+- UART: the upstream EEPROM protocol and the BK4819 register commands, plus the serial control protocol v2 (`docs/protocol-v2.md`): identification, status, events (busy, bursts, TX timing, heartbeats), parameters, register access and RAM-only overrides, a level tone.
 
 ## The audio path
 
@@ -93,19 +93,9 @@ Stored in a 16-byte block at EEPROM `0x1D00` (the old DTMF contacts area). The b
 
 The defaults (0x856 wide, 0x756 narrow) do that for the bench AIOC, which carries a stored TX EQ that cuts 5.74 dB at 1 kHz: 0x856 gives about 3 kHz at 0 dBFS. On the bench, fsk9600 decoded 15 of 15 at 0 dBFS with 0x856 (it failed at -6 dBFS with 0x956), and afsk1200 and qpsk3600 decoded 100% at 0 and -3 dBFS. **With a stock AIOC (no EQ) the equivalents are 0x762 wide and 0x662 narrow.** Deviation is a setting (menu DevW and DevN, or EEPROM 0x1D04 and 0x1D06): set it to suit the interface.
 
-### Register override table
+### Reserved: 0x1D10 to 0x1D4F
 
-For experiments without reflashing (TX filters and so on), 8 entries of 8 bytes at `0x1D10..0x1D4F`. It is used only when the settings block has its version byte, and the first menu save over foreign data in `0x1D00` blanks it.
-
-| Offset | Field |
-|---|---|
-| +0 | phase: bit 0 = after the TX set-up (every key-up), bit 1 = after the RX set-up (every return to receive); 0 or 0xFF ends the list |
-| +1 | BK4819 register; 0xFF ends the list |
-| +2 | AND mask, u16 LE |
-| +4 | OR value, u16 LE |
-| +6 | reserved, 0xFF |
-
-The register becomes `(value & mask) | or`, written after all of the firmware's own writes for that phase, so it wins. Refused (skipped): 0x00 soft reset, 0x30 TX/RX enables, 0x33 GPIO outputs (PA enable, RX enable, LNA switch, LEDs), 0x36 PA bias and gain, 0x37 power and LDOs, 0x38 and 0x39 frequency, 0x3B and 0x3C crystal trim, and anything above 0x7F. A REG_40 result is clamped to 0xA7F. The table is read at power-on and after a UART write session, like the settings; each entry is one 8-byte UART write. Example: `01 2B F8 FF 00 00 FF FF` clears REG_2B<2:0> on every key-up, which turns the TX HPF300, LPF and pre-emphasis back on.
+Until 30 September 2026 this held a stored register override table. It is gone: nothing reads or writes the area, and a radio that ran an older build may still have entries there. Register experiments use the protocol's RAM-only `REG_OVERRIDE`, which expires by time or key-ups and never survives a reboot (`docs/protocol-v2.md` 6.11).
 
 ### Operating channel
 
@@ -131,7 +121,7 @@ Keys on the main screen: digits enter a frequency, UP/DOWN step, F then 6 cycles
 
 **PTT sampling.** SysTick now runs at 1 ms (upstream 10 ms; the 10 ms and 500 ms slices are derived from it). `ptt.c` samples the PTT line every tick with separate press and release debounce, and the main loop acts on a change at once instead of waiting for the next 10 ms slice (upstream: 3 samples of 10 ms both ways, 20 to 30 ms).
 
-Timing settings, 8 bytes at `0x1D50` (one UART write; not in the menu; used only with a valid settings block, blanked with the override table on the first menu save over foreign data):
+Timing settings, 8 bytes at `0x1D50` (one UART write; not in the menu; used only with a valid settings block, blanked on the first menu save over foreign data):
 
 | Address | Setting | Range | Default |
 |---|---|---|---|

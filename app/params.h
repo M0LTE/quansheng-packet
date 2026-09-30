@@ -85,7 +85,6 @@ void     PARAMS_CancelPersist(void);
 bool     PARAMS_LiveDiffers(void);
 void     PARAMS_PersistService(bool allowed);      // one block per call
 bool     PARAMS_PersistSubscription(uint32_t mask, uint8_t options, uint16_t heartbeatMs);
-bool     PARAMS_PersistOverrides(void);            // the EEPROM table as loaded (gRegOverrides)
 void     PARAMS_Changed(uint8_t source);           // PARAMS_CHANGED for what differs from the last look
 // Re-read the stored view now. Not needed after an EEPROM write (the
 // view follows those by itself); for a change in how EEPROM is decoded,

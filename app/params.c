@@ -46,7 +46,7 @@ static const uint8_t kSize[P_LAST + 1] = {
 
 // EEPROM blocks waiting to be written, in this order (V2_B before V2_A,
 // so a fresh v2 block is blanked before its version byte makes it count)
-enum { J_SET_A, J_SET_B, J_TIMING, J_OPERATING, J_V2_B, J_V2_A, J_OVR0 };
+enum { J_SET_A, J_SET_B, J_TIMING, J_OPERATING, J_V2_B, J_V2_A };
 
 static struct {
 	EEPROM_Config_t e;
@@ -386,14 +386,6 @@ bool PARAMS_PersistSubscription(uint32_t mask, uint8_t options, uint16_t heartbe
 	return true;
 }
 
-bool PARAMS_PersistOverrides(void)
-{
-	if (!gSettingsBlockValid)
-		return false;
-	gJobs |= 0xFFu << J_OVR0;
-	return true;
-}
-
 static bool Has(uint8_t id)
 {
 	return (gPMask >> id) & 1u;
@@ -431,76 +423,60 @@ void PARAMS_PersistService(bool allowed)
 	const bool blockValid = ReadByte(SETTINGS_PKT_BLOCK) == SETTINGS_PKT_VERSION;
 	const bool v2Valid    = blockValid && ReadByte(SETTINGS_V2_BLOCK) == SETTINGS_V2_VERSION;
 
-	if (j >= J_OVR0) {
-		const uint8_t i = j - J_OVR0;
-		if (!blockValid)
-			goto done;               // the settings block went away meanwhile
-		addr = SETTINGS_REG_OVERRIDES + i * 8u;
-		memset(b, 0xFF, sizeof(b));
-		if (i < gRegOverrideCount) {
-			const RegOverride_t *o = &gRegOverrides[i];
-			b[0] = o->phase;
-			b[1] = o->reg;
-			put16(b + 2, o->andMask);
-			put16(b + 4, o->orValue);
-		}
-	}
-	else {
-		static const uint16_t kAddr[] = { 0x1D00, 0x1D08, SETTINGS_TIMING, SETTINGS_OPERATING, SETTINGS_V2_BLOCK + 8, SETTINGS_V2_BLOCK };
-		addr = kAddr[j];
-		if (!blockValid)
-			goto done;               // the settings block went away meanwhile
-		EEPROM_ReadBuffer(addr, b, 8);
-		switch (j) {
-			case J_SET_A:
-				Patch8(b + 1, P_BUSY_SQL_LEVEL);
-				if (Has(P_TX_TIMEOUT_S))
-					b[2] = TimeoutIndex(gPVal[P_TX_TIMEOUT_S]);
-				Patch16(b + 4, P_DEV_WIDE);
-				Patch16(b + 6, P_DEV_NARROW);
-				break;
-			case J_SET_B:
-				Patch8(b + 0, P_RX_GAIN);
-				Patch8(b + 1, P_RX_DAC_GAIN);
-				Patch8(b + 2, P_BACKLIGHT);
-				Patch8(b + 4, P_KEY_LOCK);
-				break;
-			case J_OPERATING:
-				if (!Has(P_FREQ_HZ) && !FREQUENCY_IsReceivable(get32(b)))
-					put32(b, gVfo->Frequency);   // never leave the block unusable
-				if (Has(P_FREQ_HZ))
-					put32(b, gPVal[P_FREQ_HZ] / 10u);
-				Patch8(b + 4, P_POWER);
-				Patch8(b + 5, P_BANDWIDTH);
-				b[6] = gPStep;
-				break;
-			case J_TIMING:
-				Patch8(b + 0, P_PTT_PRESS_MS);
-				Patch8(b + 1, P_PTT_RELEASE_MS);
-				Patch8(b + 2, P_PA_ENABLE_DELAY_MS);
-				Patch8(b + 3, P_PA_BIAS_DELAY_MS);
-				break;
-			case J_V2_B:
-				if (!v2Valid)
-					memset(b, 0xFF, sizeof(b));
-				if (gPSub) {
-					put32(b, gPSubMask);
-					put16(b + 4, gPSubHeartbeat);
-					b[6] = gPSubOptions;
-				}
-				break;
-			case J_V2_A:
-				if (!v2Valid)
-					memset(b, 0xFF, sizeof(b));
-				b[0] = SETTINGS_V2_VERSION;
-				if (Has(P_SERIAL_LOCK_MS))
-					b[1] = (uint8_t)(gPVal[P_SERIAL_LOCK_MS] / 10u);
-				Patch8(b + 2, P_BUSY_SOURCE);
-				Patch8(b + 3, P_BUSY_HANG_MS);
-				Patch16(b + 4, P_BUSY_RSSI_OPEN);
-				Patch16(b + 6, P_BUSY_RSSI_CLOSE);
-				break;
-		}
+	static const uint16_t kAddr[] = { 0x1D00, 0x1D08, SETTINGS_TIMING, SETTINGS_OPERATING, SETTINGS_V2_BLOCK + 8, SETTINGS_V2_BLOCK };
+	addr = kAddr[j];
+	if (!blockValid)
+		goto done;               // the settings block went away meanwhile
+	EEPROM_ReadBuffer(addr, b, 8);
+	switch (j) {
+		case J_SET_A:
+			Patch8(b + 1, P_BUSY_SQL_LEVEL);
+			if (Has(P_TX_TIMEOUT_S))
+				b[2] = TimeoutIndex(gPVal[P_TX_TIMEOUT_S]);
+			Patch16(b + 4, P_DEV_WIDE);
+			Patch16(b + 6, P_DEV_NARROW);
+			break;
+		case J_SET_B:
+			Patch8(b + 0, P_RX_GAIN);
+			Patch8(b + 1, P_RX_DAC_GAIN);
+			Patch8(b + 2, P_BACKLIGHT);
+			Patch8(b + 4, P_KEY_LOCK);
+			break;
+		case J_OPERATING:
+			if (!Has(P_FREQ_HZ) && !FREQUENCY_IsReceivable(get32(b)))
+				put32(b, gVfo->Frequency);   // never leave the block unusable
+			if (Has(P_FREQ_HZ))
+				put32(b, gPVal[P_FREQ_HZ] / 10u);
+			Patch8(b + 4, P_POWER);
+			Patch8(b + 5, P_BANDWIDTH);
+			b[6] = gPStep;
+			break;
+		case J_TIMING:
+			Patch8(b + 0, P_PTT_PRESS_MS);
+			Patch8(b + 1, P_PTT_RELEASE_MS);
+			Patch8(b + 2, P_PA_ENABLE_DELAY_MS);
+			Patch8(b + 3, P_PA_BIAS_DELAY_MS);
+			break;
+		case J_V2_B:
+			if (!v2Valid)
+				memset(b, 0xFF, sizeof(b));
+			if (gPSub) {
+				put32(b, gPSubMask);
+				put16(b + 4, gPSubHeartbeat);
+				b[6] = gPSubOptions;
+			}
+			break;
+		case J_V2_A:
+			if (!v2Valid)
+				memset(b, 0xFF, sizeof(b));
+			b[0] = SETTINGS_V2_VERSION;
+			if (Has(P_SERIAL_LOCK_MS))
+				b[1] = (uint8_t)(gPVal[P_SERIAL_LOCK_MS] / 10u);
+			Patch8(b + 2, P_BUSY_SOURCE);
+			Patch8(b + 3, P_BUSY_HANG_MS);
+			Patch16(b + 4, P_BUSY_RSSI_OPEN);
+			Patch16(b + 6, P_BUSY_RSSI_CLOSE);
+			break;
 	}
 
 	EEPROM_WriteBuffer(addr, b);   // refuses 0x1E00 and up

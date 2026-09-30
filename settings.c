@@ -27,15 +27,13 @@ EEPROM_Config_t gEeprom = { 0 };
 
 const uint8_t gTxTimeoutSeconds[7] = {5, 10, 15, 20, 30, 60, 120};
 
-RegOverride_t gRegOverrides[REG_OVERRIDE_MAX];
-uint8_t       gRegOverrideCount;
 RegOverride_t gRegOverridesRam[REG_OVERRIDE_MAX];
 uint8_t       gRegOverrideRamCount;
 
 V2_Config_t   gV2;
 bool          gSettingsBlockValid;
 
-// Registers an override may never touch: soft reset (00), TX/RX and PA
+// Registers an override (or a v2 REG_WRITE) may never touch: soft reset (00), TX/RX and PA
 // enables (30), GPIO outputs incl. PA enable, RX enable, LNA switch and
 // LEDs (33), PA bias and gain (36), power and LDOs (37), frequency (38,
 // 39), crystal trim (3B, 3C). Anything above 0x7F is not a register.
@@ -47,28 +45,6 @@ bool SETTINGS_RegOverrideAllowed(uint8_t reg)
 			return false;
 		default:
 			return reg <= 0x7F;
-	}
-}
-
-static void LoadRegOverrides(bool blockValid)
-{
-	gRegOverrideCount = 0;
-	if (!blockValid)
-		return;
-
-	for (unsigned int i = 0; i < REG_OVERRIDE_MAX; i++) {
-		uint8_t e[8];
-		EEPROM_ReadBuffer(SETTINGS_REG_OVERRIDES + i * 8, e, 8);
-		const uint8_t phase = e[0] & (REG_OVERRIDE_TX | REG_OVERRIDE_RX);
-		if (e[0] == 0xFF || phase == 0 || e[1] == 0xFF)
-			break;                          // end of the list
-		if (!SETTINGS_RegOverrideAllowed(e[1]))
-			continue;                       // refused, skipped
-		RegOverride_t *o = &gRegOverrides[gRegOverrideCount++];
-		o->phase   = phase;
-		o->reg     = e[1];
-		o->andMask = e[2] | (e[3] << 8);
-		o->orValue = e[4] | (e[5] << 8);
 	}
 }
 
@@ -139,7 +115,6 @@ void SETTINGS_InitEEPROM(void)
 	gSettingsBlockValid = blockValid;
 	if (!blockValid)
 		memset(Data, 0xFF, 16);   // blank, or left over from another firmware: all defaults
-	LoadRegOverrides(blockValid);
 
 	// 1D50..1D57: key-up and key-down timing
 	uint8_t T[8];
@@ -264,13 +239,11 @@ void SETTINGS_SaveSettings(void)
 {
 	uint8_t State[16];
 
-	// First save over data that is not ours: blank the override table, the
-	// timing and the v2 block too, so leftovers there never become settings.
+	// First save over data that is not ours: blank the timing, operating
+	// and v2 blocks too, so leftovers there never become settings.
 	EEPROM_ReadBuffer(SETTINGS_PKT_BLOCK, State, 1);
 	if (State[0] != SETTINGS_PKT_VERSION) {
 		memset(State, 0xFF, sizeof(State));
-		for (unsigned int i = 0; i < REG_OVERRIDE_MAX; i++)
-			EEPROM_WriteBuffer(SETTINGS_REG_OVERRIDES + i * 8, State);
 		EEPROM_WriteBuffer(SETTINGS_TIMING, State);
 		EEPROM_WriteBuffer(SETTINGS_OPERATING, State);
 		EEPROM_WriteBuffer(SETTINGS_V2_BLOCK + 0, State);

@@ -233,7 +233,7 @@ Request: empty. Reply (34 bytes):
 | 4 | u32 | frequency | Hz |
 | 8 | u8 | state | 0 receiving, nothing detected; 1 receiving, busy (8.2); 2 transmitting; 3 not used (was monitor; the firmware has no squelch); 4 reduced service |
 | 9 | u8 | flags1 | bit 0 the chip's squelch detector open (a detector only, 8.2), bit 1 busy (8.2), bit 2 PTT pressed, bit 3 lock active, bit 4 TX allowed at this frequency, bit 5 TX latched (release needed), bit 6 level tone running, bit 7 late key pending |
-| 10 | u8 | flags2 | bit 0 live params differ from stored, bit 1 RAM overrides active, bit 2 EEPROM overrides active, bit 3 LIVE_TX on, bit 4 persist in progress, bit 5 reserved (was memory-channel mode; the firmware has no memory channels), 0 |
+| 10 | u8 | flags2 | bit 0 live params differ from stored, bit 1 RAM overrides active, bit 2 reserved, always 0 (was EEPROM overrides active; the stored table is retired), bit 3 LIVE_TX on, bit 4 persist in progress, bit 5 reserved (was memory-channel mode; the firmware has no memory channels), 0 |
 | 11 | u8 | power | 0 low, 1 mid, 2 high |
 | 12 | u8 | bandwidth | 0 wide, 1 narrow |
 | 13 | u8 | busy detector level | 1 to 9 (BUSY_SQL_LEVEL; there is no squelch) |
@@ -332,23 +332,23 @@ Request: `u8 first`, `u8 count` (1 to 64, `first + count <= 0x80`), `u8 flags` (
 
 ### 6.10 REG_WRITE (0x5009)
 
-Request: `u8 n` (1 to 16), then n x `(u8 reg, u16 value)`. Registers the override table refuses (0x00, 0x30, 0x33, 0x36, 0x37, 0x38, 0x39, 0x3B, 0x3C, above 0x7F) reject the whole command with REFUSED. Written in order; read back after the last write. `n` outside 1 to 16: `RANGE` detail 0; a body that is not `1 + 3n` bytes: `BAD_LENGTH`. Reply: `u8 n`, n x `(u8 reg, u16 read-back)`. Registers the firmware manages (7D, 40, 47, 48, 7E, 2B, 43, 31 and the squelch set) are rewritten at the next set-up; use parameters or `REG_OVERRIDE` for those. Legacy 0x0602 stays unrestricted.
+Request: `u8 n` (1 to 16), then n x `(u8 reg, u16 value)`. Registers `REG_OVERRIDE` refuses (0x00, 0x30, 0x33, 0x36, 0x37, 0x38, 0x39, 0x3B, 0x3C, above 0x7F) reject the whole command with REFUSED. Written in order; read back after the last write. `n` outside 1 to 16: `RANGE` detail 0; a body that is not `1 + 3n` bytes: `BAD_LENGTH`. Reply: `u8 n`, n x `(u8 reg, u16 read-back)`. Registers the firmware manages (7D, 40, 47, 48, 7E, 2B, 43, 31 and the squelch set) are rewritten at the next set-up; use parameters or `REG_OVERRIDE` for those. Legacy 0x0602 stays unrestricted.
 
 ### 6.11 REG_OVERRIDE (0x500A)
 
-A RAM override table for safe trials, applied after the EEPROM table in each phase, same entry semantics (`docs/packet-fw.md`): register = `(value & and) | or`, same refusal list, REG_40 clamped to 0xA7F.
+A RAM-only override table for safe trials. In its phase (TX: after the TX set-up at every key-up; RX: after every receive set-up) each entry sets its register to `(value & and) | or` after all of the firmware's own writes, so it wins. Refused registers: 0x00, 0x30, 0x33, 0x36, 0x37, 0x38, 0x39, 0x3B, 0x3C and anything above 0x7F. A REG_40 result is clamped to 0xA7F. The table never outlives its bound or a reboot: there is no stored table (until 30 September 2026 there was one at EEPROM 0x1D10 to 0x1D4F, with ops 3 and 4 to write it; they are retired).
 
 Request:
 
 | Off | Type | Field |
 |---|---|---|
-| 0 | u8 | op: 0 LIST, 1 ADD, 2 CLEAR (RAM table), 3 COMMIT (RAM table replaces the EEPROM table), 4 CLEAR_EEPROM |
+| 0 | u8 | op: 0 LIST, 1 ADD, 2 CLEAR; 3 and 4 (COMMIT, CLEAR_EEPROM) are retired and reply `UNSUPPORTED`, detail 0 |
 | 1 | u16 | expiry, s: 0 none (ADD only; restarts the timer) |
 | 3 | u8 | expiry, key-ups: 0 none (ADD only) |
 | 4 | u8 | n entries (ADD only, else 0) |
 | 5 | n x 6 | `u8 phase` (bit 0 TX, bit 1 RX), `u8 reg`, `u16 and`, `u16 or` |
 
-At most 8 RAM entries (more: `RANGE`, detail 4). An entry's phase must be 1 to 3 (`RANGE`, detail = the offset of its phase byte in the request after the tag); a refused register gives `REFUSED` (detail = register); the whole command is rejected. Ops other than ADD must carry n = 0 (`RANGE`, detail 4); any op above 4: `RANGE`, detail 0. ADD takes effect at once for RX-phase entries (the RX-phase overrides are re-applied) and at the next key-up for TX-phase entries. CLEAR, COMMIT and CLEAR_EEPROM set the receiver up again (not in reduced service). An expiry that falls during a transmission takes effect when it ends. When either expiry is reached the RAM table is cleared, the receiver set up again, and `OVERRIDE_EXPIRED` sent: a bad trial cannot outlive its bound. COMMIT and CLEAR_EEPROM need a valid settings block, write 0x1D10 to 0x1D4F, reload the EEPROM table, and COMMIT clears the RAM table. Reply: `u8 n_ram`, `u16 expiry s left` (0xFFFF none), `u8 key-ups left` (0xFF none), n_ram x 6 bytes, `u8 n_eeprom`, n_eeprom x 6 bytes.
+At most 8 RAM entries (more: `RANGE`, detail 4). An entry's phase must be 1 to 3 (`RANGE`, detail = the offset of its phase byte in the request after the tag); a refused register gives `REFUSED` (detail = register); the whole command is rejected. Ops other than ADD must carry n = 0 (`RANGE`, detail 4); any op above 4: `RANGE`, detail 0. ADD takes effect at once for RX-phase entries (the RX-phase overrides are re-applied) and at the next key-up for TX-phase entries. CLEAR sets the receiver up again (not in reduced service). An expiry that falls during a transmission takes effect when it ends. When either expiry is reached the RAM table is cleared, the receiver set up again, and `OVERRIDE_EXPIRED` sent: a bad trial cannot outlive its bound. Reply: `u8 n_ram`, `u16 expiry s left` (0xFFFF none), `u8 key-ups left` (0xFF none), n_ram x 6 bytes, `u8 n_eeprom`, always 0 (kept so the layout is unchanged).
 
 ### 6.12 EVENT_REPLAY (0x500B)
 
@@ -401,7 +401,7 @@ Notes:
 
 ### 7.1 v2 EEPROM block (0x1D60 to 0x1D6F)
 
-Used only when the v1 settings block (0x1D00) is valid and 0x1D60 holds its layout version. A single byte out of range means "default". The first menu save over foreign data at 0x1D00 blanks this block too, as it already blanks the override table and timing block.
+Used only when the v1 settings block (0x1D00) is valid and 0x1D60 holds its layout version. A single byte out of range means "default". The first menu save over foreign data at 0x1D00 blanks this block too, with the timing and operating blocks.
 
 | Address | Content | Blank means |
 |---|---|---|
@@ -585,7 +585,7 @@ A 1 s heartbeat uses under 1% of the link; a 10 ms RSSI stream in batches of 10 
 - **Busy from the chip, not the audio.** The squelch result and RSSI are available within a millisecond, independent of modem and baud rate. CSMA and p-persistence stay in the host; the radio only supplies a trustworthy, timestamped busy state, the occupancy per heartbeat, and a "busy at the press" flag on each transmission.
 - **Ephemeral versus stored events.** Heartbeats and the RSSI stream are worthless late, so they are never stored and never replayed; they carry the next seq so they still reveal gaps.
 - **TLV parameters.** Atomic multi-field sets, read-back of what was really applied, partial reads, and new parameters without new commands. RAM by default; EEPROM only on request, because persisting on every QSY wears the EEPROM and blocks for milliseconds.
-- **Trial overrides that expire.** A register experiment that kills receive cannot outlive its time or key-up bound, and COMMIT turns a good one into the existing EEPROM table.
+- **Trial overrides that expire.** A register experiment that kills receive cannot outlive its time or key-up bound or a reboot. A good one belongs in the firmware source, not in EEPROM.
 - **v2 marker in the hello reply.** Every host sends a hello first anyway, so identification costs no extra round trip, and the challenge field is unused by every tool when the AES flag is clear.
 - **Real CRC on new frames only.** Legacy replies stay byte-identical; new frames can be checked, which matters because the AIOC truncates frames when PTT is asserted.
 - **No serial keying in v2.** The case for it: an atomic listen-before-talk (the radio checks busy and keys in the same millisecond, with no USB race), exact-length timed transmissions for turnaround tests, and radios on cables without a HID PTT. The case against, which wins for now: the AIOC's HID PTT already works, has a host watchdog, and is what pdn-soundmodem uses; a second keying path doubles the failure modes; audio still comes from the AIOC with no shared clock; and v1's "any frame ends TX" rule would have to be broken for the unkey command. If it is ever added, at 0x5020: disabled unless an EEPROM flag enables it, a mandatory duration of at most 10 s and at most the TX timeout, one shot, ended by any other frame or PTT edge, optional refuse-if-busy, reported through `TX_START` and `TX_END` like any other transmission.
@@ -633,7 +633,8 @@ Everything in sections 2 to 9 is implemented, with the points below settled by t
 | Serial PTT lock in ms, late key up to 30 ms, refusal and latch, lock_ms in every reply (5.3) | implemented |
 | GET_INFO, GET_STATUS, SUBSCRIBE, TIME_SYNC, GET_COUNTERS | implemented |
 | GET_PARAMS, SET_PARAMS, SAVE_PARAMS, all 23 parameters (0x01 to 0x19 except the retired 0x06 and 0x07), v2 EEPROM block | implemented |
-| REG_READ, REG_WRITE, REG_OVERRIDE with expiry | implemented |
+| REG_READ, REG_WRITE, REG_OVERRIDE with expiry (RAM only) | implemented |
+| Stored register override table (30 September) | removed: REG_OVERRIDE COMMIT and CLEAR_EEPROM reply UNSUPPORTED, GET_STATUS flags2 bit 2 is always 0, EEPROM 0x1D10 to 0x1D4F is neither read nor written |
 | LEVEL_TONE | mode 1 (raw) implemented; mode 0 replies UNSUPPORTED until the calibration byte 0x1D6F is set, and its law is provisional |
 | Events: CD, RX_BURST, TX_START, TX_END, TX_REFUSED, RSSI_STREAM, HEARTBEAT, BATTERY, PARAMS_CHANGED, EVENTS_LOST, TONE_END, OVERRIDE_EXPIRED, BOOT | implemented |
 | Deferral, LIVE_TX, sequence numbers, timestamps and flags, EVENT_REPLAY | implemented |

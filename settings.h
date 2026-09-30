@@ -70,28 +70,13 @@ enum {
 #define SETTINGS_PKT_BLOCK        0x1D00u
 #define SETTINGS_PKT_VERSION      1u
 
-// Register override table (for experiments without reflashing): 8 entries
-// of 8 bytes at 0x1D10..0x1D4F, used only when the settings block above
-// carries its layout version. Each entry:
-//
-//   +0  phase: bit 0 = after the TX set-up (every key-up),
-//              bit 1 = after the RX set-up (every return to receive and
-//              every receive set-up); 0 or 0xFF ends the list
-//   +1  BK4819 register; 0xFF ends the list
-//   +2  AND mask, u16 little-endian
-//   +4  OR value, u16 little-endian
-//   +6  reserved (0xFF)
-//
-// The register becomes (value & mask) | or, written after all of the
-// firmware's own writes for that phase, so it wins. Registers that key the
-// transmitter, drive the PA, set the frequency or reset or power the chip
-// are refused (see RegOverrideAllowed in settings.c). A REG_40 result is
-// clamped to PKT_DEVIATION_MAX. The table is read at power-on and after a
-// UART EEPROM write session, like the settings.
-#define SETTINGS_REG_OVERRIDES    0x1D10u
+// 0x1D10..0x1D4F is reserved: until 2026-09-30 it held a stored register
+// override table. Nothing reads or writes it any more; a radio that ran an
+// older build may still have entries there, so a future use needs its own
+// layout version byte.
 
-// Key-up and key-down timing, 8 bytes at 0x1D50 (after the override table),
-// used only with a valid settings block like the table. One 8-byte UART
+// Key-up and key-down timing, 8 bytes at 0x1D50,
+// used only with a valid settings block. One 8-byte UART
 // write changes all of it; the menu does not show it.
 //
 //   0x1D50  PTT press debounce, ms, 1 to 40 (default 5)
@@ -128,6 +113,14 @@ enum {
 #define REG_OVERRIDE_TX           0x01u
 #define REG_OVERRIDE_RX           0x02u
 
+// Register overrides (protocol v2 REG_OVERRIDE): a RAM-only trial table,
+// bounded by time or key-ups (app/monitor.c). In each phase (TX: after the
+// TX set-up, every key-up; RX: after every receive set-up) each entry sets
+// its register to (value & andMask) | orValue after all of the firmware's
+// own writes, so it wins. Registers that key the transmitter, drive the
+// PA, set the frequency or reset or power the chip are refused (see
+// SETTINGS_RegOverrideAllowed). A REG_40 result is clamped to
+// PKT_DEVIATION_MAX.
 typedef struct {
 	uint8_t  phase;
 	uint8_t  reg;
@@ -135,17 +128,13 @@ typedef struct {
 	uint16_t orValue;
 } RegOverride_t;
 
-// the EEPROM table as loaded, and the RAM trial table (protocol v2
-// REG_OVERRIDE), applied after it in each phase
-extern RegOverride_t gRegOverrides[REG_OVERRIDE_MAX];
-extern uint8_t       gRegOverrideCount;
 extern RegOverride_t gRegOverridesRam[REG_OVERRIDE_MAX];
 extern uint8_t       gRegOverrideRamCount;
 
 // Protocol v2 settings, 16 bytes at 0x1D60 (docs/protocol-v2.md 7.1), used
 // only when the settings block above is valid and 0x1D60 holds its layout
 // version. A byte out of range means "default". The first menu save over
-// foreign data at 0x1D00 blanks it, with the override table and timing.
+// foreign data at 0x1D00 blanks it, with the timing and operating blocks.
 //
 //   0x1D60  layout version (1)
 //   0x1D61  serial PTT lock, 10 ms units, 0 to 150 (default 2 = 20 ms)

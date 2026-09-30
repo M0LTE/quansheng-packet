@@ -297,6 +297,17 @@
       ]
     },
     {
+      "name": "reg_override_commit_retired",
+      "state": "one RAM entry active; REG_OVERRIDE op 3 (COMMIT, retired with the stored table): UNSUPPORTED, detail 0",
+      "request_mode": "plain",
+      "request": "ABCD0A000A5006009503000000005A7BDCBA",
+      "response_mode": "plain",
+      "response": "ABCD09008A500500950814000054FDDCBA",
+      "frames": [
+        { "id": "0x508A", "crc": "real", "body": "9508140000" }
+      ]
+    },
+    {
       "name": "level_tone_raw",
       "state": "LEVEL_TONE 1000 Hz, mode 1 (raw), gain code 64, 500 ms",
       "request_mode": "plain",

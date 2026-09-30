@@ -1102,32 +1102,26 @@ static void test_overrides(void)
 	CHECK(gRegOverrideRamCount == 0);
 	CHECK(events(EV_OVERRIDE_EXPIRED, &e) == 1 && e->body[7] == 1);
 
-	// COMMIT needs the settings block; then 0x1D10 holds the table
-	f = v2(V2_REG_OVERRIDE, 0x94, r, 11);
-	uint8_t c[5] = { 3, 0, 0, 0, 0 };
-	CHECK(status(v2(V2_REG_OVERRIDE, 0x95, c, 5)) == V2_EEPROM);
+	// COMMIT and CLEAR_EEPROM went with the stored table: UNSUPPORTED,
+	// detail 0, nothing written, the RAM table untouched
 	valid_settings_block();
-	f = v2(V2_REG_OVERRIDE, 0x96, r, 11);
-	f = v2(V2_REG_OVERRIDE, 0x97, c, 5);
-	CHECK(status(f) == V2_OK && rb(f)[0] == 0 && rb(f)[4] == 1);
-	host_advance(20);
-	CHECK(eeprom[0x1D10] == REG_OVERRIDE_RX && eeprom[0x1D11] == 0x2B && eeprom[0x1D12] == 0xF8 && eeprom[0x1D18] == 0xFF);
-	host_boot_keep_eeprom();
-	CHECK(gRegOverrideCount == 1 && gRegOverrides[0].reg == 0x2B);
-	host_send_mode(0x0514, &session, 4, false);
+	f = v2(V2_REG_OVERRIDE, 0x94, r, 11);
+	CHECK(status(f) == V2_OK && gRegOverrideRamCount == 1);
+	uint8_t c[5] = { 3, 0, 0, 0, 0 };
+	f = v2(V2_REG_OVERRIDE, 0x95, c, 5);
+	CHECK(status(f) == V2_UNSUPPORTED && rb(f)[0] == 0);
+	vec("reg_override_commit_retired", "one RAM entry active; REG_OVERRIDE op 3 (COMMIT, retired with the stored table): UNSUPPORTED, detail 0");
 	c[0] = 4;
 	f = v2(V2_REG_OVERRIDE, 0x98, c, 5);
-	CHECK(status(f) == V2_OK && gRegOverrideCount == 0);
+	CHECK(status(f) == V2_UNSUPPORTED && rb(f)[0] == 0);
 	host_advance(20);
-	CHECK(eeprom[0x1D10] == 0xFF);
-	// queued table writes check the settings block again when they run
-	v2(V2_REG_OVERRIDE, 0x9B, r, 11);
-	c[0] = 3;
-	CHECK(status(v2(V2_REG_OVERRIDE, 0x9C, c, 5)) == V2_OK);
-	eeprom[SETTINGS_PKT_BLOCK] = 0x41;               // the block went away meanwhile
-	host_advance(20);
-	CHECK(eeprom[0x1D10] == 0xFF && !PARAMS_PersistPending());
-	eeprom[SETTINGS_PKT_BLOCK] = SETTINGS_PKT_VERSION;
+	CHECK(gRegOverrideRamCount == 1 && !PARAMS_PersistPending());
+	for (unsigned a = 0x1D10; a < 0x1D50; a++)
+		if (eeprom[a] != 0xFF) { CHECK(eeprom[a] == 0xFF); break; }
+	// LIST: the RAM table, then n_eeprom, always 0
+	c[0] = 0;
+	f = v2(V2_REG_OVERRIDE, 0x9B, c, 5);
+	CHECK(status(f) == V2_OK && rb(f)[0] == 1 && f->body_len == 4 + 4 + 6 + 1 && rb(f)[10] == 0);
 	c[0] = 2;
 	CHECK(status(v2(V2_REG_OVERRIDE, 0x99, c, 5)) == V2_OK);
 	c[0] = 5;

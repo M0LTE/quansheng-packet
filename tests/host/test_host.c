@@ -412,9 +412,12 @@ static void test_tx_rx_registers(void)
 	CHECK(regs[0x30] == 0);
 }
 
-static void put_override(unsigned i, uint8_t phase, uint8_t reg, uint16_t andMask, uint16_t orValue)
+// 0x1D10..0x1D4F held a stored register override table until 2026-09-30.
+// Entries an older build left there are ignored and never written; the RAM
+// table (protocol v2 REG_OVERRIDE) still applies in its phase.
+static void put_old_entry(unsigned i, uint8_t phase, uint8_t reg, uint16_t andMask, uint16_t orValue)
 {
-	uint8_t *e = &eeprom[SETTINGS_REG_OVERRIDES + i * 8];
+	uint8_t *e = &eeprom[0x1D10 + i * 8];
 	e[0] = phase; e[1] = reg;
 	e[2] = andMask & 0xFF; e[3] = andMask >> 8;
 	e[4] = orValue & 0xFF; e[5] = orValue >> 8;
@@ -424,46 +427,42 @@ static void put_override(unsigned i, uint8_t phase, uint8_t reg, uint16_t andMas
 static void test_reg_overrides(void)
 {
 	memset(eeprom, 0xFF, sizeof(eeprom));
-	put_override(0, REG_OVERRIDE_TX, 0x2B, 0xFFF8, 0x0001);      // TX: re-enable part of the TX filters
-	put_override(1, REG_OVERRIDE_RX, 0x47, 0xF0FF, 0x0400);      // RX: AF output select
-	put_override(2, REG_OVERRIDE_TX, 0x30, 0x0000, 0xFFFF);      // refused: TX/RX enables
-	put_override(3, REG_OVERRIDE_TX | REG_OVERRIDE_RX, 0x36, 0, 0xFFFF); // refused: PA
-	put_override(4, REG_OVERRIDE_TX, 0x40, 0xF000, 0x0FFF);      // deviation past the clamp
-	put_override(5, 0xFF, 0x7E, 0, 0);                           // end of list
-	put_override(6, REG_OVERRIDE_TX, 0x7E, 0, 0x1234);           // after the end: ignored
-
-	// without a valid settings block the table is not used
-	SETTINGS_InitEEPROM();
-	CHECK(gRegOverrideCount == 0);
-
 	eeprom[SETTINGS_PKT_BLOCK] = SETTINGS_PKT_VERSION;
+	put_old_entry(0, REG_OVERRIDE_TX, 0x2B, 0xFFF8, 0x0001);
+	put_old_entry(1, REG_OVERRIDE_RX, 0x47, 0xF0FF, 0x0400);
+	uint8_t before[0x40];
+	memcpy(before, &eeprom[0x1D10], sizeof(before));
 	SETTINGS_InitEEPROM();
 	SETTINGS_LoadCalibration();
-	CHECK(gRegOverrideCount == 3);
 	RADIO_ConfigureChannel();
+	gRegOverrideRamCount = 0;
 
 	memset(regs, 0, sizeof(regs));
-	regs[0x2B] = 0x0707; regs[0x47] = 0x6040; regs[0x30] = 0x1111; regs[0x36] = 0x2222; regs[0x7E] = 0;
+	regs[0x2B] = 0x0707;
+	RADIO_SetTxParameters();
+	CHECK(regs[0x2B] == 0x0707);                 // the old stored entry is not applied
+	RADIO_SetupRegisters(false);
+	CHECK((regs[0x47] & 0x0F00) != 0x0400);
+
+	// the RAM table: its phase only, REG_40 clamped
+	gRegOverridesRam[0] = (RegOverride_t){ REG_OVERRIDE_TX, 0x2B, 0xFFF8, 0x0001 };
+	gRegOverridesRam[1] = (RegOverride_t){ REG_OVERRIDE_RX, 0x47, 0xF0FF, 0x0400 };
+	gRegOverridesRam[2] = (RegOverride_t){ REG_OVERRIDE_TX, 0x40, 0xF000, 0x0FFF };
+	gRegOverrideRamCount = 3;
+	regs[0x2B] = 0x0707; regs[0x47] = 0x6040;
 	RADIO_SetTxParameters();
 	CHECK(regs[0x2B] == 0x0701);
 	CHECK(regs[0x47] == 0x6040);                 // RX entry not applied on TX
-	CHECK(regs[0x30] == 0x1111 && regs[0x36] == 0x2222);
 	CHECK((regs[0x40] & 0x0FFF) == PKT_DEVIATION_MAX);
-	CHECK(regs[0x7E] != 0x1234);
-
 	RADIO_SetupRegisters(false);
 	CHECK((regs[0x47] & 0x0F00) == 0x0400);
-	CHECK(regs[0x30] == 0x1111);
+	gRegOverrideRamCount = 0;
 
-	// the first menu save over foreign data clears the table
-	memset(eeprom, 0xFF, sizeof(eeprom));
-	eeprom[SETTINGS_PKT_BLOCK] = 0x41;
-	put_override(0, REG_OVERRIDE_TX, 0x2B, 0, 0);
-	SETTINGS_InitEEPROM();
+	// saves never touch the reserved area, the first over foreign data included
 	SETTINGS_SaveSettings();
-	CHECK(eeprom[SETTINGS_REG_OVERRIDES] == 0xFF && eeprom[SETTINGS_REG_OVERRIDES + 1] == 0xFF);
-	SETTINGS_InitEEPROM();
-	CHECK(gRegOverrideCount == 0);
+	eeprom[SETTINGS_PKT_BLOCK] = 0x41;
+	SETTINGS_SaveSettings();
+	CHECK(memcmp(before, &eeprom[0x1D10], sizeof(before)) == 0);
 }
 
 int main(void)
