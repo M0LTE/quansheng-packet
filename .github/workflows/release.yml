@@ -1,0 +1,189 @@
+# On a tag v*: build the release firmware in the pinned toolchain container,
+# run every test, build k5ctl natively on each platform (NativeAOT, never
+# cross-compiled), and publish a GitHub release with checksums.
+#
+# The tag is the firmware version (it shows under Ver in the radio's menu),
+# so it must be at most 8 characters: v1.0.0, v1.2.10, v1.1.0b1. Anything
+# after vX.Y.Z makes a pre-release. Only GITHUB_TOKEN is used.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  firmware:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check the tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          echo "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+[0-9A-Za-z.]*$' \
+            || { echo "::error::tag $TAG is not vX.Y.Z[suffix]"; exit 1; }
+          [ ${#TAG} -le 8 ] || { echo "::error::tag $TAG is longer than 8 characters (the firmware version field)"; exit 1; }
+
+      - name: Host tests
+        run: tests/host/run.sh
+
+      - name: Build
+        env:
+          TAG: ${{ github.ref_name }}
+        run: ./compile-with-docker.sh --out out/fw "VERSION_STRING=$TAG"
+
+      - name: Check the image
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          size=$(stat -c %s out/fw/firmware.bin)
+          echo "firmware.bin: $size bytes of 61440"
+          [ "$size" -le 61440 ] || { echo "::error::the image does not fit the 60 KiB flash region"; exit 1; }
+          # the packed image carries "*PKTFW <tag>" at 0x2000 (obfuscated; the
+          # key repeats every 128 bytes, and 0x2000 is a multiple of 128)
+          python3 - "$TAG" <<'PY'
+          import sys
+          key = bytes.fromhex(
+              "4722c0525d574894b16060db6fe34c7cd84ad68b30ec25e04cd9007fbfe35405"
+              "e93a976bb06e0cfbb11ae2c9c15647e9baf142b6675f0f96f7c93c841b26e14e"
+              "3b6f66e6a06ab0bfc6a5703aba189e271a535b71b1941e18f2d6810222fd5a28"
+              "91dbba5d64c6fe86839c501c730311d6af30f42c77b27dbb3f29285722d6928b")
+          p = open("out/fw/firmware.packed.bin", "rb").read()
+          v = bytes(a ^ b for a, b in zip(p[0x2000:0x2010], key)).rstrip(b"\0")
+          want = ("*PKTFW " + sys.argv[1]).encode()
+          print("version in the packed image:", v.decode())
+          sys.exit(0 if v == want else "version mismatch")
+          PY
+
+      - name: Name the files
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          mkdir -p dist
+          cp out/fw/firmware.packed.bin "dist/quansheng-packet-$TAG.bin"
+          cp out/fw/firmware.bin "dist/quansheng-packet-$TAG-raw.bin"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist-firmware
+          path: dist/
+          if-no-files-found: error
+
+  dotnet-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+      - name: Test
+        run: dotnet run --project host/dotnet/tests/M0LTE.Uvk5.Tests -c Release
+
+  k5ctl:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - rid: linux-x64
+            os: ubuntu-24.04
+          - rid: linux-arm64
+            os: ubuntu-24.04-arm
+          - rid: osx-arm64
+            os: macos-15
+          - rid: win-x64
+            os: windows-2025
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: NativeAOT prerequisites
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends clang zlib1g-dev
+
+      - name: Publish
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          dotnet publish host/dotnet/tools/k5ctl -c Release -r ${{ matrix.rid }} \
+            -p:PublishAot=true -p:Version="${TAG#v}" -o publish
+          rm -f publish/*.pdb publish/*.dbg
+          rm -rf publish/*.dSYM
+          ls -l publish
+
+      - name: Smoke test
+        run: |
+          exe=publish/k5ctl
+          [ -f "$exe.exe" ] && exe="$exe.exe"
+          "$exe" --help > /dev/null
+          "$exe" --sim v2 info
+
+      - name: Package
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          mkdir -p dist
+          cp LICENSE publish/
+          name="k5ctl-$TAG-${{ matrix.rid }}"
+          if [ "${{ runner.os }}" = Windows ]; then
+            (cd publish && 7z a -tzip "../dist/$name.zip" . > /dev/null)
+          else
+            tar -C publish -czf "dist/$name.tar.gz" .
+          fi
+          ls -l dist
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist-k5ctl-${{ matrix.rid }}
+          path: dist/
+          if-no-files-found: error
+
+  release:
+    needs: [firmware, dotnet-test, k5ctl]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums and notes
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          cd dist
+          sha256sum -- * > SHA256SUMS
+          cat SHA256SUMS
+          cd ..
+          sed -e "s/{{TAG}}/$TAG/g" .github/release-notes.md > notes.md
+          {
+            echo
+            echo '```'
+            cat dist/SHA256SUMS
+            echo '```'
+          } >> notes.md
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          pre=""
+          echo "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || pre="--prerelease"
+          gh release create "$TAG" dist/* --verify-tag --title "$TAG" \
+            --notes-file notes.md --generate-notes $pre
