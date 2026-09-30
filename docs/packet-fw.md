@@ -34,6 +34,7 @@ Flash for the firmware is 61440 bytes (60 KiB). All sizes are gcc 10.3.1 (Docker
 | Deviation defaults 0x856/0x756 (TNC at 0 dBFS) | 23520 | 37920 |
 | Serial control protocol v2 (`docs/protocol-v2.md`) | 36188 | 25252 |
 | Memory channels and band slots removed: one operating channel | 35136 | 26304 |
+| Review fixes (late-key bound, event pacing, tone audio path) | 35316 | 26124 |
 
 ## What was removed
 

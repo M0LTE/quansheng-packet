@@ -557,7 +557,7 @@ Busy is forced closed when a transmission starts and when the receiver is set up
 6. The settings reload after legacy EEPROM writes has its own 1.0 s quiet timer and never runs during a transmission.
 7. EEPROM writes: one 8-byte block per main-loop pass, never during a transmission, deferred while a press is pending; never 0x1E00 and up.
 8. Stored events are kept serialized in the ring, so replay re-sends the same bytes with REPLAY set (and a fresh CRC).
-9. Budget: at most 8 KB of flash (about 38 KB free) and 2 KB of RAM (about 13 KB free). Measured: the full implementation costs about 12.7 KB of flash (23 520 to 36 188 bytes) and 2.2 KB of RAM (bss 2116 to about 4300 bytes), over the estimate but well inside what is left. With the memory channels removed as well the image is 35 136 bytes (26 304 left) and bss 4092 bytes.
+9. Budget: at most 8 KB of flash (about 38 KB free) and 2 KB of RAM (about 13 KB free). Measured: the full implementation costs about 12.7 KB of flash (23 520 to 36 188 bytes) and 2.2 KB of RAM (bss 2116 to about 4300 bytes), over the estimate but well inside what is left. With the memory channels removed and the review fixes the image is 35 316 bytes (26 124 left) and bss 4092 bytes.
 
 ## 10. Frame and MCU budget
 
