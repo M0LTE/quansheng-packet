@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UV-K5 packet station setup</title>
+<meta name="description" content="Turn a Quansheng UV-K5 and an AIOC cable into a packet radio station, from your browser.">
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="style.css">
+<script type="module" src="js/app.js"></script>
+</head>
+<body>
+<header class="top">
+  <h1>UV-K5 packet station setup</h1>
+  <p class="lede">Turn a Quansheng UV-K5 and a red AIOC cable into a packet radio station, right here in your browser. Nothing to install, no pins to short, no command line.</p>
+</header>
+
+<main>
+<section id="start" class="card">
+  <div id="support" class="note">Checking your browser...</div>
+  <h2>You will need</h2>
+  <ul>
+    <li>A <b>Quansheng UV-K5</b> (the original model; the UV-K5 V3 and UV-K1 use a different chip and are not supported).</li>
+    <li>A <b>red AIOC</b> cable and a USB-C lead.</li>
+    <li><b>Chrome or Edge</b> on a Windows, Mac, Linux or ChromeOS computer.</li>
+    <li>An amateur radio licence: transmit only where yours allows.</li>
+  </ul>
+  <p id="files-status" class="muted">Looking for the firmware files...</p>
+  <p class="muted">Each step checks what it needs before it changes anything, and you can do the steps again at any time.</p>
+</section>
+
+<!-- ============================================================= step 1 -->
+<section id="step1" class="card step">
+  <h2><span class="num">1</span> Flash the radio</h2>
+  <p>This puts the packet firmware on the radio. Its first start is a factory reset: 144.800 MHz, low power, wide channel. The radio's factory calibration is kept.</p>
+  <ol>
+    <li>Switch the radio <b>off</b> and plug the AIOC into the radio and the computer.</li>
+    <li><b>Hold PTT</b> while you switch the radio on. The torch LED lights and the screen stays blank: this is flash mode. Let go of PTT.</li>
+    <li>Press <b>Connect</b> and pick the AIOC's serial port ("All-In-One-Cable" or similar).</li>
+  </ol>
+  <div class="actions">
+    <button id="k5-connect">Connect</button>
+    <button id="k5-flash" disabled>Flash</button>
+    <button id="k5-cancel" class="secondary" hidden>Cancel</button>
+    <label class="small"><input type="checkbox" id="k5-showall"> My cable is not an AIOC (show all serial ports)</label>
+  </div>
+  <div id="k5-status" class="status" role="status" aria-live="polite"></div>
+  <progress id="k5-progress" max="1" value="0" hidden></progress>
+  <div id="k5-after" hidden>
+    <p><b>Now switch the radio off, then on again</b> (without PTT). This page is listening and will check the new firmware. The menu's last item, <b>Ver</b>, shows the version too.</p>
+    <button id="k5-check" class="secondary">Check the radio now</button>
+  </div>
+  <details>
+    <summary>Use a firmware file from your computer</summary>
+    <p>For a release you downloaded yourself (<code>quansheng-packet-vX.Y.Z.bin</code>). The page checks it looks like UV-K5 firmware.</p>
+    <input type="file" id="k5-file" accept=".bin">
+  </details>
+  <details>
+    <summary>If something goes wrong</summary>
+    <ul>
+      <li><b>No answer from the radio:</b> push the plugs fully into the radio (they are stiff), check the torch LED is on, and try Connect again. The radio sits in flash mode until you switch it off.</li>
+      <li><b>Could not open the port:</b> close any other program using it (CHIRP, a soundmodem, Direwolf). On Linux, add yourself to the <code>dialout</code> group and log in again.</li>
+      <li><b>Stopped part way:</b> nothing is lost. Put the radio back in flash mode and flash again; the bootloader cannot be overwritten.</li>
+      <li><b>A different bootloader version:</b> the page only flashes radios with bootloader 2.00.06, the one this firmware is tested with, and refuses before sending anything.</li>
+    </ul>
+  </details>
+</section>
+
+<!-- ============================================================= step 2 -->
+<section id="step2" class="card step">
+  <h2><span class="num">2</span> Flash the AIOC</h2>
+  <p>The packet AIOC firmware adds a transmit equaliser that makes a UV-K5's audio flat, which the radio firmware's default deviation expects. Flashing it <b>resets the AIOC's settings to the defaults</b>: PTT from the CM108 (HID) interface, and from the serial port with DTR high and RTS low.</p>
+  <ol>
+    <li><b>Unplug the AIOC from the radio</b> for this step, leave it plugged into the computer, and close any program using it.</li>
+    <li>Press <b>Switch to bootloader</b> and pick the AIOC ("All-In-One-Cable"). It restarts as "STM32 BOOTLOADER".</li>
+    <li>Press <b>Connect to bootloader</b> and pick "STM32 BOOTLOADER". The browser asks again because, to it, this is a new device.</li>
+    <li>Save a backup if you like, then flash.</li>
+  </ol>
+  <div class="actions">
+    <button id="aioc-detach">Switch to bootloader</button>
+    <button id="aioc-connect" class="secondary">Connect to bootloader</button>
+    <button id="aioc-backup" class="secondary" disabled>Save a backup</button>
+    <button id="aioc-flash" disabled>Flash</button>
+  </div>
+  <div id="aioc-status" class="status" role="status" aria-live="polite"></div>
+  <progress id="aioc-progress" max="1" value="0" hidden></progress>
+  <details>
+    <summary>If the AIOC will not switch by itself</summary>
+    <p>Put it in bootloader mode by hand: unplug it, short the two outermost pins of its programming header (<a href="https://github.com/skuep/AIOC/blob/master/doc/images/k1-aioc-dfu.jpg" target="_blank" rel="noopener">photo</a>) with tweezers or a wire, and plug it in with the short in place. Then press <b>Connect to bootloader</b> and flash. Afterwards unplug it, remove the short and plug it back in.</p>
+    <p>The bootloader lives in the chip's ROM, so a failed flash cannot brick the AIOC: just do this and flash again.</p>
+  </details>
+  <details>
+    <summary>Windows and Linux notes</summary>
+    <p><b>Windows:</b> if the browser cannot see "STM32 BOOTLOADER", install the WinUSB driver for it once with <a href="https://zadig.akeo.ie/" target="_blank" rel="noopener">Zadig</a>. For the automatic switch, do the same for "All-In-One-Cable (Interface 6)" (in Zadig, Options, List All Devices). Or use the manual way above.</p>
+    <p><b>Linux:</b> the browser needs permission to use the AIOC's USB and HID devices. Save this as <code>/etc/udev/rules.d/99-aioc.rules</code>, then unplug and replug the AIOC:</p>
+    <pre>SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="7388", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="7388", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="df11", TAG+="uaccess"</pre>
+  </details>
+  <details>
+    <summary>Use a file from your computer (or restore a backup)</summary>
+    <p>A full AIOC image or a backup saved here. The page checks it looks like AIOC firmware.</p>
+    <input type="file" id="aioc-file" accept=".bin">
+  </details>
+  <h3>Check the equaliser</h3>
+  <p>Once the AIOC has restarted, this reads (never changes) its settings to confirm the equaliser is on.</p>
+  <div class="actions"><button id="eq-check" class="secondary">Check the AIOC</button></div>
+  <div id="eq-status" class="status" role="status" aria-live="polite"></div>
+</section>
+
+<!-- ============================================================= step 3 -->
+<section id="step3" class="card step">
+  <h2><span class="num">3</span> Set up the radio</h2>
+  <p>Plug the AIOC back into the radio and switch the radio on normally. Then connect to set its frequency, power and channel width. Changes are saved in the radio.</p>
+  <div class="warn note"><b>Don't transmit while this page is connected.</b> The radio's PTT and its serial input share one wire, so anything this page sends ends a transmission. Disconnect here before you start your soundmodem (only one program can use the serial port anyway).</div>
+  <div class="actions">
+    <button id="radio-connect">Connect</button>
+    <button id="radio-disconnect" class="secondary" disabled>Disconnect</button>
+  </div>
+  <div id="radio-status" class="status" role="status" aria-live="polite"></div>
+  <div id="radio-panel" hidden>
+    <dl class="grid">
+      <dt>Firmware</dt><dd id="r-fw"></dd>
+      <dt>Signal</dt><dd id="r-rssi"></dd>
+      <dt>Battery</dt><dd id="r-batt"></dd>
+      <dt>Radio is</dt><dd id="r-state"></dd>
+      <dt>Deviation</dt><dd id="r-dev"></dd>
+    </dl>
+    <form id="radio-form" class="form">
+      <label>Frequency, MHz <input id="f-freq" inputmode="decimal" autocomplete="off" required></label>
+      <label>Power
+        <select id="f-power"><option value="0">low (~0.5 W)</option><option value="1">mid (~2 W)</option><option value="2">high (~5 W)</option></select>
+      </label>
+      <label>Channel
+        <select id="f-bw"><option value="0">wide (25 kHz)</option><option value="1">narrow (12.5 kHz)</option></select>
+      </label>
+      <button id="f-save" type="submit">Save to radio</button>
+    </form>
+    <p class="muted small">The radio transmits only from 136 to 174 MHz and from 400 to 470 MHz; the page will not save anything outside those. Low power is kinder to the radio on long packet transmissions.</p>
+    <h3>Receive level tone</h3>
+    <p>Plays a steady 1 kHz tone into the AIOC in place of received audio, so you can set the radio's volume knob against your soundmodem's input meter (step 4).</p>
+    <div class="actions">
+      <button id="tone-start" class="secondary">Play tone for 10 s</button>
+      <button id="tone-stop" class="secondary">Stop</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================= step 4 -->
+<section id="step4" class="card step">
+  <h2><span class="num">4</span> Set up your TNC</h2>
+  <p>Your soundmodem or TNC (pdn-soundmodem, Direwolf, QtSoundModem and so on) does the packet work. Point it at the AIOC and use these settings.</p>
+  <table class="settings">
+    <tr><th>Sound card</th><td>The AIOC ("All-In-One-Cable"), at <b>48000 Hz</b>. The AIOC's equaliser only works at 48000 Hz.</td></tr>
+    <tr><th>PTT</th><td><b>CM108</b> (the AIOC's HID interface, GPIO 3, the usual default). Or the serial port with DTR high and RTS low, the AIOC's other default.</td></tr>
+    <tr><th>Transmit level</th><td>Near <b>full scale</b>, just short of clipping. Then set the deviation in the radio (menu <b>DevW</b>, or <b>DevN</b> on narrow): the default gives about 2.8 kHz at full scale. Never the other way round: a quiet TNC with a high deviation setting sends more hiss.</td></tr>
+    <tr><th>TXDELAY</th><td>Start at <b>50 ms</b>. On the bench 30 ms was enough for AFSK 1200 and QPSK 3600, and FSK 9600 liked 50 ms. The station you talk to may need more.</td></tr>
+    <tr><th>Receive level</th><td>There is no squelch: audio is always on. Set the radio's <b>volume knob</b> so the strongest packets sit well below clipping on your soundmodem's input meter. The level tone in step 3 helps: turn up until it clips, then back off.</td></tr>
+  </table>
+  <h3>Three rules</h3>
+  <ul>
+    <li><b>Never transmit with the charger connected.</b> On the bench it put severe noise on the signal and every packet failed.</li>
+    <li><b>Serial port: 38400 baud only.</b> Slower rates can look like a PTT press to the radio.</li>
+    <li><b>Send nothing on the serial port while transmitting.</b> Any byte ends the transmission.</li>
+  </ul>
+  <h3>pdn-soundmodem</h3>
+  <p>In <code>/etc/pdn-soundmodem/soundmodem.json</code>, name the AIOC's card and its CM108 PTT (find the hidraw node as its docs show, and add the udev rule):</p>
+  <pre>{
+  "device": "plughw:CARD=AllInOneCable,DEV=0",
+  "modems": [ { "subChannel": 0, "mode": "afsk1200" } ],
+  "ptt": { "type": "cm108", "device": "/dev/hidraw0" },
+  "waterfall": { "port": 8107, "enableAudioControls": true }
+}</pre>
+  <p>It runs at 48000 Hz by default. Your node or APRS software sends TXDELAY over KISS. Set the receive level against the station page's level meter, and the transmit level with its TX gain slider. See the <a href="https://github.com/packet-net/pdn-soundmodem/tree/main/docs" target="_blank" rel="noopener">pdn-soundmodem docs</a>.</p>
+  <h3>Direwolf and other soundmodems</h3>
+  <pre>ADEVICE plughw:CARD=AllInOneCable,DEV=0
+ARATE 48000
+PTT CM108
+TXDELAY 5</pre>
+  <p>Direwolf's TXDELAY is in 10 ms units, so 5 is 50 ms. On Windows, pick the AIOC's sound card by name. Other soundmodems: the same ideas, 48000 Hz, CM108 PTT, 50 ms TXDELAY.</p>
+</section>
+
+<section class="card">
+  <h2>More</h2>
+  <ul>
+    <li><a href="https://github.com/M0LTE/quansheng-packet" target="_blank" rel="noopener">quansheng-packet</a>: the radio firmware, its <a href="https://github.com/M0LTE/quansheng-packet/releases" target="_blank" rel="noopener">releases</a>, keys, menu and how it works.</li>
+    <li><a href="https://github.com/M0LTE/aioc-packet" target="_blank" rel="noopener">aioc-packet</a>: the AIOC firmware and its <a href="https://github.com/M0LTE/aioc-packet/releases" target="_blank" rel="noopener">releases</a>.</li>
+    <li>Going back: flash the stock firmware (or another) the same way. This page's flashers take any file in the "Use a file" boxes, including an AIOC backup.</li>
+  </ul>
+  <p class="muted small">This page runs entirely in your browser. It talks to your radio and AIOC through the browser's serial, USB and HID permissions, which you grant one device at a time; nothing is sent anywhere else. Use at your own risk, as with any firmware.</p>
+</section>
+</main>
+</body>
+</html>
