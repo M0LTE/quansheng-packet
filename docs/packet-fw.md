@@ -42,6 +42,7 @@ Flash for the firmware is 61440 bytes (60 KiB). All sizes are gcc 10.3.1 (Docker
 | Memory channels and band slots removed: one operating channel | 35136 | 26304 |
 | Review fixes (late-key bound, event pacing, tone audio path) | 35316 | 26124 |
 | Squelch removed, release prep (mic gain and battery type fixed, stored override table gone, 0x0602 bench only) | 34252 | 27188 |
+| Approximate deviation in kHz on the screen and in the menu | 34544 | 26896 |
 
 ## What was removed
 
@@ -54,7 +55,7 @@ CTCSS/DCS went because packet needs no tone squelch, and dropping it removes the
 - One VFO, simplex (TX frequency = RX frequency), no squelch: receive audio is always open, and the speaker amplifier (the K1 audio out) always on in receive. The chip's squelch result is kept only as a carrier detector for the protocol's busy events and the green LED ("RX" on the display); it never mutes anything.
 - One operating frequency, with its power, bandwidth and step, stored in this firmware's own settings (0x1D58); frequency entry on the keypad and up/down stepping. No memory channels, no band slots, no CHIRP compatibility (see "Operating channel" under Settings).
 - Power (low, mid, high from the factory calibration, shown as `~0.5W`, `~2W` and `~5W`), bandwidth (wide, narrow), TX timeout, battery monitoring (TX refused below about 6.3 V and above about 8.9 V, as upstream), backlight, key lock.
-- Display: frequency, TX/RX, RSSI in dBm and S-units, and the settings in use (for example `~5W WIDE TOT30`).
+- Display: frequency, TX/RX, RSSI in dBm and S-units, and the settings in use (for example `~5W WIDE TOT30`, `DEV ~2.8kHz` and `RXG58 DAC15`).
 
 **The watts are nominal, not measured.** The screen and the menu show the usual UV-K5 figures for the three power levels, the same on VHF and UHF, with a tilde because nothing measures them. What the radio really puts out depends on its factory PA calibration (0x1ED0 up), which varies from radio to radio: the bench K5's VHF high row is 105, 116 and 123 across 137 to 174 MHz, against 135 in most dumps, so at 145 MHz its high (about 110) is barely above its mid (105) and likely less than 5 W. Measure a radio's output before relying on the figure.
 - UART: the upstream EEPROM protocol and the BK4819 register read (0x0601; the unchecked write, 0x0602, only in bench builds), plus the serial control protocol v2 (`docs/protocol-v2.md`): identification, status, events (busy, bursts, TX timing, heartbeats), parameters, register access and RAM-only overrides, a level tone.
@@ -86,7 +87,7 @@ Stored in a 16-byte block at EEPROM `0x1D00` (the old DTMF contacts area). The b
 | 0x1D01 | busy detector level: the row of the factory squelch tables the chip's carrier detector uses (not a squelch; v2 parameter BUSY_SQL_LEVEL, not in the menu); was the squelch level, and 0 now means 1 | 1 to 9 | 1 |
 | 0x1D02 | TX timeout | 0 to 6 = 5, 10, 15, 20, 30, 60, 120 s | 4 (30 s) |
 | 0x1D03 | reserved: was the mic gain (retired 2026-09-30); ignored, written 0xFF | | |
-| 0x1D04 | wide deviation, REG_40<11:0>, u16 LE | 0 to 0xA7F | 0x856 (about 3 kHz at 0 dBFS with the bench AIOC EQ) |
+| 0x1D04 | wide deviation, REG_40<11:0>, u16 LE | 0 to 0xA7F | 0x856 (about 2.8 kHz at 0 dBFS with the bench AIOC EQ) |
 | 0x1D06 | narrow deviation, REG_40<11:0>, u16 LE | 0 to 0xA7F | 0x756 (half the wide deviation) |
 | 0x1D08 | RX AF gain 2, REG_48<9:4>, 0.5 dB steps | 0 to 63 | factory calibration (0x1F8E) |
 | 0x1D09 | RX DAC gain, REG_48<3:0>, about 2 dB steps | 0 to 15 | 15 |
@@ -98,7 +99,9 @@ Stored in a 16-byte block at EEPROM `0x1D00` (the old DTMF contacts area). The b
 
 **Operating rule: drive the audio near full scale and keep REG_40 low.** The K5 adds analogue hiss to its transmitted FM: about 900 Hz rms residual deviation in 3 to 8 kHz at 0x956, and it scales exactly with REG_40 (it is added before the deviation gain). So set the TNC to drive the AIOC near 0 dBFS and choose the deviation to give about 3 kHz there, rather than a quiet TNC and a high REG_40.
 
-The defaults (0x856 wide, 0x756 narrow) do that for the bench AIOC, which carries a stored TX EQ that cuts 5.74 dB at 1 kHz: 0x856 gives about 3 kHz at 0 dBFS. On the bench, fsk9600 decoded 15 of 15 at 0 dBFS with 0x856 (it failed at -6 dBFS with 0x956), and afsk1200 and qpsk3600 decoded 100% at 0 and -3 dBFS. **With a stock AIOC (no EQ) the equivalents are 0x762 wide and 0x662 narrow.** Deviation is a setting (menu DevW and DevN, or EEPROM 0x1D04 and 0x1D06): set it to suit the interface.
+The defaults (0x856 wide, 0x756 narrow) do that for the bench AIOC, which carries a stored TX EQ that cuts 5.74 dB at 1 kHz: 0x856 gives about 2.8 kHz at 0 dBFS. On the bench, fsk9600 decoded 15 of 15 at 0 dBFS with 0x856 (it failed at -6 dBFS with 0x956), and afsk1200 and qpsk3600 decoded 100% at 0 and -3 dBFS. **With a stock AIOC (no EQ) the equivalents are 0x762 wide and 0x662 narrow.** Deviation is a setting (menu DevW and DevN, or EEPROM 0x1D04 and 0x1D06): set it to suit the interface.
+
+**The deviation on the screen is an estimate, not a measurement.** The main screen shows `DEV ~2.8kHz` for the deviation setting of the bandwidth in use, and the menu shows the same figure under DevW and DevN. It is worked out from the logarithmic law above with one reference point, `PKT_DEVIATION_REF_HZ` (2800 Hz) at `PKT_DEVIATION_REF_REG` (0x856) in `packet.h`: kHz = 2.80 * 2^((reg - 0x856) / 256), so 0x756 shows about 1.4 kHz and the 0xA7F clamp about 12.5 kHz (at 0x287 and below it shows `<0.1kHz`). The reference assumes a full-scale (0 dBFS) tone through the aioc-packet AIOC firmware with its k5-red TX EQ; quieter audio gives proportionally less. A stock AIOC gives about 1.9 times more for the same setting, so with one the screen reads low: 0x762 shows about 1.4 kHz but gives roughly 3 kHz. The firmware works it out in integer arithmetic (a 17-entry table of 2^(i/16) with linear interpolation, within 0.06 kHz of the formula) and shows one decimal place.
 
 ### Reserved: 0x1D10 to 0x1D4F
 

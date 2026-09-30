@@ -214,7 +214,10 @@ void UI_DisplayMain(void)
 		gTxTimeoutSeconds[gEeprom.TX_TIMEOUT]);
 	UI_PrintStringSmallNormal(String, 2, 0, 4);
 
-	sprintf(String, "DEV 0x%03X",
+	// approximate deviation for the bandwidth in use, at most
+	// "DEV ~12.5kHz", 12 characters
+	strcpy(String, "DEV ");
+	UI_DeviationString(String + 4,
 		narrow ? gEeprom.DEVIATION_NARROW : gEeprom.DEVIATION_WIDE);
 	UI_PrintStringSmallNormal(String, 2, 0, 5);
 

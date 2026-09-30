@@ -32,6 +32,13 @@ void UI_DisplayPopup(const char *string);
 // calibration, the output is not measured), indexed by OUTPUT_POWER_*
 extern const char gPowerNames[3][6];
 
+// Approximate peak deviation for a REG_40<11:0> deviation setting, from the
+// reference point in packet.h (full-scale audio through the packet AIOC):
+// in tenths of a kHz, and as text such as "~2.8kHz" or "<0.1kHz", at most 8
+// characters plus the terminator.
+unsigned int UI_DeviationTenthsKHz(uint16_t reg);
+void UI_DeviationString(char *pString, uint16_t reg);
+
 
 void UI_DisplayClear();
 

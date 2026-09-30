@@ -56,7 +56,9 @@ On first start the radio takes over the frequency the old firmware was using.
 | MENU | settings |
 | PTT | transmit (normally the AIOC keys the radio for you) |
 
-The screen shows the frequency, the signal strength, and the settings in use, for example `~5W WIDE TOT30`, `DEV 0x856` and `RXG58 DAC15`. `RX` appears while a signal is present.
+The screen shows the frequency, the signal strength, and the settings in use, for example `~5W WIDE TOT30`, `DEV ~2.8kHz` and `RXG58 DAC15`. `RX` appears while a signal is present.
+
+`DEV` is the approximate peak deviation for the channel width in use (DevW on wide, DevN on narrow), worked out from the setting. It assumes full-scale audio through the [packet AIOC firmware](https://github.com/M0LTE/aioc-packet); quieter audio gives less, and with a stock AIOC it reads low (see below). The menu shows the setting itself, with the same estimate under it.
 
 **Menu.** MENU opens it, UP and DOWN move, MENU edits an item and MENU again saves it, EXIT cancels. Changes take effect straight away and are remembered.
 
@@ -79,8 +81,8 @@ The screen shows the frequency, the signal strength, and the settings in use, fo
 1. **PTT through the AIOC's CM108 (HID) interface.** In Direwolf that is `PTT CM108`; pdn-soundmodem and most soundmodems support it. Keep the AIOC's serial port for control software only.
 2. **Transmit level: drive the audio hot and set deviation in the radio.** Set your soundmodem's transmit level near full scale, just short of clipping, and then set the deviation with DevW and DevN. Never the other way round: the radio adds a little hiss of its own that grows with the deviation setting, so a quiet TNC with a high deviation setting makes a noisier signal.
    - The defaults (DevW 2134, shown as `0x856`, and DevN 1878, `0x756`) give about 2.8 kHz and 1.4 kHz of deviation at full scale **with the [packet AIOC firmware](https://github.com/M0LTE/aioc-packet)**, whose transmit EQ is tuned for the K5.
-   - **With a stock AIOC** use DevW 1890 (`0x762`) and DevN 1634 (`0x662`).
-   - The scale is logarithmic: 256 higher doubles the deviation, 16 higher is about 0.4 dB more.
+   - **With a stock AIOC** use DevW 1890 (`0x762`) and DevN 1634 (`0x662`). A stock AIOC gives about 1.9 times more deviation for the same setting, so these give about the same as the defaults do with the packet AIOC, and the `DEV` figure on the screen reads low (about 1.4 kHz for `0x762`).
+   - The scale is logarithmic: 256 higher doubles the deviation, 16 higher is about 0.4 dB more. The `DEV` figure follows it, from about 0.1 kHz up to about 12.5 kHz at the top of the range; treat it as a guide and measure if it matters.
 3. **TXDELAY.** Start at 50 ms. On the bench 30 ms was enough for AFSK 1200 and QPSK 3600, and FSK 9600 was happiest at about 50 ms. The station you are talking to may need more.
 4. **Receive level.** Audio is always open (there is no squelch), and the **volume knob** sets the level into the AIOC. Turn it so the strongest packets come in well below clipping on your soundmodem's level meter. The level tone helps here: `k5ctl -p PORT tone 1000 64 10000` replaces the receive audio with a steady 1 kHz tone for 10 seconds, so you can see where the audio clips and back off from there. Then check with real packets.
 5. **Do not transmit with the charger connected.** On the bench it put severe noise on the transmitted signal and every packet failed.

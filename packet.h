@@ -69,13 +69,24 @@
 // residual deviation in 3 to 8 kHz at 0x956) that scales with REG_40, so
 // run the audio hot and REG_40 low, not the other way round. On the bench
 // AIOC, which carries a stored TX EQ cutting 5.74 dB at 1 kHz, 0x856 gives
-// about 3 kHz at 0 dBFS. With a stock AIOC the equivalents are 0x762 wide
+// about 2.8 kHz at 0 dBFS. With a stock AIOC the equivalents are 0x762 wide
 // and 0x662 narrow. The deviation is a setting: change it to suit.
 #define PKT_REG_40_ENABLE        0x1000u
 #define PKT_REG_40_DEV_MASK      0x0FFFu
 #define PKT_DEVIATION_MAX        0x0A7Fu
 #define PKT_DEVIATION_WIDE_DEFAULT    0x0856u
 #define PKT_DEVIATION_NARROW_DEFAULT  0x0756u
+
+// The reference point for the approximate deviation on the screen: REG_40
+// <11:0> = PKT_DEVIATION_REF_REG gives about PKT_DEVIATION_REF_HZ of peak
+// deviation, doubling for every 0x100 above it and halving for every 0x100
+// below. It assumes the recommended set-up: the aioc-packet AIOC firmware
+// with its k5-red TX EQ, and a full-scale (0 dBFS) tone from the TNC.
+// Quieter audio gives proportionally less. A stock AIOC (no EQ) gives about
+// 1.9 times more for the same setting (0x762 there gives about what 0x856
+// gives here, roughly 3 kHz), so with one the screen reads low.
+#define PKT_DEVIATION_REF_REG    0x0856u
+#define PKT_DEVIATION_REF_HZ     2800u
 
 // REG_48: RX audio. <15:12> = 11 (upstream, undocumented), <11:10> AF RX
 // gain 1 = 0 dB, <9:4> AF RX gain 2 (0 to 63, 0.5 dB steps), <3:0> AF DAC

@@ -22,6 +22,7 @@
 #include "ui/helper.h"
 #include "ui/inputbox.h"
 #include "misc.h"
+#include "packet.h"
 
 #ifndef ARRAY_SIZE
 	#define ARRAY_SIZE(arr) (sizeof(arr)/sizeof((arr)[0]))
@@ -30,6 +31,47 @@
 // Nominal UV-K5 output for the low, mid and high calibration rows, the
 // same on VHF and UHF; the tilde says it is not a measurement.
 const char gPowerNames[3][6] = { "~0.5W", "~2W", "~5W" };
+
+// 2^(i/16) for i = 0 to 16, in 16.16 fixed point
+static const uint32_t Pow2Sixteenths[17] = {
+	65536, 68438, 71468, 74632, 77936, 81386, 84990, 88752,
+	92682, 96785, 101070, 105545, 110218, 115098, 120194, 125515, 131072
+};
+
+unsigned int UI_DeviationTenthsKHz(uint16_t reg)
+{
+	if (reg > PKT_DEVIATION_MAX)
+		reg = PKT_DEVIATION_MAX;
+
+	// reg - REF as 256 * octaves + fraction, kept unsigned by adding 16
+	// octaves, which is more than reg can be below REF
+	const uint32_t u        = reg + (16u << 8) - PKT_DEVIATION_REF_REG;
+	const int      octaves  = (int)(u >> 8) - 16;
+	const uint32_t fraction = u & 0xFF;
+
+	// 2^(fraction / 256), interpolating between sixteenths
+	const uint32_t lo = Pow2Sixteenths[fraction >> 4];
+	const uint32_t hi = Pow2Sixteenths[(fraction >> 4) + 1];
+	const uint32_t m  = lo + (((hi - lo) * (fraction & 15)) >> 4);
+
+	// Hz in 16.16: at most 2800 * 2^(0x229 / 256) * 65536, about 8.2e8
+	uint32_t hz = PKT_DEVIATION_REF_HZ * m;
+	if (octaves >= 0)
+		hz <<= octaves;
+	else
+		hz >>= -octaves;
+
+	return (hz + (50u << 16)) / (100u << 16);
+}
+
+void UI_DeviationString(char *pString, uint16_t reg)
+{
+	const unsigned int tenths = UI_DeviationTenthsKHz(reg);
+	if (tenths == 0)
+		strcpy(pString, "<0.1kHz");
+	else
+		sprintf(pString, "~%u.%ukHz", tenths / 10, tenths % 10);
+}
 
 void UI_PrintStringBuffer(const char *pString, uint8_t * buffer, uint32_t char_width, const uint8_t *font)
 {

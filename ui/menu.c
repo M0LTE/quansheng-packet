@@ -65,6 +65,7 @@ void UI_DisplayMenu(void)
 	const unsigned int value_x = 50;
 	char String[24];
 	char Hint[24];      // small font: 11 characters fit right of the list
+	char Hint2[24];     // a second hint line, under the first
 
 	UI_DisplayClear();
 
@@ -81,6 +82,7 @@ void UI_DisplayMenu(void)
 
 	String[0] = 0;
 	Hint[0]   = 0;
+	Hint2[0]  = 0;
 
 	switch (gMenuCursor)
 	{
@@ -104,6 +106,7 @@ void UI_DisplayMenu(void)
 		case MENU_DEVN:
 			sprintf(String, "%d", (int)gSubMenuSelection);
 			sprintf(Hint, "0x%03X", (unsigned int)gSubMenuSelection);
+			UI_DeviationString(Hint2, (uint16_t)gSubMenuSelection);
 			break;
 
 		case MENU_RXG: {
@@ -148,6 +151,7 @@ void UI_DisplayMenu(void)
 
 	UI_PrintString(String, value_x, 0, 1, 8);
 	UI_PrintStringSmallNormal(Hint, value_x, 0, 4);
+	UI_PrintStringSmallNormal(Hint2, value_x, 0, 5);
 
 	// the edit cursor, in the gap between the list and the value: the
 	// small ">" is inked in its columns 1 to 4 and drawn one column in,
