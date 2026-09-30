@@ -18,7 +18,7 @@ dotnet run --project host/dotnet/tests/M0LTE.Uvk5.Tests -c Release   # the C# cl
 
 The Makefile has no feature flags left, only `ENABLE_CLANG`, `ENABLE_SWD`, `ENABLE_LTO` and the bench option `ENABLE_UART_RAW_REG_WRITE` (off unless you build `bench`). The build options are recorded in `.build-options`, so switching between release and bench rebuilds everything. The packed image carries `*PKTFW <version>`: the tag on HEAD, else the short commit hash, unless `VERSION_STRING` is given.
 
-**Releases** come from GitHub Actions (`.github/workflows/release.yml`): pushing a tag `vX.Y.Z` (at most 8 characters, since it becomes the firmware version; a suffix such as `v1.1.0b1` makes a pre-release) runs the host and C# tests, builds the firmware with the tag as its version, builds `k5ctl` with NativeAOT on native runners for linux-x64, linux-arm64, osx-arm64 and win-x64, and publishes the packed image, the raw image, the k5ctl archives and `SHA256SUMS`. Every push and pull request runs `.github/workflows/build.yml` (tests, release and bench builds).
+**Releases** come from GitHub Actions (`.github/workflows/release.yml`): pushing a tag `vX.Y.Z` (at most 8 characters, since it becomes the firmware version; a suffix such as `v1.1.0b1` makes a pre-release) runs the host and C# tests, builds the firmware with the tag as its version, builds `k5ctl` with NativeAOT on native runners for linux-x64, linux-arm64, osx-arm64 and win-x64, and publishes the packed image, the raw image, the k5ctl archives and `SHA256SUMS`, with `docs/releases/<tag>.md` (if there is one) and `.github/release-notes.md` as the notes. A release (not a pre-release) also commits its packed image to the `flash` branch as `<tag>/quansheng-packet-<tag>.bin` and updates `latest/quansheng-packet.bin`, which the README's browser flashing link loads (raw.githubusercontent.com allows cross-origin reads; release downloads do not). Every push and pull request runs `.github/workflows/build.yml` (tests, release and bench builds).
 
 ## Size
 
@@ -43,6 +43,7 @@ Flash for the firmware is 61440 bytes (60 KiB). All sizes are gcc 10.3.1 (Docker
 | Review fixes (late-key bound, event pacing, tone audio path) | 35316 | 26124 |
 | Squelch removed, release prep (mic gain and battery type fixed, stored override table gone, 0x0602 bench only) | 34252 | 27188 |
 | Approximate deviation in kHz on the screen and in the menu | 34544 | 26896 |
+| v1.0.1: signed settings family and factory-fresh first start, fixed TX policy, other firmwares' settings no longer read | 34292 | 27148 |
 
 ## What was removed
 
@@ -55,6 +56,8 @@ CTCSS/DCS went because packet needs no tone squelch, and dropping it removes the
 - One VFO, simplex (TX frequency = RX frequency), no squelch: receive audio is always open, and the speaker amplifier (the K1 audio out) always on in receive. The chip's squelch result is kept only as a carrier detector for the protocol's busy events and the green LED ("RX" on the display); it never mutes anything.
 - One operating frequency, with its power, bandwidth and step, stored in this firmware's own settings (0x1D58); frequency entry on the keypad and up/down stepping. No memory channels, no band slots, no CHIRP compatibility (see "Operating channel" under Settings).
 - Power (low, mid, high from the factory calibration, shown as `~0.5W`, `~2W` and `~5W`), bandwidth (wide, narrow), TX timeout, battery monitoring (TX refused below about 6.3 V and above about 8.9 V, as upstream), backlight, key lock.
+- A fixed TX policy: transmit only on 136 to 174 MHz and 400 to 470 MHz (see "TX policy" under Settings); receive across the whole band table.
+- A factory-fresh first start: nothing another firmware saved is used (see "Settings").
 - Display: frequency, TX/RX, RSSI in dBm and S-units, and the settings in use (for example `~5W WIDE TOT30`, `DEV ~2.8kHz` and `RXG58 DAC15`).
 
 **The watts are nominal, not measured.** The screen and the menu show the usual UV-K5 figures for the three power levels, the same on VHF and UHF, with a tilde because nothing measures them. What the radio really puts out depends on its factory PA calibration (0x1ED0 up), which varies from radio to radio: the bench K5's VHF high row is 105, 116 and 123 across 137 to 174 MHz, against 135 in most dumps, so at 145 MHz its high (about 110) is barely above its mid (105) and likely less than 5 W. Measure a radio's output before relying on the figure.
@@ -79,11 +82,23 @@ Always the upstream DIG path: no pre-emphasis or de-emphasis, no TX or RX audio 
 
 ## Settings
 
-Stored in a 16-byte block at EEPROM `0x1D00` (the old DTMF contacts area). The block is ignored unless byte 0 is the layout version (1); an out-of-range byte means "use the default".
+This firmware's own EEPROM is the **settings family**, `0x1D00` to `0x1D6F` (the stock firmware's DTMF contacts area, unused here), in 8-byte blocks so each is one UART write. Nothing outside it is read as a setting, and the family itself is trusted only when its signature block at `0x1D10` holds the magic `PKFW` and the layout version (2).
+
+**First power-on (factory-fresh).** Without that signature (the first start after flashing over any other firmware, v1.0.0 of this one included, or a host that wrote over it) the radio reads nothing from the family: it loads every default and writes the whole family with them, the reserved area blank and the signature last, once, before anything can transmit. A power cut part-way leaves the family unsigned and the next power-on starts again. From then on it looks like a factory-fresh radio. The defaults: 144.800 MHz, low power (~0.5 W nominal: kinder to the PA and battery on long packet bursts and on a first key-up into an unknown antenna), wide, 12.5 kHz step, and the defaults in the tables below; the RX gain comes from the factory calibration. v1.0.0 marked its block with byte 0 = 1 and no signature, so a radio upgraded from it resets once. The same happens if a host overwrites the signature: the reload after the UART write session finds it gone and starts again from the defaults.
+
+The first power-on replaced a single marker byte (0x1D00 = 1), which sat in other firmwares' DTMF contacts and could match by chance, and a one-time import of the frequency the previous firmware had in use; the old channel layout (`0x0E80` and the records it points at), the S-meter levels at `0x0EA0` and the TX limits at `0x0F40` are no longer read either.
+
+| Address | Content |
+|---|---|
+| 0x1D10 | signature: `P` `K` `F` `W` |
+| 0x1D14 | layout version, 2 |
+| 0x1D15 | reserved, 0xFF (3 bytes) |
+
+The settings, 16 bytes at `0x1D00`; an out-of-range byte means "use the default":
 
 | Address | Setting | Range | Default |
 |---|---|---|---|
-| 0x1D00 | layout version | 1 | |
+| 0x1D00 | reserved: the layout version (1) until v1.0.0; ignored, written 0xFF | | |
 | 0x1D01 | busy detector level: the row of the factory squelch tables the chip's carrier detector uses (not a squelch; v2 parameter BUSY_SQL_LEVEL, not in the menu); was the squelch level, and 0 now means 1 | 1 to 9 | 1 |
 | 0x1D02 | TX timeout | 0 to 6 = 5, 10, 15, 20, 30, 60, 120 s | 4 (30 s) |
 | 0x1D03 | reserved: was the mic gain (retired 2026-09-30); ignored, written 0xFF | | |
@@ -103,25 +118,29 @@ The defaults (0x856 wide, 0x756 narrow) do that for the bench AIOC, which carrie
 
 **The deviation on the screen is an estimate, not a measurement.** The main screen shows `DEV ~2.8kHz` for the deviation setting of the bandwidth in use, and the menu shows the same figure under DevW and DevN. It is worked out from the logarithmic law above with one reference point, `PKT_DEVIATION_REF_HZ` (2800 Hz) at `PKT_DEVIATION_REF_REG` (0x856) in `packet.h`: kHz = 2.80 * 2^((reg - 0x856) / 256), so 0x756 shows about 1.4 kHz and the 0xA7F clamp about 12.5 kHz (at 0x287 and below it shows `<0.1kHz`). The reference assumes a full-scale (0 dBFS) tone through the aioc-packet AIOC firmware with its k5-red TX EQ; quieter audio gives proportionally less. A stock AIOC gives about 1.9 times more for the same setting, so with one the screen reads low: 0x762 shows about 1.4 kHz but gives roughly 3 kHz. The firmware works it out in integer arithmetic (a 17-entry table of 2^(i/16) with linear interpolation, within 0.06 kHz of the formula) and shows one decimal place.
 
-### Reserved: 0x1D10 to 0x1D4F
+### Reserved: 0x1D18 to 0x1D4F
 
-Until 30 September 2026 this held a stored register override table. It is gone: nothing reads or writes the area, and a radio that ran an older build may still have entries there. Register experiments use the protocol's RAM-only `REG_OVERRIDE`, which expires by time or key-ups and never survives a reboot (`docs/protocol-v2.md` 6.11).
+Until 30 September 2026 `0x1D10` to `0x1D4F` held a stored register override table. It is gone: the first power-on puts the signature at `0x1D10` and writes the rest blank, and nothing reads the area. Register experiments use the protocol's RAM-only `REG_OVERRIDE`, which expires by time or key-ups and never survives a reboot (`docs/protocol-v2.md` 6.11).
 
 ### Operating channel
 
-There are no memory channels or band slots, and the upstream channel layout (CHIRP's) is not used. The one frequency the radio works on, with its power, bandwidth and step, is an 8-byte block at `0x1D58`, used only with a valid settings block and blanked with the others by the first menu save over foreign data. The keypad, the menu (Step, TxPwr, W/N) and the v2 protocol store it; a keypad or menu save over foreign data at `0x1D00` writes the settings block first, so the frequency sticks.
+There are no memory channels or band slots, and the upstream channel layout (CHIRP's) is neither read nor written. The one frequency the radio works on, with its power, bandwidth and step, is an 8-byte block at `0x1D58` in the settings family. The keypad, the menu (Step, TxPwr, W/N) and the v2 protocol store it. (A keypad or menu save that finds the family unsigned, which only happens if a host overwrote the signature since the last load, writes the whole family from the values in use and signs it, so the change sticks.)
 
 | Address | Setting | Range | Default |
 |---|---|---|---|
-| 0x1D58 | frequency, u32 LE, 10 Hz units | receivable (inside the band table; 350 to 400 MHz only if enabled) | 144.800 MHz |
+| 0x1D58 | frequency, u32 LE, 10 Hz units | receivable (inside the band table, 350 to 400 MHz included) | 144.800 MHz |
 | 0x1D5C | power | 0 low, 1 mid, 2 high (shown as ~0.5W, ~2W, ~5W) | 0 |
 | 0x1D5D | bandwidth | 0 wide, 1 narrow | 0 |
 | 0x1D5E | step, index into the step table | 0 to 23 | 12.5 kHz |
 | 0x1D5F | reserved, 0xFF | | |
 
-If the frequency there is not receivable (a blank block, or a radio coming from another firmware or from the channel-memory builds of this one), the frequency the old upstream layout had in use (channel indices at `0x0E80` and the memory channel or band slot record they point at) is taken once if it is receivable, else 144.800 MHz. With a valid settings block it is then written to `0x1D58` at once and the old layout is never read again; without one nothing is written until the first save.
+If the frequency there is not receivable, the whole block means the defaults (144.800 MHz, low, wide, 12.5 kHz).
 
-Other EEPROM the firmware reads: S-meter levels at `0x0EA0`, TX band limits at `0x0F40` (no menu). Calibration (`0x1E00` up) is read only.
+**Other EEPROM the firmware reads:** only the factory calibration, `0x1E00` up (squelch tables for the busy detector, PA bias at `0x1ED0`, battery at `0x1F40`, crystal and misc at `0x1F88`, RX gain at `0x1F8E`), which it never writes. The S-meter scale is fixed (S0 at -130 dBm, S9 at -76 dBm).
+
+### TX policy
+
+Transmit is allowed only from 136 MHz up to 174 MHz and from 400 MHz up to 470 MHz (174.000 and 470.000 themselves are refused): the ranges the PA and its filters are designed for. It is fixed in the firmware (`TX_VHF_*` and `TX_UHF_*` in `frequencies.h`); the upstream TX limits at `0x0F40` (F_LOCK, 200TX, 350TX, 500TX, 350EN) are never read, so no previous firmware's band plan carries over. A PTT press anywhere else is refused as before (`TX_REFUSED` reason `TX_BAND`, and SET_PARAMS with REQUIRE_TX_OK replies `TX_BAND`). Receive covers the whole band table: 50 to 76 MHz and 108 to 600 MHz, 350 to 400 MHz included (upstream gated that band with 350EN).
 
 The same settings are in the menu (MENU, then UP/DOWN, MENU to edit and again to store, EXIT to cancel): Step, TxPwr, W/N, DevW, DevN, RxG, RxDAC, TxTOut, BackLt, plus the battery voltage and the version.
 
@@ -131,7 +150,7 @@ Keys on the main screen: digits enter a frequency, UP/DOWN step, F then 6 cycles
 
 **PTT sampling.** SysTick now runs at 1 ms (upstream 10 ms; the 10 ms and 500 ms slices are derived from it). `ptt.c` samples the PTT line every tick with separate press and release debounce, and the main loop acts on a change at once instead of waiting for the next 10 ms slice (upstream: 3 samples of 10 ms both ways, 20 to 30 ms).
 
-Timing settings, 8 bytes at `0x1D50` (one UART write; not in the menu; used only with a valid settings block, blanked on the first menu save over foreign data):
+Timing settings, 8 bytes at `0x1D50` in the settings family (one UART write; not in the menu):
 
 | Address | Setting | Range | Default |
 |---|---|---|---|
@@ -182,7 +201,7 @@ Timing settings, 8 bytes at `0x1D50` (one UART write; not in the menu; used only
 
 **Output and timing.** Everything the radio sends goes through a 512-byte queue drained into the UART FIFO by the UART TX interrupt, the main loop and the 1 ms tick (the tick alone managed only 1 to 2.3 bytes/ms on the bench); the command handler no longer blocks with interrupts off. Frames are handled on every pass of the main loop (v1: one per 10 ms slice, so replies took 10 to 20 ms), all complete frames at once. The parser drops only the `AB` of anything that cannot be a frame and drops a frame still incomplete 5 ms after its last byte, so a frame cut short by PTT no longer leaves the radio deaf to hellos.
 
-**Protocol v2.** Commands 0x5000 to 0x507F, events 0x50C0 up, specified in `docs/protocol-v2.md` (section 13 lists what is implemented). A hello's 0x0515 reply carries the `PKT2` marker in its challenge field; the replies to legacy commands are otherwise byte-identical to v1. v2 settings (lock, busy detection, default subscription, tone calibration) live in the 16-byte block at 0x1D60, used only with a valid settings block and its own version byte, and blanked by the first menu save over foreign data. Nothing in v2 keys the transmitter.
+**Protocol v2.** Commands 0x5000 to 0x507F, events 0x50C0 up, specified in `docs/protocol-v2.md` (section 13 lists what is implemented). A hello's 0x0515 reply carries the `PKT2` marker in its challenge field; the replies to legacy commands are otherwise byte-identical to v1. v2 settings (lock, busy detection, default subscription, tone calibration) live in the 16-byte block at 0x1D60 in the settings family, used when it also holds its own version byte (the first power-on writes it). Nothing in v2 keys the transmitter.
 
 ## Fixes
 
@@ -197,7 +216,8 @@ Timing settings, 8 bytes at `0x1D50` (one UART write; not in the menu; used only
 
 - REG_24 (DTMF detector) is cleared at power-on, not only at the first key-up; the DTMF coefficient writes (REG_09) are gone.
 - REG_48 uses the RX DAC gain setting (default 15) at all times; upstream used the calibration value (usually 8) while its squelch was closed.
-- A blank EEPROM starts on 144.800 MHz (upstream: the bottom of the 2 m band slot, 137.000 MHz).
+- Every first start after flashing is a factory reset onto 144.800 MHz, whatever the EEPROM held (upstream: a blank EEPROM starts at the bottom of the 2 m band slot, 137.000 MHz).
+- TX is limited to 136 to 174 MHz and 400 to 470 MHz whatever `0x0F40` says; upstream read its TX band plan from there.
 - The first-power-on defaults differ from upstream: no dual watch, and a 30 s TX timeout instead of 1 minute.
 
 ## Left for measurement to decide

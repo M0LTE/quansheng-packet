@@ -24,23 +24,42 @@ Newer models built on a different processor, such as the UV-K5 V3 and UV-K1, are
 
 ## Flashing
 
-You need the firmware file `quansheng-packet-<version>.bin` from the [latest release](https://github.com/M0LTE/quansheng-packet/releases/latest). It is already packed for the radio's bootloader.
+### Flash from your browser (Chrome or Edge)
 
-1. **Put the radio in flash mode.** Switch it off, then hold PTT while switching it on. The torch LED lights and the screen stays blank.
+**[Flash the latest release from your browser](https://armel.github.io/uvtools/?firmwareURL=https://raw.githubusercontent.com/M0LTE/quansheng-packet/flash/latest/quansheng-packet.bin)**
+
+1. **Put the radio in flash mode** (bootloader mode): switch it off, then hold PTT while switching it on. The torch LED lights and the screen stays blank.
 2. **Connect** the AIOC (or any UV-K5 programming cable) to the radio and the computer.
-3. **Flash**, with either tool:
-   - **k5ctl**, from the same release (Linux, Windows, macOS). First a dry run, which checks the radio and the file and sends nothing:
-     ```sh
-     k5ctl -p /dev/ttyACM0 flash quansheng-packet-v1.0.0.bin
-     k5ctl -p /dev/ttyACM0 flash quansheng-packet-v1.0.0.bin --really-flash
-     ```
-     On Windows the port is `COM3` or similar; `k5ctl ports` lists them. On macOS, a downloaded binary may need `xattr -d com.apple.quarantine k5ctl` before it will run.
-   - **A web flasher** in Chrome or Edge, such as [egzumer's UVTools flasher](https://egzumer.github.io/uvtools/), which takes packed images like this one (not yet tried with this firmware).
+3. **Open the link above** in Chrome or Edge, pick the cable's serial port and flash. The link opens [armel's UVTools](https://github.com/armel/uvtools), a third-party page, with the latest release of this firmware already loaded from this project's `flash` branch. Each release's notes link to that release's image the same way.
 4. Switch the radio off and on. The menu's last item, **Ver**, shows the version.
 
-**Going back** to the stock firmware or another one works the same way: flash its packed image in flash mode. Nothing is lost. This firmware never writes the factory calibration and never changes your memory channels. Its own settings live in the part of the EEPROM that the stock firmware uses for DTMF contacts, so re-enter those if you used them. For extra peace of mind, take a backup before you start: `k5ctl -p PORT backup k5-backup.bin`.
+### Or with k5ctl
 
-On first start the radio takes over the frequency the old firmware was using.
+You need the firmware file `quansheng-packet-<version>.bin` from the [latest release](https://github.com/M0LTE/quansheng-packet/releases/latest), already packed for the radio's bootloader, and `k5ctl` from the same release (Linux, Windows, macOS). With the radio in flash mode and connected as above, first a dry run, which checks the radio and the file and sends nothing, then the real thing:
+
+```sh
+k5ctl -p /dev/ttyACM0 flash quansheng-packet-v1.0.1.bin
+k5ctl -p /dev/ttyACM0 flash quansheng-packet-v1.0.1.bin --really-flash
+```
+
+On Windows the port is `COM3` or similar; `k5ctl ports` lists them. On macOS, a downloaded binary may need `xattr -d com.apple.quarantine k5ctl` before it will run. `k5ctl` checks the bootloader version before it flashes anything.
+
+### The first start is a factory reset
+
+Flashing over any other firmware (or over v1.0.0 of this one) is like a factory reset. On its first start the radio ignores everything the previous firmware saved and starts with every setting at its default:
+
+- **144.800 MHz**, the European APRS frequency
+- **low power** (`~0.5W`), wide (25 kHz) channel, 12.5 kHz step
+- deviation `0x856` wide and `0x756` narrow, TX timeout 30 s, backlight 20 s, key lock off
+- receive audio gain from the radio's factory calibration
+
+It writes those defaults to its own settings area once, then remembers your changes from then on. Low power is the default because it is kinder to the radio's amplifier and battery on long packet transmissions and on a first key-up into an unknown antenna; raise it with F then 6, the menu or `k5ctl -p PORT set power=high --persist`.
+
+The radio's **factory calibration** (receive thresholds, transmit power, battery and crystal tuning) is kept: it is read, and never written.
+
+### Going back
+
+Flashing the stock firmware or another one works the same way: flash its packed image in flash mode. This firmware never writes the factory calibration and never changes your memory channels. It keeps its own settings in the part of the EEPROM the stock firmware uses for DTMF contacts (0x1D00 to 0x1D6F), and its first start overwrites that part, so re-enter any DTMF contacts stored there if you used them. For extra peace of mind, take a backup before you start: `k5ctl -p PORT backup k5-backup.bin`.
 
 ## Using the radio
 
@@ -105,7 +124,7 @@ The radio speaks a serial control protocol over the AIOC's serial port: carrier 
 - **Transmit timeout.** Every transmission ends after the TxTOut time (30 seconds unless you change it), and the next one needs PTT released first.
 - **Nothing can key the radio over the serial port.** The protocol has no transmit command, commands that could turn on the transmitter or its amplifier are refused, and at 38400 baud no serial data can be mistaken for a PTT press.
 - **Transmitting is refused** when the battery is flat or the supply voltage is too high.
-- By default the radio can transmit on 137 to 174 MHz and 400 to 470 MHz. Transmit only where your licence allows.
+- **Transmit is limited to 136 to 174 MHz and 400 to 470 MHz**, the ranges the radio's amplifier and filters are designed for. This is fixed in the firmware; anything another firmware set up does not change it. A PTT press anywhere else is refused (the screen shows it, and the software control reports it). Receive works across the whole range, 350 to 400 MHz included. Transmit only where your licence allows.
 
 ## More
 

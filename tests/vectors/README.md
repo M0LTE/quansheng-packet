@@ -12,6 +12,6 @@ Each vector:
 | `response_mode`, `response` | everything the radio sent in reply, as hex, possibly several frames (events come before an `EVENT_REPLAY` reply) |
 | `frames` | the response decoded: `id`, `crc` (`real` on every 0x50xx frame, `FFFF` on legacy replies) and `body` (after the inner id and length) |
 
-Common state unless the vector says otherwise: a fresh boot with a blank EEPROM except the factory calibration area, firmware version string `PKTFW test`, clock 1000 ms at boot, then a plain-mode hello (`0x0514` with raw id bytes `14 05`), so replies carry `lock_ms` 20 (the default SERIAL_LOCK_MS) because every frame restarts the lock. Tags are arbitrary per vector.
+Common state unless the vector says otherwise: a fresh boot with a blank EEPROM except the factory calibration area (so the first power-on writes and signs the default settings family, as on a newly flashed radio), firmware version string `PKTFW test`, clock 1000 ms at boot, then a plain-mode hello (`0x0514` with raw id bytes `14 05`), so replies carry `lock_ms` 20 (the default SERIAL_LOCK_MS) because every frame restarts the lock. Tags are arbitrary per vector.
 
 Reply bodies start with the 4-byte reply header (`tag`, `status`, `lock_ms`); event bodies with the 7-byte event header (`seq`, `t_ms`, `flags`). Layouts are in `docs/protocol-v2.md` sections 4, 6 and 8.

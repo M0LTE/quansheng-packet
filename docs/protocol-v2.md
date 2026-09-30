@@ -1,6 +1,6 @@
 # Serial control protocol v2 (packet firmware)
 
-Status: implemented in the firmware, host-tested and verified on the bench radio; section 13 lists what is implemented and where the firmware settled a point this text left open. Written 29 September 2026 against the v1 firmware (2951c48); amended 30 September 2026 with the implementation and the release changes (retired parameters and ops are marked where they were).
+Status: implemented in the firmware, host-tested and verified on the bench radio; section 13 lists what is implemented and where the firmware settled a point this text left open. Written 29 September 2026 against the v1 firmware (2951c48); amended 30 September 2026 with the implementation and the release changes (retired parameters and ops are marked where they were), and for v1.0.1: the signed settings family and factory-fresh first power-on (7.1), and the fixed TX policy (GET_INFO bytes 35 to 37).
 
 This is the serial protocol a TNC or soundmodem (pdn-soundmodem, say) uses to control and watch the UV-K5 packet firmware through an AIOC: AIOC sound card for audio, AIOC CM108 HID for PTT, AIOC CDC serial for this protocol. It adds a command set in its own ID range (0x50xx) to the existing framing. Every existing command and the framing stay as they are on the wire.
 
@@ -126,7 +126,7 @@ On an error status the reply body after the header is one `u8 detail` (the offen
 | 0x06 | STATE | not possible in the current state (reduced service) |
 | 0x07 | REFUSED | register not allowed (detail = register) |
 | 0x08 | UNSUPPORTED | capability absent or uncalibrated |
-| 0x09 | EEPROM | settings block not valid, cannot persist |
+| 0x09 | EEPROM | settings family not signed, cannot persist (from v1.0.1 the radio signs it at power-on, so only if that write failed) |
 | 0x0A | NOT_PERSISTABLE | RAM-only parameter with PERSIST (detail = id) |
 
 ### 4.4 Event header (first body bytes of every event)
@@ -215,9 +215,9 @@ Request: empty. Reply (40 bytes):
 | 31 | u8 | event ring capacity, events (at least 16; 20 in this firmware) |
 | 32 | u16 | SERIAL_LOCK_MS in force |
 | 34 | u8 | LATE_KEY_MAX_MS (30) |
-| 35 | u8 | TX band plan (F_LOCK, 0 to 7 as `settings.h`) |
-| 36 | u8 | TX band flags: bit 0 200TX, bit 1 350TX, bit 2 500TX, bit 3 350EN |
-| 37 | u8 | settings block layout (1), 0 if the block is not valid |
+| 35 | u8 | TX band policy: 8, fixed: transmit only from 136 up to 174 MHz and from 400 up to 470 MHz (v1.0.0 sent its F_LOCK plan here, 0 to 7) |
+| 36 | u8 | reserved, 0 (v1.0.0: TX band flags, bit 0 200TX, bit 1 350TX, bit 2 500TX, bit 3 350EN) |
+| 37 | u8 | settings layout: 2 once the settings family is signed (7), 0 if not; v1.0.0 sent 1 |
 | 38 | u8 | v2 block layout (1), 0 if not valid |
 | 39 | u8 | default burst sample period, ms |
 
@@ -266,7 +266,7 @@ Request (10 bytes):
 
 Reply (8 bytes): `u16 next_seq`, `u16 oldest_seq` (oldest event still in the ring, equal to next_seq if empty), `u32 t_ms` (radio clock now).
 
-Mask bits for events the radio does not support, and option bits other than 0 and 1, are ignored. The batch may be 0 only when the stream period is 0. PERSIST needs a valid settings block (else `EEPROM`); the default is written after the reply, like SET_PARAMS PERSIST. Errors: `RANGE` with the field offset as detail (5 heartbeat, 7 stream period, 8 batch, 9 burst period).
+Mask bits for events the radio does not support, and option bits other than 0 and 1, are ignored. The batch may be 0 only when the stream period is 0. PERSIST needs the signed settings family (else `EEPROM`); the default is written after the reply, like SET_PARAMS PERSIST. Errors: `RANGE` with the field offset as detail (5 heartbeat, 7 stream period, 8 batch, 9 burst period).
 
 The live subscription is RAM. It returns to the stored default (normally nothing) at power-on and on every legacy hello. A persisted non-empty mask makes the radio send frames unprompted from power-on, which may confuse CHIRP and similar tools; use it only for dedicated stations. Heartbeat needs bit 6 and a period; the stream needs bit 5 and a period.
 
@@ -307,7 +307,7 @@ Reply: `u8 result` (bit 0 TX allowed at the resulting frequency, bit 1 persist q
 
 ### 6.7 SAVE_PARAMS (0x5006)
 
-Request: `u8 op`: 0 SAVE (persist every live persistable parameter that differs from its stored value), 1 REVERT (reload all live parameters from EEPROM, as at power-on, and drop RAM-only settings). Reply: `u32 mask` (bit n = parameter id n written or reverted, that is, whose value differed). SAVE needs a valid settings block (else EEPROM); write rules as 6.6. REVERT is refused with `STATE` while a persist is still being written, and in reduced service. Any other op: `RANGE`, detail 0.
+Request: `u8 op`: 0 SAVE (persist every live persistable parameter that differs from its stored value), 1 REVERT (reload all live parameters from EEPROM, as at power-on, and drop RAM-only settings). Reply: `u32 mask` (bit n = parameter id n written or reverted, that is, whose value differed). SAVE needs the signed settings family (else EEPROM); write rules as 6.6. REVERT is refused with `STATE` while a persist is still being written, and in reduced service. Any other op: `RANGE`, detail 0.
 
 ### 6.8 LEVEL_TONE (0x5007)
 
@@ -393,15 +393,17 @@ Ids for `GET_PARAMS` and `SET_PARAMS`. "Stored" is the EEPROM home when persiste
 | 0x19 | BUSY_SQL_LEVEL | u8 | 1 to 9: the row of the factory squelch tables the chip's squelch detector uses | 1 | 0x1D01 (was the squelch level; 0 there means 1) |
 
 Notes:
-- FREQ_HZ: the radio must be able to receive it (inside the band table, and not 350 to 400 MHz unless the band is enabled at 0x0F45). The firmware has one operating channel, no memory channels or band slots: frequency, power, bandwidth and step live in an 8-byte block at 0x1D58 in the settings family (`0x1D58` u32 frequency in 10 Hz units, `0x1D5C` power, `0x1D5D` bandwidth, `0x1D5E` step index, `0x1D5F` reserved), used only with a valid settings block. REQUIRE_TX_OK rejects a frequency the TX band plan forbids; otherwise the reply's result bit 0 says whether TX would be allowed. PERSIST of any of the three writes the block with all of them and the step, as the keypad does, and like every other stored parameter needs a valid settings block (else `EEPROM`).
-- When the block is not in use (a radio coming from another firmware or from the channel-memory builds), the frequency the old upstream layout had in use (channel indices at 0x0E80 and the record they point at) is taken once if receivable, else 144.800 MHz; with a valid settings block it is then written to 0x1D58 and the old layout is never read again.
+- FREQ_HZ: the radio must be able to receive it: inside the band table, 50 to 76 MHz or 108 to 600 MHz, 350 to 400 MHz included (v1.0.0 refused 350 to 400 MHz unless another firmware had enabled it at 0x0F45). The firmware has one operating channel, no memory channels or band slots: frequency, power, bandwidth and step live in an 8-byte block at 0x1D58 in the settings family (`0x1D58` u32 frequency in 10 Hz units, `0x1D5C` power, `0x1D5D` bandwidth, `0x1D5E` step index, `0x1D5F` reserved). REQUIRE_TX_OK rejects a frequency the fixed TX policy forbids (anything outside 136 up to 174 MHz and 400 up to 470 MHz; GET_INFO byte 35); otherwise the reply's result bit 0 says whether TX would be allowed. PERSIST of any of the three writes the block with all of them and the step, as the keypad does, and like every other stored parameter needs the signed settings family (else `EEPROM`).
+- A frequency in the block that cannot be received means the defaults: 144.800 MHz, low power, wide. Nothing another firmware stored (its channels, the indices at 0x0E80) is ever read.
 - There is no squelch: receive audio is always open (the AF output carries the FM demodulator output whenever the radio is not transmitting, and the speaker amplifier is on). The chip's squelch result is only a carrier detector for the busy events (8.2); BUSY_SQL_LEVEL and BUSY_SQL_RAW set its thresholds and never mute anything.
 - BUSY_SQL_RAW overrides the thresholds from the level table and survives retunes; setting BUSY_SQL_LEVEL or rebooting drops it. Reading it returns the thresholds in use.
 - AGC_FIX and AFC are diagnostics.
 
-### 7.1 v2 EEPROM block (0x1D60 to 0x1D6F)
+### 7.1 The settings family and the v2 EEPROM block (0x1D60 to 0x1D6F)
 
-Used only when the v1 settings block (0x1D00) is valid and 0x1D60 holds its layout version. A single byte out of range means "default". The first menu save over foreign data at 0x1D00 blanks this block too, with the timing and operating blocks.
+From v1.0.1 every stored parameter lives in the settings family, 0x1D00 to 0x1D6F, which the firmware trusts only when the signature block at 0x1D10 holds `50 4B 46 57` ("PKFW") and the layout version 2 (then 3 reserved bytes, 0xFF). Without it (the first power-on after flashing over any other firmware, v1.0.0 included, or after a host wrote over it) the firmware reads nothing from the family, loads every default and writes the whole family with them, the signature last; so after the first power-on the family is always signed and STORED reads return the defaults until something is persisted. v1.0.0 marked the family with 0x1D00 = 1 instead; that byte is now reserved (0xFF) and a family marked only that way counts as foreign. The layout of each block is in `docs/packet-fw.md` ("Settings").
+
+The v2 block is used when the family is signed and 0x1D60 also holds its own layout version (the first power-on writes it). A single byte out of range means "default".
 
 | Address | Content | Blank means |
 |---|---|---|
@@ -644,6 +646,8 @@ Everything in sections 2 to 9 is implemented, with the points below settled by t
 | 0x5020 serial keying | not implemented, reserved; replies UNKNOWN_CMD |
 | Squelch (30 September) | removed: receive audio always open; parameter 0x07 retired (UNSUPPORTED); the chip's squelch result kept as the busy detector, level 0x19 and thresholds 0x14 |
 | Mic gain (30 September) | fixed at the maximum; parameter 0x06 retired (UNSUPPORTED), EEPROM 0x1D03 ignored |
+| Settings family (v1.0.1) | trusted only with the signature at 0x1D10 ("PKFW", layout 2); without it the first power-on writes the defaults and signs it; GET_INFO byte 37 reports 2 |
+| TX policy (v1.0.1) | fixed: TX only 136 up to 174 MHz and 400 up to 470 MHz, 0x0F40 never read; GET_INFO byte 35 = 8, byte 36 = 0; RX across the band table, 350 to 400 MHz included |
 
 Points settled by the implementation, beyond the amendments above:
 - PARAMS_CHANGED with source 0 (keypad or menu) comes from comparing every parameter with its last reported value every 500 ms, so it follows anything the operator changes, up to 0.5 s late.
