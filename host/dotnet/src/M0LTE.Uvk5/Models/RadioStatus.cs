@@ -137,7 +137,7 @@ public sealed record RadioStatus
     /// <summary>The seq the next stored event will get.</summary>
     public ushort NextEventSequence { get; init; }
 
-    /// <summary>Memory channel 0 to 199, or band slot 200 to 206.</summary>
+    /// <summary>Always 0xFF on the current packet firmware, which has one operating channel and no memory channels or band slots.</summary>
     public int Channel { get; init; }
 
     /// <summary>TX timeout.</summary>

@@ -625,7 +625,7 @@ public sealed partial class SimulatedRadio
             .U8((int)Param(RadioParameterId.Power)).U8(bw).U8((int)Param(RadioParameterId.Squelch))
             .U16((int)Param(bw == 0 ? RadioParameterId.DeviationWide : RadioParameterId.DeviationNarrow))
             .U16(rssi).U8(noise).U8(glitch).U8(0).U8(BatteryLevel()).U16(BatteryMillivolts / 10 * 10).U16(LockMs()).U16(txLeft)
-            .U16((int)Math.Min(busyAge, 65535)).U16(_nextSeq).U8(200).U8(TxTimeoutSeconds());
+            .U16((int)Math.Min(busyAge, 65535)).U16(_nextSeq).U8(0xFF).U8(TxTimeoutSeconds());
         Reply(id, tag, K5Status.Ok, w.ToArray());
     }
 

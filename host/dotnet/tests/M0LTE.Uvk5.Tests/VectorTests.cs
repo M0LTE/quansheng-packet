@@ -180,7 +180,7 @@ public class VectorTests
         Assert.Equal(3, s.Agc.Index);
         Assert.Equal(5, s.BatteryLevel);
         Assert.Equal(7800, s.BatteryMillivolts);
-        Assert.Equal(202, s.Channel);
+        Assert.Equal(0xFF, s.Channel);   // one operating channel, no memory channels
         Assert.Equal(TimeSpan.FromMilliseconds(1000), s.BusyAge);
         Assert.Null(s.TxTimeLeft);
 
