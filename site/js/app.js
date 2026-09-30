@@ -331,7 +331,7 @@ function usbCancelled(e) {
 
 function usbErrorText(e) {
   if (e?.name === 'SecurityError' || e?.name === 'NotAllowedError' || /Access denied/i.test(e?.message)) {
-    return 'The browser was not allowed to use the device. On Windows it needs the WinUSB driver (see the notes below); on Linux, the udev rule; or another program has it open.';
+    return 'The browser was not allowed to use the device. On Windows it needs the WinUSB driver (the Zadig note above); on Linux, the udev rule (below); or another program has it open.';
   }
   return errText(e);
 }
@@ -441,12 +441,11 @@ $('aioc-flash').addEventListener('click', async () => {
     await d.leave(AIOC_FLASH_START);
     show(
       $('aioc-status'),
-      `Done: ${aiocFw.label} is written and checked, and the AIOC is restarting with it. Its settings are back to the defaults.\n` +
-        'If you shorted the pins, unplug it, remove the short and plug it back in. Then check the equaliser below.',
+      `Done: ${aiocFw.label} is written and checked, and the AIOC is restarting with it. Its settings are back to the defaults. Now check the equaliser below.`,
       'ok',
     );
   } catch (e) {
-    show($('aioc-status'), `${errText(e)} Nothing is lost: connect to the bootloader again and flash again.`, 'error');
+    show($('aioc-status'), `${errText(e)} Nothing is lost: leave the AIOC plugged in, connect to the bootloader again and flash again.`, 'error');
   } finally {
     busyCount--;
     $('aioc-progress').hidden = true;
@@ -470,7 +469,7 @@ $('eq-check').addEventListener('click', async () => {
   } catch (e) {
     show(
       $('eq-status'),
-      `Could not read the AIOC: ${errText(e)}. On Linux this needs the udev rule in the notes above; elsewhere, unplug and replug the AIOC and try again.`,
+      `Could not read the AIOC: ${errText(e)}. On Linux this needs the udev rule in step 2; elsewhere, unplug and replug the AIOC and try again.`,
       'error',
     );
   } finally {

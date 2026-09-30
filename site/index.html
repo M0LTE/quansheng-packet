@@ -71,12 +71,9 @@
   <h2><span class="num">2</span> Flash the AIOC</h2>
   <p>The packet AIOC firmware adds a transmit equaliser that makes a UV-K5's audio flat, which the radio firmware's default deviation expects. Flashing it <b>resets the AIOC's settings to the defaults</b>: PTT from the CM108 (HID) interface, and from the serial port with DTR high and RTS low.</p>
   <div class="note">
-    <p><b>Windows only, once per computer:</b> Windows has no driver for the two ways the AIOC shows itself here, so the browser cannot see them until you add one with <a href="https://zadig.akeo.ie/" target="_blank" rel="noopener">Zadig</a> (in Zadig, choose <b>Options, List All Devices</b> first):</p>
-    <ol>
-      <li><b>Before you switch:</b> pick <b>AIOC DFU Runtime (Interface 6)</b> (USB ID 1209 7388 06), check the driver on the right is <b>WinUSB</b>, and click <b>Install Driver</b>. Now <b>Switch to bootloader</b> below works.</li>
-      <li><b>After you switch:</b> the AIOC restarts as <b>STM32 BOOTLOADER</b> (USB ID 0483 DF11; Device Manager may show it with Code 28). Pick it in Zadig, <b>WinUSB</b>, <b>Install Driver</b>, then press <b>Connect to bootloader</b>.</li>
-    </ol>
-    <p>After that this computer just works. Mac, Linux and ChromeOS need nothing extra (Linux: see the notes below for permissions).</p>
+    <p><b>Windows only, once per computer:</b> open <a href="https://zadig.akeo.ie/" target="_blank" rel="noopener">Zadig</a>, choose <b>Options, List All Devices</b>, pick <b>AIOC DFU Runtime (Interface 6)</b> (USB ID 1209 7388 06), check the driver on the right is <b>WinUSB</b>, and click <b>Install Driver</b>.</p>
+    <p class="small">If the picker then shows no "STM32 BOOTLOADER" after the switch, do the same in Zadig for it.</p>
+    <p class="small">Mac, Linux and ChromeOS need nothing extra (Linux: see the permissions note below).</p>
   </div>
   <ol>
     <li>Close any program using the AIOC (soundmodem, terminal). The radio can stay connected.</li>
@@ -93,14 +90,8 @@
   <div id="aioc-status" class="status" role="status" aria-live="polite"></div>
   <progress id="aioc-progress" max="1" value="0" hidden></progress>
   <details>
-    <summary>If the AIOC will not switch by itself</summary>
-    <p>Put it in bootloader mode by hand: unplug it, short the two outermost pins of its programming header (<a href="https://github.com/skuep/AIOC/blob/master/doc/images/k1-aioc-dfu.jpg" target="_blank" rel="noopener">photo</a>) with tweezers or a wire, and plug it in with the short in place. Then press <b>Connect to bootloader</b> and flash. Afterwards unplug it, remove the short and plug it back in.</p>
-    <p>The bootloader lives in the chip's ROM, so a failed flash cannot brick the AIOC: just do this and flash again.</p>
-  </details>
-  <details>
-    <summary>Windows and Linux notes</summary>
-    <p><b>Windows:</b> if the browser cannot see "STM32 BOOTLOADER", install the WinUSB driver for it once with <a href="https://zadig.akeo.ie/" target="_blank" rel="noopener">Zadig</a>. For the automatic switch, do the same for "All-In-One-Cable (Interface 6)" (in Zadig, Options, List All Devices). Or use the manual way above.</p>
-    <p><b>Linux:</b> the browser needs permission to use the AIOC's USB and HID devices. Save this as <code>/etc/udev/rules.d/99-aioc.rules</code>, then unplug and replug the AIOC:</p>
+    <summary>Linux permissions</summary>
+    <p>The browser needs permission to use the AIOC's USB and HID devices. Save this as <code>/etc/udev/rules.d/99-aioc.rules</code>, then unplug and replug the AIOC:</p>
     <pre>SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="7388", TAG+="uaccess"
 SUBSYSTEM=="usb", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="7388", TAG+="uaccess"
 SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="df11", TAG+="uaccess"</pre>
@@ -119,7 +110,7 @@ SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="df11", TAG+="uacce
 <!-- ============================================================= step 3 -->
 <section id="step3" class="card step">
   <h2><span class="num">3</span> Set up the radio</h2>
-  <p>Plug the AIOC back into the radio and switch the radio on normally. Then connect to set its frequency, power and channel width. Changes are saved in the radio.</p>
+  <p>With the radio switched on normally, connect to set its frequency, power and channel width. Changes are saved in the radio.</p>
   <div class="warn note"><b>Don't transmit while this page is connected.</b> The radio's PTT and its serial input share one wire, so anything this page sends ends a transmission. Disconnect here before you start your soundmodem (only one program can use the serial port anyway).</div>
   <div class="actions">
     <button id="radio-connect">Connect</button>
