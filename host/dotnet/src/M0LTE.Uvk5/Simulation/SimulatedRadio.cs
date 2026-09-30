@@ -16,7 +16,12 @@ public sealed record SimulatedRadioOptions
     /// <summary>Clock. A <c>FakeTimeProvider</c> makes the simulation deterministic.</summary>
     public TimeProvider TimeProvider { get; init; } = TimeProvider.System;
 
-    /// <summary>Initial 8 KiB EEPROM image; a plausible one (valid settings block, non-blank calibration) if null.</summary>
+    /// <summary>
+    /// Initial 8 KiB EEPROM image; a plausible one (a signed settings family, non-blank calibration)
+    /// if null. As on the radio, a packet firmware v2 simulation that finds no signature at
+    /// power-on (another firmware's EEPROM, or v1.0.0's layout) starts factory-fresh: it writes the
+    /// whole settings family with the defaults and signs it.
+    /// </summary>
     public byte[]? Eeprom { get; init; }
 
     /// <summary>Seed for the synthetic calibration area, so two simulated radios can differ.</summary>
@@ -25,8 +30,8 @@ public sealed record SimulatedRadioOptions
     /// <summary>Initial frequency, Hz.</summary>
     public long FrequencyHz { get; init; } = 144_800_000;
 
-    /// <summary>Which frequencies the TX band plan allows.</summary>
-    public Func<long, bool> TxAllowed { get; init; } = f => f is >= 144_000_000 and < 146_000_000 or >= 430_000_000 and < 440_000_000;
+    /// <summary>Which frequencies the radio may transmit on: by default the firmware's fixed policy, 136 up to 174 MHz and 400 up to 470 MHz.</summary>
+    public Func<long, bool> TxAllowed { get; init; } = FirmwareInfo.IsFixedTxAllowed;
 
     /// <summary>Stored-event ring capacity (the spec asks for at least 16).</summary>
     public int EventRingCapacity { get; init; } = 32;
@@ -927,7 +932,14 @@ public sealed partial class SimulatedRadio : IDisposable
         }
 
         // Bytes 3 (was the mic gain) and 11 (was the battery type) are reserved: the firmware writes 0xFF.
+        // Byte 0 is the marker of packet firmware before protocol v2; v1.0.1 on reserve it (0xFF) and
+        // sign the family at 0x1D10 instead.
         byte[] settings = [0x01, 0x01, 0x04, 0xFF, 0x56, 0x08, 0x56, 0x07, 0xFF, 0x0F, 0x03, 0xFF, 0x00, 0xFF, 0xFF, 0xFF];
+        if (o.Firmware == FirmwareKind.PacketV2)
+        {
+            settings[0] = 0xFF;
+        }
+
         settings.CopyTo(e, 0x1D00);
         byte[] timing = [0x05, 0x05, 0x01, 0x02, 0xFF, 0xFF, 0xFF, 0xFF];
         timing.CopyTo(e, 0x1D50);
@@ -935,6 +947,7 @@ public sealed partial class SimulatedRadio : IDisposable
         {
             byte[] v2 = [0x01, 0x02, 0x01, 0x14, 0x6E, 0x00, 0x68, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0xFF];
             v2.CopyTo(e, 0x1D60);
+            SettingsBlock.Signature.CopyTo(e, SettingsBlock.SignatureAddress);
         }
 
         for (int i = K5Safety.CalibrationStart; i < K5Safety.EepromSize; i++)

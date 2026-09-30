@@ -37,8 +37,10 @@ public class CommandTests
         Assert.Equal(120, fw.MaxRequestBody);
         Assert.True(fw.Supports(RadioParameterId.KeyLock));
         Assert.Equal((RadioEvents)0x1FFF, fw.SupportedEvents);
-        Assert.Equal(1, fw.SettingsBlockLayout);
+        Assert.Equal(2, fw.SettingsBlockLayout);        // the signed family (v1.0.1 on)
         Assert.Equal(1, fw.V2BlockLayout);
+        Assert.Equal(FirmwareInfo.FixedTxBandPolicy, fw.TxBandPlan);
+        Assert.Equal(0, fw.TxBandFlags);
     }
 
     [Fact]
@@ -141,7 +143,7 @@ public class CommandTests
     {
         await using var rig = await Rig.StartAsync();
         var e = await Assert.ThrowsAsync<K5CommandRejectedException>(() =>
-            rig.Radio.SetSettingsAsync(new RadioSettings { FrequencyHz = 150_000_000, BusySquelchLevel = 3 }, SetSettingsFlags.RequireTxAllowed, Ct));
+            rig.Radio.SetSettingsAsync(new RadioSettings { FrequencyHz = 200_000_000, BusySquelchLevel = 3 }, SetSettingsFlags.RequireTxAllowed, Ct));
         Assert.Equal(K5Status.TxBand, e.Status);
         Assert.Equal(1, rig.Sim.LiveSettings.BusySquelchLevel);   // nothing changed
 
@@ -209,16 +211,16 @@ public class CommandTests
     }
 
     [Fact]
-    public async Task Persist_needs_a_valid_settings_block()
+    public async Task A_blank_eeprom_is_signed_at_power_on_so_persist_works_at_once()
     {
         var blank = new byte[0x2000];
         Array.Fill(blank, (byte)0xFF);
         new Random(3).NextBytes(blank.AsSpan(0x1E00));
         await using var rig = await Rig.StartAsync(simOptions: new SimulatedRadioOptions { Eeprom = blank });
-        var e = await Assert.ThrowsAsync<K5CommandRejectedException>(() =>
-            rig.Radio.SetSettingsAsync(new RadioSettings { FrequencyHz = 145_000_000 }, SetSettingsFlags.Persist, Ct));
-        Assert.Equal(K5Status.Eeprom, e.Status);
-        Assert.Equal(1, (await rig.Radio.GetSettingsAsync(true, [RadioParameterId.BusySquelchLevel], Ct)).BusySquelchLevel);
+        Assert.Equal(2, rig.Radio.Firmware.SettingsBlockLayout);
+        await rig.Radio.SetSettingsAsync(new RadioSettings { BusySquelchLevel = 5 }, SetSettingsFlags.Persist, Ct);
+        Assert.Equal(5, (await rig.Radio.GetSettingsAsync(true, [RadioParameterId.BusySquelchLevel], Ct)).BusySquelchLevel);
+        Assert.Equal(5, rig.Sim.Eeprom[0x1D01]);
     }
 
     [Fact]
@@ -330,7 +332,7 @@ public class CommandTests
         var cleared = await rig.Radio.ClearOverridesAsync(Ct);
         Assert.Empty(cleared.Ram);
         Assert.Null(cleared.ExpiresIn);
-        Assert.All(rig.Sim.Eeprom[0x1D10..0x1D50], b => Assert.Equal(0xFF, b));   // nothing stored
+        Assert.All(rig.Sim.Eeprom[0x1D18..0x1D50], b => Assert.Equal(0xFF, b));   // nothing stored (0x1D10 is the signature)
     }
 
     [Fact]
@@ -445,5 +447,87 @@ public class CommandTests
         rig.Sim.Dispose();
         await Rig.Until(() => rig.Radio.ChannelBusy is null);
         await Assert.ThrowsAnyAsync<Exception>(() => rig.Radio.GetStatusAsync(Ct));
+    }
+
+    /// <summary>
+    /// What a radio that ran another firmware carries: its channels and settings everywhere, the CE
+    /// TX plan with the 350 MHz band off at 0x0F40, and DTMF contacts over 0x1D00, starting 0x01.
+    /// </summary>
+    private static byte[] ForeignEeprom()
+    {
+        var e = new byte[0x2000];
+        for (int i = 0; i < e.Length; i++)
+        {
+            e[i] = (byte)(i * 7 + 3);
+        }
+
+        e[0x0F40] = 2;
+        e[0x0F45] = 0;
+        e[0x1D00] = 0x01;
+        return e;
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task First_power_on_over_another_firmware_or_v1_0_0_is_factory_fresh(bool v100)
+    {
+        byte[] before = ForeignEeprom();
+        if (v100)
+        {
+            // v1.0.0's own layout: marker 1 at 0x1D00, settings, an operating channel, no signature
+            Array.Fill(before, (byte)0xFF, 0x1D00, 0x70);
+            byte[] settings = [0x01, 0x07, 0x05, 0xFF, 0x00, 0x09, 0x00, 0x08, 0x1E, 0x09, 0x07, 0xFF, 0x01, 0xFF, 0xFF, 0xFF];
+            settings.CopyTo(before, 0x1D00);
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(before.AsSpan(0x1D58), 43_350_000);
+            before[0x1D5C] = 2;
+        }
+
+        await using var rig = await Rig.StartAsync(simOptions: new SimulatedRadioOptions { Eeprom = before });
+        byte[] e = rig.Sim.Eeprom;
+        Assert.Equal([.. "PKFW"u8, 2, 0xFF, 0xFF, 0xFF], e[0x1D10..0x1D18]);
+        Assert.Equal(0xFF, e[0x1D00]);                                  // no v1.0.0 marker
+        Assert.All(e[0x1D18..0x1D50], b => Assert.Equal(0xFF, b));       // reserved: blank
+        Assert.Equal(before[..0x1D00], e[..0x1D00]);                    // nothing outside the family written
+        Assert.Equal(before[0x1D70..], e[0x1D70..]);
+        Assert.Equal(2, rig.Radio.Firmware.SettingsBlockLayout);
+        Assert.Equal(1, rig.Radio.Firmware.V2BlockLayout);
+        int changed = Enumerable.Range(0, 14).Count(i => !before.AsSpan(0x1D00 + 8 * i, 8).SequenceEqual(e.AsSpan(0x1D00 + 8 * i, 8)));
+        Assert.Equal(v100 ? 7 : 14, changed);                           // blocks already holding the defaults are left alone
+        Assert.Equal((uint)changed, (await rig.Radio.GetCountersAsync(cancellationToken: Ct)).EepromBlocksWritten);
+
+        var stored = await rig.Radio.GetSettingsAsync(true, cancellationToken: Ct);
+        Assert.Equal(144_800_000, stored.FrequencyHz);
+        Assert.Equal(TxPower.Low, stored.Power);
+        Assert.Equal(1, stored.BusySquelchLevel);
+        Assert.Equal(TimeSpan.FromSeconds(30), stored.TxTimeout);
+        Assert.Equal(0x856, stored.DeviationWide!.Value.Register);
+        Assert.Equal(TimeSpan.FromMilliseconds(20), stored.SerialLock);
+        Assert.False((await rig.Radio.GetStatusAsync(Ct)).Flags2.HasFlag(StatusFlags2.UnsavedChanges));
+
+        // the fixed TX policy, whatever 0x0F40 said; 380 MHz receivable (350EN off is not read)
+        foreach (var (hz, tx) in new[] { (146_900_000L, true), (435_000_000L, true), (50_000_000L, false), (200_000_000L, false), (380_000_000L, false), (500_000_000L, false) })
+        {
+            var r = await rig.Radio.SetSettingsAsync(new RadioSettings { FrequencyHz = hz }, cancellationToken: Ct);
+            Assert.Equal(tx, r.TxAllowed);
+            Assert.Equal(tx, FirmwareInfo.IsFixedTxAllowed(hz));
+            if (!tx)
+            {
+                var x = await Assert.ThrowsAsync<K5CommandRejectedException>(() =>
+                    rig.Radio.SetSettingsAsync(new RadioSettings { FrequencyHz = hz }, SetSettingsFlags.RequireTxAllowed, Ct));
+                Assert.Equal(K5Status.TxBand, x.Status);
+            }
+        }
+
+        // user changes survive the next power-on, which writes nothing
+        await rig.Radio.SetSettingsAsync(new RadioSettings { FrequencyHz = 433_500_000, Power = TxPower.High, BusySquelchLevel = 4 }, SetSettingsFlags.Persist, Ct);
+        await Rig.Until(() => rig.Sim.Eeprom[0x1D01] == 4 && rig.Sim.Eeprom[0x1D5C] == 2);
+        await using var again = await Rig.StartAsync(simOptions: new SimulatedRadioOptions { Eeprom = rig.Sim.Eeprom });
+        Assert.Equal(0u, (await again.Radio.GetCountersAsync(cancellationToken: Ct)).EepromBlocksWritten);
+        var live = await again.Radio.GetSettingsAsync(cancellationToken: Ct);
+        Assert.Equal(433_500_000, live.FrequencyHz);
+        Assert.Equal(TxPower.High, live.Power);
+        Assert.Equal(4, live.BusySquelchLevel);
+        Assert.Empty(rig.Sim.Violations);
     }
 }

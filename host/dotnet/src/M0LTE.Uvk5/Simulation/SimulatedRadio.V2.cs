@@ -115,13 +115,18 @@ public sealed partial class SimulatedRadio
 
     private void PowerOnV2()
     {
+        Array.Clear(_counters);
+        if (_options.Firmware == FirmwareKind.PacketV2 && !SettingsBlockValid())
+        {
+            WriteFactoryDefaults();
+        }
+
         _live.Clear();
         foreach (RadioParameterId id in Enum.GetValues<RadioParameterId>())
         {
             _live[id] = StoredOrDefault(id);
         }
 
-        Array.Clear(_counters);
         _ring.Clear();
         _nextSeq = 0;
         _busy = false;
@@ -138,12 +143,83 @@ public sealed partial class SimulatedRadio
         UpdateBusy(BusyCause.None);
     }
 
-    private bool SettingsBlockValid() => _eeprom[0x1D00] == 1;
+    /// <summary>
+    /// The settings family is the firmware's own: from v1.0.1 (packet firmware v2) the signature
+    /// at 0x1D10; packet firmware before protocol v2 marked its block with byte 0 = 1.
+    /// </summary>
+    private bool SettingsBlockValid() => _options.Firmware == FirmwareKind.PacketV1
+        ? _eeprom[SettingsBlock.Address] == SettingsBlock.Layout
+        : SettingsBlock.IsSigned(_eeprom.AsSpan(SettingsBlock.SignatureAddress, 8));
+
+    /// <summary>Inside the firmware's band table: 50 to 76 MHz or 108 to 600 MHz (350 to 400 MHz included).</summary>
+    private static bool Receivable(long hz) => hz is >= 50_000_000 and <= 76_000_000 or >= 108_000_000 and <= 600_000_000;
 
     private bool ChannelBlockInUse()
     {
         uint f = BinaryPrimitives.ReadUInt32LittleEndian(_eeprom.AsSpan(0x1D58));
-        return SettingsBlockValid() && f is >= 5_000_000 and <= 60_000_000;
+        return SettingsBlockValid() && Receivable(f * 10L);
+    }
+
+    /// <summary>
+    /// What the firmware does when it finds no signature (the first power-on over another
+    /// firmware's EEPROM, or over v1.0.0's layout): every setting to its default, the whole family
+    /// 0x1D00 to 0x1D6F written with them (reserved bytes 0xFF), the signature last. Blocks that
+    /// already hold those bytes are not written, as on the radio.
+    /// </summary>
+    private void WriteFactoryDefaults()
+    {
+        var f = new byte[SettingsBlock.FamilyEnd - SettingsBlock.FamilyStart];
+        Array.Fill(f, (byte)0xFF);
+        void W16(int off, int v) => BinaryPrimitives.WriteUInt16LittleEndian(f.AsSpan(off), (ushort)v);
+
+        // settings (0x1D00): busy level 1, TX timeout 30 s, deviation, RX gains, backlight, key lock
+        f[0x01] = 1;
+        f[0x02] = 4;
+        W16(0x04, 0x856);
+        W16(0x06, 0x756);
+        f[0x08] = 50;
+        f[0x09] = 15;
+        f[0x0A] = 3;
+        f[0x0C] = 0;
+
+        // timing (0x1D50)
+        f[0x50] = 5;
+        f[0x51] = 5;
+        f[0x52] = 1;
+        f[0x53] = 2;
+
+        // operating channel (0x1D58): frequency in 10 Hz units, low power, wide, 12.5 kHz step
+        BinaryPrimitives.WriteUInt32LittleEndian(f.AsSpan(0x58), (uint)(_options.FrequencyHz / 10));
+        f[0x5C] = 0;
+        f[0x5D] = 0;
+        f[0x5E] = 4;
+
+        // v2 (0x1D60): layout 1, lock 20 ms, busy source 1, hang 20 ms, RSSI 110 and 104,
+        // no default subscription, no tone calibration
+        byte[] v2 = [0x01, 0x02, 0x01, 0x14, 0x6E, 0x00, 0x68, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF];
+        v2.CopyTo(f, 0x60);
+
+        const int sig = SettingsBlock.SignatureAddress - SettingsBlock.FamilyStart;
+        for (int off = 0; off < f.Length; off += 8)
+        {
+            if (off != sig)
+            {
+                WriteBlock(off);
+            }
+        }
+
+        SettingsBlock.Signature.CopyTo(f, sig);
+        WriteBlock(sig);
+
+        void WriteBlock(int off)
+        {
+            var dst = _eeprom.AsSpan(SettingsBlock.FamilyStart + off, 8);
+            if (!dst.SequenceEqual(f.AsSpan(off, 8)))
+            {
+                f.AsSpan(off, 8).CopyTo(dst);
+                Counter(13);
+            }
+        }
     }
 
     private bool V2BlockValid() => SettingsBlockValid() && _eeprom[0x1D60] == 1;
@@ -218,6 +294,11 @@ public sealed partial class SimulatedRadio
         {
             _reloadTimer = After(100, ReloadFromEeprom);
             return;
+        }
+
+        if (_options.Firmware == FirmwareKind.PacketV2 && !SettingsBlockValid())
+        {
+            WriteFactoryDefaults();   // a host wrote over the signature: factory-fresh, as at power-on
         }
 
         uint mask = 0;
@@ -602,7 +683,7 @@ public sealed partial class SimulatedRadio
         }
 
         var w = new WireWriter().U16(0x0200).Ascii(Version, 16).U32((uint)caps).U32(pmask).U32(0x1FFF).U8(120).U8(_options.EventRingCapacity)
-            .U16((int)Param(RadioParameterId.SerialLockMs)).U8(LateKeyMaxMs).U8(0).U8(0).U8(SettingsBlockValid() ? 1 : 0).U8(V2BlockValid() ? 1 : 0).U8(5);
+            .U16((int)Param(RadioParameterId.SerialLockMs)).U8(LateKeyMaxMs).U8(FirmwareInfo.FixedTxBandPolicy).U8(0).U8(SettingsBlockValid() ? SettingsBlock.SignedLayout : 0).U8(V2BlockValid() ? 1 : 0).U8(5);
         Reply(id, tag, K5Status.Ok, w.ToArray());
     }
 
@@ -883,7 +964,7 @@ public sealed partial class SimulatedRadio
 
     private static bool InRange(RadioParameterId p, ulong v, ulong rssiOpen) => p switch
     {
-        RadioParameterId.FrequencyHz => v is >= 50_000_000 and <= 600_000_000 && v % 10 == 0,
+        RadioParameterId.FrequencyHz => v % 10 == 0 && Receivable((long)v),
         RadioParameterId.Power => v <= 2,
         RadioParameterId.Bandwidth => v <= 1,
         RadioParameterId.DeviationWide or RadioParameterId.DeviationNarrow => v <= Deviation.MaxRegister,

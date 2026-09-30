@@ -3,18 +3,52 @@ using System.Buffers.Binary;
 namespace M0LTE.Uvk5.Protocol;
 
 /// <summary>
-/// Packet firmware v1 settings in EEPROM: the 16-byte settings block at 0x1D00 and the 8-byte
+/// Packet firmware settings in EEPROM: the 16-byte settings block at 0x1D00 and the 8-byte
 /// timing block at 0x1D50 (docs/packet-fw.md). A byte out of range means "use the default".
 /// Bytes 3 (was the mic gain) and 11 (was the battery type) are reserved: the current firmware
 /// ignores them and writes 0xFF, so they are neither decoded nor written here.
 /// </summary>
+/// <remarks>
+/// <para>Which firmware trusts the blocks when: from v1.0.1 the whole family (0x1D00 to 0x1D6F)
+/// counts only when the signature block at 0x1D10 holds "PKFW" and layout 2, and a radio without
+/// it starts factory-fresh, writing the defaults and the signature at power-on; byte 0 of the
+/// settings block is then reserved (0xFF). Those radios speak protocol v2, so the library reads
+/// and writes their settings with GET_PARAMS and SET_PARAMS, never through these blocks.</para>
+/// <para>The v1 path (<see cref="FirmwareKind.PacketV1"/>: packet firmware from before protocol
+/// v2, whose hello has no PKT2 marker) is the only user of <see cref="IsValid"/>, <see cref="Decode"/>
+/// and <see cref="Encode"/>. That firmware marks its block with byte 0 = 1 and knows nothing of
+/// the signature, so that is what <see cref="IsValid"/> checks.</para>
+/// </remarks>
 internal static class SettingsBlock
 {
     public const int Address = 0x1D00;
     public const int Length = 16;
     public const int TimingAddress = 0x1D50;
     public const int TimingLength = 8;
+
+    /// <summary>The marker byte at 0x1D00 of packet firmware before protocol v2 (and of v1.0.0).</summary>
     public const byte Layout = 1;
+
+    /// <summary>The signature block (v1.0.1 on): "PKFW", the layout, three reserved bytes.</summary>
+    public const int SignatureAddress = 0x1D10;
+
+    /// <summary>The settings family layout the signature names (v1.0.1 on).</summary>
+    public const byte SignedLayout = 2;
+
+    /// <summary>The whole settings family, 0x1D00 to 0x1D6F.</summary>
+    public const int FamilyStart = 0x1D00;
+
+    /// <summary>End of the settings family (exclusive).</summary>
+    public const int FamilyEnd = 0x1D70;
+
+    private static ReadOnlySpan<byte> Magic => "PKFW"u8;
+
+    /// <summary>The 8 bytes the firmware writes at <see cref="SignatureAddress"/>.</summary>
+    public static byte[] Signature => [.. Magic, SignedLayout, 0xFF, 0xFF, 0xFF];
+
+    /// <summary>True if <paramref name="signature"/> (8 bytes from 0x1D10) marks the family as the firmware's own.</summary>
+    public static bool IsSigned(ReadOnlySpan<byte> signature) =>
+        signature.Length >= 5 && signature[..4].SequenceEqual(Magic) && signature[4] == SignedLayout;
 
     public static readonly RadioParameterId[] V1Parameters =
     [

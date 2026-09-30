@@ -166,7 +166,9 @@ public class VectorTests
         Assert.Equal("PKTFW test", fw.Version);
         Assert.Equal(TimeSpan.FromMilliseconds(20), fw.SerialLock);
         Assert.Equal(20, fw.EventRingCapacity);
-        Assert.Equal(0, fw.SettingsBlockLayout);
+        Assert.Equal(2, fw.SettingsBlockLayout);        // signed at the first power-on
+        Assert.Equal(1, fw.V2BlockLayout);
+        Assert.Equal(FirmwareInfo.FixedTxBandPolicy, fw.TxBandPlan);
         Assert.Equal(23, fw.SupportedParameters.Count);
         Assert.DoesNotContain((RadioParameterId)0x06, fw.SupportedParameters);
         Assert.DoesNotContain((RadioParameterId)0x07, fw.SupportedParameters);

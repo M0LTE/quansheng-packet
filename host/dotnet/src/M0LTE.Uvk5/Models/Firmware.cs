@@ -193,13 +193,29 @@ public sealed record FirmwareInfo
     /// <summary>Longest late key the radio does instead of refusing a press during the lock (v2), else zero.</summary>
     public TimeSpan LateKeyMax { get; init; }
 
-    /// <summary>TX band plan (F_LOCK, 0 to 7) on v2.</summary>
+    /// <summary>
+    /// <see cref="TxBandPlan"/> from v1.0.1: the fixed TX policy, transmit only from 136 up to
+    /// 174 MHz and from 400 up to 470 MHz (see <see cref="IsFixedTxAllowed"/>).
+    /// </summary>
+    public const int FixedTxBandPolicy = 8;
+
+    /// <summary>
+    /// TX band policy on v2 (GET_INFO byte 35): <see cref="FixedTxBandPolicy"/> (8) from v1.0.1.
+    /// v1.0.0 sent the upstream F_LOCK plan it read from EEPROM here, 0 to 7.
+    /// </summary>
     public int TxBandPlan { get; init; }
 
-    /// <summary>TX band flags on v2: bit 0 200TX, bit 1 350TX, bit 2 500TX, bit 3 350EN.</summary>
+    /// <summary>
+    /// GET_INFO byte 36: reserved, 0, from v1.0.1. v1.0.0 sent the upstream TX band flags here
+    /// (bit 0 200TX, bit 1 350TX, bit 2 500TX, bit 3 350EN).
+    /// </summary>
     public int TxBandFlags { get; init; }
 
-    /// <summary>Settings block layout at 0x1D00 (1), 0 if the block is not valid. Known on v2; on v1 after a settings read.</summary>
+    /// <summary>
+    /// Settings layout: on v2 from GET_INFO, 2 once the radio has signed its settings family
+    /// (v1.0.1 on, from the first power-on), 1 for v1.0.0, 0 if not valid. On v1 (packet firmware
+    /// before protocol v2) the marker byte at 0x1D00 (1), after a settings read.
+    /// </summary>
     public int SettingsBlockLayout { get; init; }
 
     /// <summary>v2 EEPROM block layout at 0x1D60 (1), 0 if not valid.</summary>
@@ -207,6 +223,13 @@ public sealed record FirmwareInfo
 
     /// <summary>Default burst sample period on v2.</summary>
     public TimeSpan DefaultBurstSamplePeriod { get; init; }
+
+    /// <summary>
+    /// True if the fixed TX policy (<see cref="FixedTxBandPolicy"/>) allows transmitting on
+    /// <paramref name="frequencyHz"/>: 136 MHz up to 174 MHz, or 400 MHz up to 470 MHz.
+    /// </summary>
+    public static bool IsFixedTxAllowed(long frequencyHz) =>
+        frequencyHz is >= 136_000_000 and < 174_000_000 or >= 400_000_000 and < 470_000_000;
 
     /// <summary>True if the library can do <paramref name="feature"/> with this radio.</summary>
     public bool Supports(K5Features feature) => (Features & feature) == feature;

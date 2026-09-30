@@ -326,7 +326,9 @@ internal static class Program
             Console.WriteLine($"serial lock {f.SerialLock.TotalMilliseconds:F0} ms, late key up to {f.LateKeyMax.TotalMilliseconds:F0} ms");
             Console.WriteLine($"events      {f.SupportedEvents}");
             Console.WriteLine($"ring        {f.EventRingCapacity} events, max request body {f.MaxRequestBody} bytes");
-            Console.WriteLine($"TX band     plan {f.TxBandPlan}, flags 0x{f.TxBandFlags:X2}");
+            Console.WriteLine(f.TxBandPlan == FirmwareInfo.FixedTxBandPolicy
+                ? "TX band     fixed: 136 to 174 MHz and 400 to 470 MHz"
+                : $"TX band     plan {f.TxBandPlan}, flags 0x{f.TxBandFlags:X2}");
             Console.WriteLine($"EEPROM      settings layout {f.SettingsBlockLayout}, v2 layout {f.V2BlockLayout}");
         }
         else
