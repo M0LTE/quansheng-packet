@@ -6,6 +6,8 @@ It does one job: send and receive FM data through a flat audio path, on one freq
 
 It is for licensed radio amateurs who want a cheap, dependable packet radio. It is not a voice firmware.
 
+**The quick way: [set up your station in your browser](https://m0lte.github.io/quansheng-packet/).** In Chrome or Edge, that page flashes this firmware on the radio and the [packet AIOC firmware](https://github.com/M0LTE/aioc-packet) on the AIOC, sets the radio's frequency and power, and walks you through your soundmodem settings. Nothing to install.
+
 ## What you get
 
 Measured on the bench, with an AIOC running the [packet AIOC firmware](https://github.com/M0LTE/aioc-packet):
@@ -25,6 +27,8 @@ Newer models built on a different processor, such as the UV-K5 V3 and UV-K1, are
 ## Flashing
 
 ### Flash from your browser (Chrome or Edge)
+
+The [setup page](https://m0lte.github.io/quansheng-packet/) flashes the latest release with its own flasher, then checks the radio's version. Or use armel's UVTools:
 
 **[Flash the latest release from your browser](https://armel.github.io/uvtools/?firmwareURL=https://raw.githubusercontent.com/M0LTE/quansheng-packet/flash/latest/quansheng-packet.bin)**
 
@@ -96,6 +100,8 @@ The screen shows the frequency, the signal strength, and the settings in use, fo
 | Ver | firmware version (read only) |
 
 ## Setting up for packet with an AIOC
+
+Two firmwares make the pair: this one on the radio, and the [packet AIOC firmware](https://github.com/M0LTE/aioc-packet) on the AIOC. For the AIOC, flash `aioc-packet-X.Y.Z.bin` from its [releases](https://github.com/M0LTE/aioc-packet/releases) (the [setup page](https://m0lte.github.io/quansheng-packet/) does it in the browser). Its transmit equaliser, tuned for the UV-K5, is on out of the box, so there is nothing to switch on. Flashing it resets the AIOC's settings to the defaults, which key PTT from the CM108 interface and from the serial port with DTR high and RTS low. Then:
 
 1. **PTT through the AIOC's CM108 (HID) interface.** In Direwolf that is `PTT CM108`; pdn-soundmodem and most soundmodems support it. Keep the AIOC's serial port for control software only.
 2. **Transmit level: drive the audio hot and set deviation in the radio.** Set your soundmodem's transmit level near full scale, just short of clipping, and then set the deviation with DevW and DevN. Never the other way round: the radio adds a little hiss of its own that grows with the deviation setting, so a quiet TNC with a high deviation setting makes a noisier signal.

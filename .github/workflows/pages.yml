@@ -1,0 +1,88 @@
+# The setup site at https://m0lte.github.io/quansheng-packet/ (site/): runs its tests, puts the
+# latest releases of this firmware and of the packet AIOC firmware (M0LTE/aioc-packet) into it
+# with a manifest of versions and checksums, and deploys it to GitHub Pages.
+#
+# Runs on pushes to main that touch the site, when a release is published here, daily (to pick
+# up new aioc-packet releases, which cannot trigger this repo), and by hand. Only GITHUB_TOKEN is
+# used: both repos are public. Pages must be set to "GitHub Actions" as its source.
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "tests/vectors/**"
+      - ".github/workflows/pages.yml"
+  release:
+    types: [published]
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Test
+        working-directory: site
+        run: node --test test/*.test.js
+
+      - name: Fetch the latest releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # the latest release, never a pre-release or a draft
+          radio_tag=$(gh release view -R M0LTE/quansheng-packet --json tagName -q .tagName)
+          aioc_tag=$(gh release view -R M0LTE/aioc-packet --json tagName -q .tagName)
+          echo "quansheng-packet $radio_tag, aioc-packet $aioc_tag"
+          gh release download "$radio_tag" -R M0LTE/quansheng-packet -D dl/radio \
+            -p "quansheng-packet-$radio_tag.bin" -p SHA256SUMS
+          gh release download "$aioc_tag" -R M0LTE/aioc-packet -D dl/aioc \
+            -p 'aioc-packet-*.bin' -p SHA256SUMS
+          node site/tools/build-manifest.js --out site/files \
+            --radio-dir dl/radio --radio-tag "$radio_tag" \
+            --aioc-dir dl/aioc --aioc-tag "$aioc_tag"
+
+      - name: Check the downloaded files
+        working-directory: site
+        run: node --test test/manifest.test.js
+
+      - name: Assemble
+        run: |
+          mkdir _site
+          cp -r site/index.html site/style.css site/js site/files _site/
+          find _site -type f | sort
+
+      - uses: actions/configure-pages@v6
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
