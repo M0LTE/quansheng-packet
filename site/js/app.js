@@ -391,6 +391,9 @@ function usbCancelled(e) {
 }
 
 function usbErrorText(e) {
+  if (/user gesture/i.test(e?.message || '')) {
+    return 'The browser did not count that as a click (this can happen if a device picker was still open). Press the button again.';
+  }
   if (e?.name === 'SecurityError' || e?.name === 'NotAllowedError' || /Access denied/i.test(e?.message)) {
     return 'The browser was not allowed to use the device. On Windows it needs the WinUSB driver (the Zadig note above); on Linux, the udev rule (below); or another program has it open.';
   }
