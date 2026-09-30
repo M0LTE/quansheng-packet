@@ -1,5 +1,4 @@
 using System.Buffers.Binary;
-using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Channels;
@@ -284,7 +283,8 @@ public sealed partial class K5Radio : IAsyncDisposable
 
         try
         {
-            await _readerTask.ConfigureAwait(false);
+            // A stream we do not own may not honour cancellation of a pending read; do not hang on it.
+            await _readerTask.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
         }
         catch (Exception)
         {
@@ -693,7 +693,7 @@ public sealed partial class K5Radio : IAsyncDisposable
         Publish(e);
         if (e is BusyEvent busy && !e.IsReplay)
         {
-            BusyChanged?.Invoke(this, busy);
+            Raise(BusyChanged, busy, nameof(BusyChanged));
         }
 
         if (verdict == EventSequencer.Verdict.Gap)
@@ -704,7 +704,8 @@ public sealed partial class K5Radio : IAsyncDisposable
 
     private void Publish(RadioEvent e)
     {
-        EventReceived?.Invoke(this, e);
+        Raise(EventReceived, e, nameof(EventReceived));
+
         lock (_gate)
         {
             foreach (var r in _readers)
@@ -739,7 +740,8 @@ public sealed partial class K5Radio : IAsyncDisposable
 
         // A rebooted radio is obfuscated again, whatever this session had chosen.
         _decoder.Obfuscated = true;
-        Rebooted?.Invoke(this, EventArgs.Empty);
+        Raise(Rebooted, EventArgs.Empty, nameof(Rebooted));
+
         if (_options.ResubscribeAfterReboot && Interlocked.Exchange(ref _resubscribing, 1) == 0)
         {
             _ = Task.Run(async () =>
@@ -800,6 +802,44 @@ public sealed partial class K5Radio : IAsyncDisposable
         });
     }
 
-    [DoesNotReturn]
-    private static void ThrowShort(string what) => throw new K5ProtocolException($"{what}: reply too short");
+    /// <summary>Calls each subscriber in turn; one that throws must not starve the others or take the reader down.</summary>
+    private void Raise<T>(EventHandler<T>? handlers, T args, string what)
+    {
+        if (handlers is null)
+        {
+            return;
+        }
+
+        foreach (var d in handlers.GetInvocationList())
+        {
+            try
+            {
+                ((EventHandler<T>)d)(this, args);
+            }
+            catch (Exception e)
+            {
+                _options.Trace?.Invoke($"{what} handler threw: {e.GetType().Name}: {e.Message}");
+            }
+        }
+    }
+
+    private void Raise(EventHandler? handlers, EventArgs args, string what)
+    {
+        if (handlers is null)
+        {
+            return;
+        }
+
+        foreach (var d in handlers.GetInvocationList())
+        {
+            try
+            {
+                ((EventHandler)d)(this, args);
+            }
+            catch (Exception e)
+            {
+                _options.Trace?.Invoke($"{what} handler threw: {e.GetType().Name}: {e.Message}");
+            }
+        }
+    }
 }

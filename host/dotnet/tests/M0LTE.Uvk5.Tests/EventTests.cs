@@ -62,6 +62,20 @@ public class EventTests
     }
 
     [Fact]
+    public async Task A_throwing_handler_does_not_stop_the_reader()
+    {
+        await using var rig = await Rig.StartAsync();
+        rig.Radio.EventReceived += (_, _) => throw new InvalidOperationException("subscriber bug");
+        rig.Radio.BusyChanged += (_, _) => throw new InvalidOperationException("subscriber bug");
+        var c = new Collector(rig.Radio);
+        await rig.Radio.SubscribeAsync(new EventSubscription { Events = RadioEvents.Busy }, Ct);
+        rig.Sim.StartCarrier(new Rssi(200));
+        rig.Sim.StopCarrier();
+        await c.WaitFor(l => l.Count == 2);
+        Assert.Equal(144_800_000, (await rig.Radio.GetStatusAsync(Ct)).FrequencyHz);
+    }
+
+    [Fact]
     public async Task Read_events_async_delivers_in_order()
     {
         await using var rig = await Rig.StartAsync();
