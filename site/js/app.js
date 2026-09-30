@@ -154,7 +154,7 @@ function newLink(s) {
 
 // ------------------------------------------------------------------ step 1: flash the radio
 
-const k5 = { link: null, abort: null, flashed: false, checking: false, bannerTimer: null };
+const k5 = { link: null, abort: null, flashed: false, checking: false, bannerTimer: null, fallbackTimer: null };
 
 serialUsers.flash = (e) => {
   if (!k5.link) return;
@@ -239,9 +239,11 @@ $('k5-flash').addEventListener('click', async () => {
       },
     });
     k5.flashed = true;
-    show($('k5-status'), `Flashed ${radioFw.label}: all ${r.blocks} blocks written and confirmed by the radio.`, 'ok');
+    show($('k5-status'), `Flashed ${radioFw.label}: all ${r.blocks} blocks written and confirmed by the radio. It is restarting; checking the new firmware in a few seconds.`, 'ok');
     $('k5-after').hidden = false;
     listenForBanner();
+    // If the start-up text is missed, check anyway once the welcome screen must be over.
+    k5.fallbackTimer = setTimeout(() => { k5.fallbackTimer = null; checkNewFirmware({ auto: true }); }, 6000);
   } catch (e) {
     if (!(e instanceof K5CancelledError)) show($('k5-status'), errText(e), 'error');
   } finally {
@@ -258,15 +260,20 @@ function listenForBanner() {
     text = (text + t).slice(-200);
     if (/packet firmware/i.test(text) && !k5.bannerTimer) {
       text = '';
+      if (k5.fallbackTimer) { clearTimeout(k5.fallbackTimer); k5.fallbackTimer = null; }
+      // The start-up text comes about 0.3 s after a restart, but the firmware only answers once its
+      // 2.5 s welcome screen is over (measured: first reply 2.86 s after a restart).
       k5.bannerTimer = setTimeout(() => {
         k5.bannerTimer = null;
-        checkNewFirmware();
-      }, 400);
+        checkNewFirmware({ auto: true });
+      }, 2800);
     }
   };
 }
 
-async function checkNewFirmware() {
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function checkNewFirmware({ auto = false } = {}) {
   if (!k5.link || k5.checking) {
     if (!k5.link) show($('k5-status'), 'Not connected. Press Connect in step 3 to check the radio instead.', 'warn');
     return;
@@ -275,7 +282,17 @@ async function checkNewFirmware() {
   const l = k5.link;
   const client = new RadioClient(l);
   try {
-    const h = await client.sayHello();
+    // An automatic check retries for a few seconds: the radio may still be on its welcome screen.
+    let h;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        h = await client.sayHello();
+        break;
+      } catch (e) {
+        if (!auto || attempt >= 6 || e.message === IN_FLASH_MODE) throw e;
+        await sleep(1000);
+      }
+    }
     const want = radioFw.image.version.replace(/^\*/, '');
     if (h.version === want) {
       show($('k5-status'), `The radio runs ${h.version}${h.pkt2 ? ` (protocol ${h.protocolText})` : ''}. Step 1 is done.`, 'ok');
