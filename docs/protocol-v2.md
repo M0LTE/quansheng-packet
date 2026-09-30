@@ -48,7 +48,7 @@ payload = id u16 | body_len u16 | body (body_len bytes)       body_len = len - 4
 - `crc16` is CRC-16/XMODEM (poly 0x1021, init 0) over the payload. In obfuscated mode payload and CRC are XORed with `16 6C 14 E6 2E 91 0D 40 21 35 D5 40 13 03 E9 80`, cycling from payload byte 0. 38400 8N1; the radio actually runs at about 39056 baud (1.7% fast).
 - Mode: a hello whose raw id bytes are `14 05` switches the radio to plain mode; raw `02 69` (an obfuscated 0x0514) switches it back. Power-on mode is obfuscated. The mode applies to both directions and to v2 frames exactly as to legacy ones.
 - Frames from the radio: legacy replies keep `FF FF` (obfuscated as usual) in the CRC field, as today. **All 0x50xx frames from the radio carry a real CRC.** Hosts MUST check it on 0x50xx frames and accept either on legacy frames (k5.py already does).
-- The radio drops frames with a bad CRC, a bad footer, or `len + 8 > 256` (its DMA ring), without reply. It resynchronises as a host does (2.3): anything that cannot be a frame (second byte not `CD`, oversize length, bad footer) loses only its `AB`, and a frame still incomplete 5 ms after the last byte arrived is dropped as truncated, so a frame cut short (for example by PTT pulling the shared line low) never swallows the frames after it.
+- The radio drops frames with a bad CRC, a bad footer, or `len + 8 >= 256` (its 256-byte DMA ring; a frame filling all of it could never complete), without reply. It resynchronises as a host does (2.3): anything that cannot be a frame (second byte not `CD`, oversize length, bad footer) loses only its `AB`, and a frame still incomplete 5 ms after the last byte arrived is dropped as truncated, so a frame cut short (for example by PTT pulling the shared line low) never swallows the frames after it.
 - For v2 IDs the firmware MUST check `body_len == len - 4`; otherwise it replies `BAD_LENGTH`. A 0x50xx frame too short to hold the tag gets `BAD_LENGTH` with tag 0. Frames with ids 0x5080 to 0x50FF from the host are not requests and get no reply.
 - v2 request bodies MUST NOT exceed 120 bytes (frame of 132 bytes), so that two frames fit in the 256-byte receive ring.
 
@@ -167,6 +167,8 @@ Evaluated on every 1 ms tick. `press` is the v1 debounced press (280 us windows,
    - `0 < lock_ms <= 30` (LATE_KEY_MAX_MS): key when `lock_ms` reaches 0 if still pressed; `TX_START.lock_delay_ms` gives the delay.
    - `lock_ms > 30`: refuse and latch; `TX_REFUSED` reason LOCK, detail = lock_ms. No transmission until PTT is released and pressed again.
    - frequency not TX-allowed, battery empty, over-voltage, reduced service: refuse and latch, `TX_REFUSED` with the reason (v1 already refuses these; v2 reports them).
+   - The radio never keys more than LATE_KEY_MAX_MS after the press edge. A press it cannot act on in time (the main loop held up, for example by a long legacy EEPROM write session) is refused and latched, `TX_REFUSED` reason LATE with the delay as detail.
+   - A frame that arrives between the press edge and the radio acting on it cancels the press (rule 1): refused and latched, `TX_REFUSED` reason LOCK with the lock remaining as detail.
 3. On a release edge: clear any pending late key and any latch.
 4. TX timeout: end the transmission (`TX_END` reason TIMEOUT) and latch until release, as v1.
 
@@ -434,7 +436,7 @@ The calibration area 0x1E00 to 0x1FFF is never written by anything in this proto
 
 ### 8.1 Delivery
 
-- Stored events go into a ring that holds at least 16 of the largest events (this firmware: 20 slots of 36 bytes) and out through the output queue in seq order, each only when the queue has room for it and for the largest reply. Ephemeral events are never stored and are the first dropped when the queue is short of space, while stored events wait, and while events are held back.
+- Stored events go into a ring that holds at least 16 of the largest events (this firmware: 20 slots of 36 bytes) and out through the output queue in seq order, each only when the queue is empty (its bytes have all gone to the UART's 8-byte FIFO), so a PTT press loses at most one event frame at the AIOC; the rest stay held back in the ring. Ephemeral events are never stored and are the first dropped when the queue is short of space, while stored events wait, and while events are held back.
 - Priority in the output queue: replies, then stored events, then ephemeral events.
 - Deferral (default): the radio starts no event frame while the PTT line reads low or the radio is transmitting, and resumes 2 ms after the release; such events carry DEFERRED. Replies are never deferred. With LIVE_TX the radio sends events during transmissions too.
 - If the ring overwrites an event that was never sent, the radio sends `EVENTS_LOST` once it can.
@@ -510,8 +512,8 @@ Busy is forced closed when a transmission starts and when the receiver is set up
 | Off | Type | Field |
 |---|---|---|
 | 0 | u32 | t_press_ms |
-| 4 | u8 | reason: 1 LOCK, 2 TX_BAND, 3 BATTERY_EMPTY, 4 OVER_VOLTAGE, 5 REDUCED_SERVICE |
-| 5 | u16 | detail: lock ms remaining for LOCK, else 0 |
+| 4 | u8 | reason: 1 LOCK, 2 TX_BAND, 3 BATTERY_EMPTY, 4 OVER_VOLTAGE, 5 REDUCED_SERVICE, 6 LATE (could not key within LATE_KEY_MAX_MS of the press) |
+| 5 | u16 | detail: lock ms remaining for LOCK, ms since the press edge for LATE, else 0 |
 
 **RSSI_STREAM 0x50C5** (2 + 4 x count). t_ms = time of the last sample; sample i was taken at `t_ms - (count - 1 - i) x period`. Receive only; paused while transmitting.
 
@@ -642,4 +644,5 @@ Points settled by the implementation, beyond the amendments above:
 - PARAMS_CHANGED with source 0 (keypad or menu) comes from comparing every parameter with its last reported value every 500 ms, so it follows anything the operator changes, up to 0.5 s late.
 - The event deferral also covers a press that is still being debounced, and resumes 2 ms after the last millisecond in which PTT was asserted or the radio transmitted.
 - EEPROM persistence (6.6) is also deferred while the PTT rules have a key-up pending.
+- Known limits: a keypad or menu save stores the live value of everything in the block it writes, so a value a host set in RAM in the same block (a deviation trial, say) is persisted with it; and legacy 0x0602 still writes any BK4819 register, REG_30, REG_33 and REG_36 included, which can put out RF outside the transmit state machine (no TX timeout, a PTT release does not stop it): tools must not use it for that.
 - Golden vectors from the firmware code for the C# client and simulator: `tests/vectors/protocol-v2.json` (format in `tests/vectors/README.md`), regenerated and compared by `tests/host/run.sh`.
