@@ -795,17 +795,18 @@ static void test_persist(void)
 	CHECK(status(v2(V2_SAVE_PARAMS, 0x68, &op, 1)) == V2_RANGE);
 
 	// frequency persist: the operating channel block, power, bandwidth and step with it
-	n = 0; s[n++] = SETP_PERSIST; s[n++] = P_FREQ_HZ; put32(s + n, 145012500u); n += 4; s[n++] = P_POWER; s[n++] = 2;
+	n = 0; s[n++] = SETP_PERSIST; s[n++] = P_FREQ_HZ; put32(s + n, 145010100u); n += 4; s[n++] = P_POWER; s[n++] = 2;
 	f = v2(V2_SET_PARAMS, 0x69, s, n);
 	CHECK(status(f) == V2_OK);
 	host_advance(10);
-	CHECK(get32(&eeprom[SETTINGS_OPERATING]) == 14501250);
+	CHECK(get32(&eeprom[SETTINGS_OPERATING]) == 14501010);
 	CHECK(eeprom[SETTINGS_OPERATING + 4] == 2 && eeprom[SETTINGS_OPERATING + 5] == 0);
-	CHECK(eeprom[SETTINGS_OPERATING + 6] == gVfo->STEP_SETTING && gVfo->StepFrequency == 1250);
+	CHECK(gVfo->StepFrequency == 10);                // the largest step that holds 145.0101 MHz
+	CHECK(eeprom[SETTINGS_OPERATING + 6] == STEP_0_1kHz);
 	for (unsigned a = 0x0C80; a < 0x0E90; a++)
 		if (eeprom[a] != 0xFF) { CHECK(eeprom[a] == 0xFF); break; }   // the old layout is not written
 	host_boot_keep_eeprom();
-	CHECK(gVfo->Frequency == 14501250 && gVfo->OUTPUT_POWER == 2);
+	CHECK(gVfo->Frequency == 14501010 && gVfo->OUTPUT_POWER == 2 && gVfo->StepFrequency == 10);
 
 	// SUBSCRIBE PERSIST: the power-on default, BOOT from power-on
 	host_send_mode(0x0514, &session, 4, false);
