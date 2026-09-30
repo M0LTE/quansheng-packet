@@ -13,11 +13,12 @@ public static class K5Safety
     public const int CalibrationStart = 0x1E00;
 
     /// <summary>
-    /// BK4819 registers the packet firmware refuses in its override table and REG_WRITE, and this
-    /// library refuses everywhere (including legacy 0x0602, which the firmware itself leaves
-    /// unrestricted): 0x00 soft reset, 0x30 TX/RX enables, 0x33 GPIO outputs (PA enable, RX enable,
-    /// LNA switch, LEDs), 0x36 PA bias and gain, 0x37 power and LDOs, 0x38 and 0x39 frequency, 0x3B
-    /// and 0x3C crystal trim, and anything above 0x7F.
+    /// BK4819 registers the packet firmware refuses in REG_OVERRIDE and REG_WRITE, and this library
+    /// refuses everywhere, including through legacy 0x0602 (sent only to v1 and stock firmware; a
+    /// v2 release build leaves 0x0602 out, and only a bench build has it, unrestricted): 0x00 soft
+    /// reset, 0x30 TX/RX enables, 0x33 GPIO outputs (PA enable, RX enable, LNA switch, LEDs), 0x36
+    /// PA bias and gain, 0x37 power and LDOs, 0x38 and 0x39 frequency, 0x3B and 0x3C crystal trim,
+    /// and anything above 0x7F.
     /// </summary>
     public static IReadOnlySet<int> RefusedRegisters { get; } = new HashSet<int> { 0x00, 0x30, 0x33, 0x36, 0x37, 0x38, 0x39, 0x3B, 0x3C };
 

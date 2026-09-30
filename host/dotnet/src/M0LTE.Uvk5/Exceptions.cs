@@ -83,6 +83,7 @@ public sealed class K5CommandRejectedException : K5Exception
             K5Status.TxBand => "the frequency is not TX-allowed and RequireTxAllowed was set",
             K5Status.State => "not possible in the radio's current state (reduced service?)",
             K5Status.Refused => $"register 0x{detail:X2} is on the firmware's refusal list",
+            K5Status.Unsupported when detail == 0x06 => "parameter 0x06 (MIC_GAIN) is retired: the mic gain is fixed at the maximum; the deviation settings set the transmit level",
             K5Status.Unsupported when detail == 0x07 => "parameter 0x07 (SQUELCH) is retired: the firmware has no squelch; use BusySquelchLevel for the busy detector",
             K5Status.Unsupported => "capability absent or uncalibrated",
             K5Status.Eeprom => "the settings block in EEPROM is not valid, so nothing can be persisted",

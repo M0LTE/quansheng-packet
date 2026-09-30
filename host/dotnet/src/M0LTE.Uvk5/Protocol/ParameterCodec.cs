@@ -18,11 +18,17 @@ internal static class ParameterCodec
         _ => -1,
     };
 
+    /// <summary>0x06 (MIC_GAIN) is retired: the firmware fixes the mic gain at the maximum.</summary>
+    public const byte RetiredMicGain = 0x06;
+
     /// <summary>0x07 (SQUELCH) is retired: the firmware has no squelch.</summary>
     public const byte RetiredSquelch = 0x07;
 
+    /// <summary>True for a retired id: the firmware answers UNSUPPORTED (detail = the id) to it.</summary>
+    public static bool IsRetired(byte id) => id is RetiredMicGain or RetiredSquelch;
+
     public static bool IsKnown(RadioParameterId id) =>
-        id is >= RadioParameterId.FrequencyHz and <= RadioParameterId.BusySquelchLevel && (byte)id != RetiredSquelch;
+        id is >= RadioParameterId.FrequencyHz and <= RadioParameterId.BusySquelchLevel && !IsRetired((byte)id);
 
     public static bool IsRamOnly(RadioParameterId id) =>
         id is RadioParameterId.BusySquelchRaw or RadioParameterId.AgcFix or RadioParameterId.Afc;
@@ -43,7 +49,6 @@ internal static class ParameterCodec
         Add(s.Bandwidth.HasValue, RadioParameterId.Bandwidth);
         Add(s.DeviationWide.HasValue, RadioParameterId.DeviationWide);
         Add(s.DeviationNarrow.HasValue, RadioParameterId.DeviationNarrow);
-        Add(s.MicGain.HasValue, RadioParameterId.MicGain);
         Add(s.RxGain.HasValue, RadioParameterId.RxGain);
         Add(s.RxDacGain.HasValue, RadioParameterId.RxDacGain);
         Add(s.TxTimeout.HasValue, RadioParameterId.TxTimeoutSeconds);
@@ -72,7 +77,6 @@ internal static class ParameterCodec
         Bandwidth = b.Bandwidth ?? a.Bandwidth,
         DeviationWide = b.DeviationWide ?? a.DeviationWide,
         DeviationNarrow = b.DeviationNarrow ?? a.DeviationNarrow,
-        MicGain = b.MicGain ?? a.MicGain,
         BusySquelchLevel = b.BusySquelchLevel ?? a.BusySquelchLevel,
         RxGain = b.RxGain ?? a.RxGain,
         RxDacGain = b.RxDacGain ?? a.RxDacGain,
@@ -132,7 +136,6 @@ internal static class ParameterCodec
             list.Add((RadioParameterId.DeviationNarrow, dn.Register));
         }
 
-        Int(list, RadioParameterId.MicGain, nameof(s.MicGain), s.MicGain, 0, 31);
         Int(list, RadioParameterId.RxGain, nameof(s.RxGain), s.RxGain, 0, 63);
         Int(list, RadioParameterId.RxDacGain, nameof(s.RxDacGain), s.RxDacGain, 0, 15);
         if (s.TxTimeout is { } tt)
@@ -263,7 +266,6 @@ internal static class ParameterCodec
         RadioParameterId.Bandwidth => s with { Bandwidth = (Bandwidth)v },
         RadioParameterId.DeviationWide => s with { DeviationWide = new Deviation((ushort)Math.Min(v, Deviation.MaxRegister), law) },
         RadioParameterId.DeviationNarrow => s with { DeviationNarrow = new Deviation((ushort)Math.Min(v, Deviation.MaxRegister), law) },
-        RadioParameterId.MicGain => s with { MicGain = (int)v },
         RadioParameterId.RxGain => s with { RxGain = (int)v },
         RadioParameterId.RxDacGain => s with { RxDacGain = (int)v },
         RadioParameterId.TxTimeoutSeconds => s with { TxTimeout = TimeSpan.FromSeconds(v) },

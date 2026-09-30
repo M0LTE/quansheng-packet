@@ -5,6 +5,8 @@ namespace M0LTE.Uvk5.Protocol;
 /// <summary>
 /// Packet firmware v1 settings in EEPROM: the 16-byte settings block at 0x1D00 and the 8-byte
 /// timing block at 0x1D50 (docs/packet-fw.md). A byte out of range means "use the default".
+/// Bytes 3 (was the mic gain) and 11 (was the battery type) are reserved: the current firmware
+/// ignores them and writes 0xFF, so they are neither decoded nor written here.
 /// </summary>
 internal static class SettingsBlock
 {
@@ -16,7 +18,7 @@ internal static class SettingsBlock
 
     public static readonly RadioParameterId[] V1Parameters =
     [
-        RadioParameterId.DeviationWide, RadioParameterId.DeviationNarrow, RadioParameterId.MicGain, RadioParameterId.BusySquelchLevel,
+        RadioParameterId.DeviationWide, RadioParameterId.DeviationNarrow, RadioParameterId.BusySquelchLevel,
         RadioParameterId.RxGain, RadioParameterId.RxDacGain, RadioParameterId.TxTimeoutSeconds, RadioParameterId.PttPressMs,
         RadioParameterId.PttReleaseMs, RadioParameterId.PaEnableDelayMs, RadioParameterId.PaBiasDelayMs,
         RadioParameterId.Backlight, RadioParameterId.KeyLock,
@@ -43,7 +45,6 @@ internal static class SettingsBlock
         {
             BusySquelchLevel = U8(block, 1, 0, 9, 1),
             TxTimeout = TimeSpan.FromSeconds(ParameterCodec.TxTimeoutSeconds[U8(block, 2, 0, 6, 4)]),
-            MicGain = U8(block, 3, 0, 31, 31),
             DeviationWide = new Deviation(Dev(block, 4, 0x856), law),
             DeviationNarrow = new Deviation(Dev(block, 6, 0x756), law),
             RxGain = rxGain <= 63 ? rxGain : null,
@@ -71,7 +72,6 @@ internal static class SettingsBlock
             {
                 case RadioParameterId.BusySquelchLevel: b[1] = (byte)v; break;
                 case RadioParameterId.TxTimeoutSeconds: b[2] = (byte)Array.IndexOf(ParameterCodec.TxTimeoutSeconds, (int)v); break;
-                case RadioParameterId.MicGain: b[3] = (byte)v; break;
                 case RadioParameterId.DeviationWide: BinaryPrimitives.WriteUInt16LittleEndian(b.AsSpan(4), (ushort)v); break;
                 case RadioParameterId.DeviationNarrow: BinaryPrimitives.WriteUInt16LittleEndian(b.AsSpan(6), (ushort)v); break;
                 case RadioParameterId.RxGain: b[8] = (byte)v; break;
