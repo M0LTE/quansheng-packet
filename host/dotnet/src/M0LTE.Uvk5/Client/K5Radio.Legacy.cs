@@ -353,6 +353,14 @@ public sealed partial class K5Radio
 
     private async Task<SetSettingsResult> WriteV1SettingsAsync(RadioSettings changes, CancellationToken ct)
     {
+        foreach (var id in changes.SetIds)
+        {
+            if (Array.IndexOf(SettingsBlock.V1Parameters, id) < 0)
+            {
+                throw new K5FirmwareNotSupportedException($"setting {id}", FirmwareKind.PacketV1, "protocol v2 firmware (v1 keeps it outside the settings block)");
+            }
+        }
+
         if (_authorizedBackup is null)
         {
             throw new K5SafetyException("on packet firmware v1 settings live in EEPROM: call BackupEepromAsync or AuthorizeEepromWritesAsync first");

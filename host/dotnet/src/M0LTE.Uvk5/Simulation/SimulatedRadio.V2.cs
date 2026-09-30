@@ -366,19 +366,6 @@ public sealed partial class SimulatedRadio
             return;
         }
 
-        if (_lostPendingCount > 0 && (_subMask & 0x1FFFu & ~((1u << 5) | (1u << 6))) != 0)
-        {
-            int first = _lostPendingFirst;
-            int count = _lostPendingCount;
-            _lostPendingFirst = -1;
-            _lostPendingCount = 0;
-            uint saved = _subMask;
-            _subMask |= 1u << 9;
-            StoreEvent(9, new WireWriter().U16(first).U16(count).ToArray());
-            _subMask = saved;
-            return;     // StoreEvent flushed
-        }
-
         foreach (var e in _ring)
         {
             if (e.Sent)
@@ -390,6 +377,19 @@ public sealed partial class SimulatedRadio
             e.Payload[10] = flags;
             e.Sent = true;
             SendV2Frame(BinaryPrimitives.ReadUInt16LittleEndian(e.Payload), e.Payload.AsSpan(4).ToArray());
+        }
+
+        // Everything in the ring has gone, so storing EVENTS_LOST overwrites nothing unsent.
+        if (_lostPendingCount > 0 && (_subMask & 0x1FFFu & ~((1u << 5) | (1u << 6))) != 0)
+        {
+            int first = _lostPendingFirst;
+            int count = _lostPendingCount;
+            _lostPendingFirst = -1;
+            _lostPendingCount = 0;
+            uint saved = _subMask;
+            _subMask |= 1u << 9;
+            StoreEvent(9, new WireWriter().U16(first).U16(count).ToArray());
+            _subMask = saved;
         }
     }
 

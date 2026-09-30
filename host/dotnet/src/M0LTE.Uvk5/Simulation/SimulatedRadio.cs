@@ -620,7 +620,13 @@ public sealed partial class SimulatedRadio : IDisposable
     /// <summary>Every valid frame starts the lock and ends any transmission (5.3 rule 1).</summary>
     private void OnValidFrame()
     {
-        long now = _time.GetTimestamp();
+        if (_reloadTimer is not null)
+        {
+            // The settings reload waits for the session to go quiet: every frame restarts it.
+            Cancel(ref _reloadTimer);
+            _reloadTimer = After(_options.Firmware == FirmwareKind.PacketV2 ? 1000 : 1500 - NowMs() % 500, ReloadFromEeprom);
+        }
+
         switch (_options.Firmware)
         {
             case FirmwareKind.PacketV2:
@@ -641,8 +647,6 @@ public sealed partial class SimulatedRadio : IDisposable
 
                 break;
         }
-
-        _ = now;
     }
 
     private void HandleFrame(ushort id, byte[] payload)
