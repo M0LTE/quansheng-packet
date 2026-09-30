@@ -434,8 +434,8 @@ public sealed record HeartbeatEvent : RadioEvent
     /// <summary>Battery, mV.</summary>
     public int BatteryMillivolts { get; init; }
 
-    /// <summary>Busy time since the previous heartbeat (channel occupancy).</summary>
-    public TimeSpan BusyTime { get; init; }
+    /// <summary>Busy time since the previous heartbeat (channel occupancy), null if the radio reports 0xFFFF (unknown).</summary>
+    public TimeSpan? BusyTime { get; init; }
 
     /// <summary>Serial lock remaining.</summary>
     public TimeSpan LockRemaining { get; init; }
@@ -580,7 +580,7 @@ internal static class EventParser
                 State = (RadioState)r.U8(),
                 Rssi = new Rssi(r.U16()),
                 BatteryMillivolts = r.U16(),
-                BusyTime = TimeSpan.FromMilliseconds(r.U16()),
+                BusyTime = OrNull(r.U16()) is { } busyMs ? TimeSpan.FromMilliseconds(busyMs) : null,
                 LockRemaining = TimeSpan.FromMilliseconds(r.U16()),
             },
             7 => new BatteryEvent { Class = (BatteryClass)r.U8(), Level = r.U8(), Millivolts = r.U16() },

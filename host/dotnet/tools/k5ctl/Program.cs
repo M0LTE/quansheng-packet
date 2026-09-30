@@ -550,7 +550,7 @@ internal static class Program
                 + (s.LateKey ? $", LATE by {s.LockDelay.TotalMilliseconds:F0} ms" : string.Empty) + (s.BusyAtPress ? ", CHANNEL WAS BUSY" : string.Empty),
             TxEndEvent x => $"TX END {x.Reason}, on air {x.OnAir.TotalMilliseconds:F0} ms, release to carrier off {x.KeyDownLatency.TotalMilliseconds:F0} ms, to RX ready {x.TurnaroundToReceive.TotalMilliseconds:F0} ms",
             TxRefusedEvent x => $"TX REFUSED {x.Reason}" + (x.Reason == TxRefusedReason.Lock ? $" ({x.LockRemaining.TotalMilliseconds:F0} ms of lock left)" : string.Empty),
-            HeartbeatEvent h => $"HEARTBEAT {h.State} {h.Rssi} battery {h.BatteryMillivolts} mV, busy {h.BusyTime.TotalMilliseconds:F0} ms, lock {h.LockRemaining.TotalMilliseconds:F0} ms",
+            HeartbeatEvent h => $"HEARTBEAT {h.State} {h.Rssi} battery {h.BatteryMillivolts} mV, busy {(h.BusyTime is { } bt ? $"{bt.TotalMilliseconds:F0} ms" : "unknown")}, lock {h.LockRemaining.TotalMilliseconds:F0} ms",
             RssiStreamEvent r => $"RSSI {string.Join(" ", r.Samples.Select(x => x.Rssi.Dbm.ToString("F0", CultureInfo.InvariantCulture)))} dBm every {r.Period.TotalMilliseconds:F0} ms",
             BatteryEvent b => $"BATTERY {b.Class} level {b.Level}, {b.Millivolts} mV",
             ParamsChangedEvent p => $"PARAMS CHANGED by {p.Source}: {string.Join(", ", p.Parameters)}",

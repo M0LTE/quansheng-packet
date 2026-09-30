@@ -440,7 +440,7 @@ public sealed partial class SimulatedRadio
             }
 
             _lastHeartbeatMs = now;
-            EmitEphemeral(6, new WireWriter().U16(NowUs()).U8((int)Flags1()).U8((int)State()).U16(Signal().Rssi)
+            EmitEphemeral(6, new WireWriter().U16(NowUs()).U8((int)Flags1()).U8((int)State()).U16(_transmitting ? 0 : Signal().Rssi)
                 .U16(BatteryMillivolts / 10 * 10).U16((int)Math.Min(busyMs, 65535)).U16(LockMs()).ToArray());
             ScheduleHeartbeat();
         });
@@ -655,7 +655,7 @@ public sealed partial class SimulatedRadio
             return;
         }
 
-        if (batch is < 1 or > 20)
+        if (batch > 20 || (batch == 0 && stream != 0))
         {
             Error(id, tag, K5Status.Range, 8);
             return;
@@ -687,7 +687,7 @@ public sealed partial class SimulatedRadio
         _liveTx = (options & 1) != 0;
         _hbPeriod = hb;
         _streamPeriod = stream;
-        _streamBatchSize = batch;
+        _streamBatchSize = Math.Max(1, batch);
         _burstPeriod = burst == 0 ? 5 : burst;
         _streamBatch.Clear();
         RestartTimers();
@@ -1286,11 +1286,18 @@ public sealed partial class SimulatedRadio
         int span = (ushort)(_nextSeq - from);
         int first = -1;
         int count = 0;
+        int bytes = 0;
         foreach (var e in _ring)
         {
-            if ((ushort)(e.Seq - from) >= span || span == 0)
+            // Events not delivered yet are not replayed: they follow through normal delivery.
+            if ((ushort)(e.Seq - from) >= span || span == 0 || !e.Sent)
             {
                 continue;
+            }
+
+            if (bytes + e.Payload.Length + 4 > 256)
+            {
+                break;          // at most 256 bytes per request; the host asks again
             }
 
             if (first < 0)
@@ -1300,13 +1307,13 @@ public sealed partial class SimulatedRadio
 
             var copy = (byte[])e.Payload.Clone();
             copy[10] |= (byte)RadioEventFlags.Replay;
-            e.Sent = true;
             SendV2Frame(BinaryPrimitives.ReadUInt16LittleEndian(copy), copy.AsSpan(4).ToArray());
+            bytes += copy.Length + 4;
             count++;
         }
 
         ushort oldest = _ring.Count > 0 ? _ring[0].Seq : _nextSeq;
-        Reply(id, tag, K5Status.Ok, new WireWriter().U16(first < 0 ? from : first).U8(count).U16(oldest).U16(_nextSeq).ToArray());
+        Reply(id, tag, K5Status.Ok, new WireWriter().U16(first < 0 ? _nextSeq : first).U8(count).U16(oldest).U16(_nextSeq).ToArray());
     }
 
     private void Counters(ushort id, byte tag, byte[] a)

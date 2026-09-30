@@ -225,7 +225,7 @@ public sealed partial class K5Radio
             .U8((subscription.LiveTx ? 1 : 0) | (subscription.Persist ? 2 : 0))
             .U16(hb)
             .U8(stream)
-            .U8(subscription.RssiStreamBatch)
+            .U8(stream > 0 ? subscription.RssiStreamBatch : 0)
             .U8(burst);
         byte[] b = await V2Async("SUBSCRIBE", MessageIds.Subscribe, w.ToArray(), true, cancellationToken).ConfigureAwait(false);
         var r = new WireReader(b, "SUBSCRIBE reply");
@@ -579,12 +579,30 @@ public sealed partial class K5Radio
     /// </summary>
     public async Task<ReplayResult> ReplayEventsAsync(ushort fromSequence, CancellationToken cancellationToken = default)
     {
-        byte[] b = await V2Async("EVENT_REPLAY", MessageIds.EventReplay, new WireWriter().U16(fromSequence).ToArray(), true, cancellationToken,
-            TimeSpan.FromMilliseconds(Math.Max(_options.V2ReplyTimeout.TotalMilliseconds, 400))).ConfigureAwait(false);
-        var r = new WireReader(b, "EVENT_REPLAY reply");
-        var result = new ReplayResult(r.U16(), r.U8(), r.U16(), r.U16());
+        // One request re-sends at most 256 bytes of events (so the reply stays inside the
+        // timeout); ask again from where it stopped until caught up.
+        ReplayResult? total = null;
+        ushort from = fromSequence;
+        for (int round = 0; round < 64; round++)
+        {
+            byte[] b = await V2Async("EVENT_REPLAY", MessageIds.EventReplay, new WireWriter().U16(from).ToArray(), true, cancellationToken,
+                TimeSpan.FromMilliseconds(Math.Max(_options.V2ReplyTimeout.TotalMilliseconds, 400))).ConfigureAwait(false);
+            var r = new WireReader(b, "EVENT_REPLAY reply");
+            var part = new ReplayResult(r.U16(), r.U8(), r.U16(), r.U16());
+            total = total is { } t
+                ? t with { CountSent = t.CountSent + part.CountSent, OldestAvailable = part.OldestAvailable, NextSequence = part.NextSequence }
+                : part;
+            ushort after = (ushort)(part.FirstSent + part.CountSent);
+            if (part.CountSent == 0 || after == part.NextSequence || (ushort)(after - from) == 0)
+            {
+                break;
+            }
+
+            from = after;
+        }
+
         _sequencer.ReplayDone();
-        return result;
+        return total!.Value;
     }
 
     /// <summary>GET_COUNTERS (v2), optionally clearing them after reading.</summary>
