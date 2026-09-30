@@ -348,14 +348,12 @@ static void test_operating_channel(void)
 	memcpy(&fs, &eeprom[SETTINGS_OPERATING], 4);
 	CHECK(fs == 14500000);
 
-	// 350 to 400 MHz is receivable only when enabled (0x0F45)
-	CHECK(FREQUENCY_IsReceivable(37000000));
+	// 350 to 400 MHz is always receivable: upstream's enable (0x0F45) is not read
 	eeprom[0x0F45] = 0;
 	memcpy(&eeprom[SETTINGS_OPERATING], &(uint32_t){ 37000000 }, 4);
 	SETTINGS_InitEEPROM();
-	CHECK(!FREQUENCY_IsReceivable(37000000));
-	CHECK(gVfo->Frequency != 37000000);
-	gSetting_350EN = true;
+	CHECK(FREQUENCY_IsReceivable(37000000));
+	CHECK(gVfo->Frequency == 37000000);
 	CHECK(eeprom_writes_in_cal == 0);
 }
 
@@ -365,12 +363,27 @@ static void test_frequency(void)
 	CHECK(FREQUENCY_RoundToStep(14493700, 1250) == 14493750);
 	CHECK(FREQUENCY_GetBand(14493750) == BAND3_137MHz);
 
-	gSetting_F_LOCK = F_LOCK_GB;
+	// the fixed TX policy: 136 up to 174 MHz and 400 up to 470 MHz only
 	CHECK(TX_freq_check(14493750) == 0);
-	CHECK(TX_freq_check(13700000) != 0);
-	CHECK(TX_freq_check(43350000) == 0);
-	gSetting_F_LOCK = F_LOCK_DEF;
-	CHECK(TX_freq_check(14480000) == 0);
+	CHECK(TX_freq_check(14690000) == 0);
+	CHECK(TX_freq_check(43500000) == 0);
+	CHECK(TX_freq_check(13600000) == 0);
+	CHECK(TX_freq_check(17399999) == 0);
+	CHECK(TX_freq_check(40000000) == 0);
+	CHECK(TX_freq_check(46999999) == 0);
+	CHECK(TX_freq_check(13599999) != 0);
+	CHECK(TX_freq_check(17400000) != 0);
+	CHECK(TX_freq_check(39999999) != 0);
+	CHECK(TX_freq_check(47000000) != 0);
+	CHECK(TX_freq_check(5000000) != 0);     // 50 MHz
+	CHECK(TX_freq_check(20000000) != 0);    // 200 MHz
+	CHECK(TX_freq_check(38000000) != 0);    // 380 MHz
+	CHECK(TX_freq_check(50000000) != 0);    // 500 MHz
+	CHECK(TX_freq_check(0) != 0 && TX_freq_check(0xFFFFFFFFu) != 0);
+
+	// receive: the whole band table, 350 to 400 MHz included; not the gaps
+	CHECK(FREQUENCY_IsReceivable(5000000) && FREQUENCY_IsReceivable(38000000) && FREQUENCY_IsReceivable(60000000));
+	CHECK(!FREQUENCY_IsReceivable(4999999) && !FREQUENCY_IsReceivable(9000000) && !FREQUENCY_IsReceivable(60000001));
 }
 
 static void test_tx_rx_registers(void)

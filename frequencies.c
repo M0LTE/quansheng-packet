@@ -138,80 +138,16 @@ uint32_t FREQUENCY_RoundToStep(uint32_t freq, uint16_t step)
 	return (freq + (step + 1) / 2) / step * step;
 }
 
+// 0 if this firmware may transmit on Frequency (10 Hz units), else -1.
+// A fixed policy: only the VHF and UHF ranges the radio's PA and filters
+// are designed for (frequencies.h). Nothing in EEPROM changes it; the
+// upstream TX limits at 0x0F40 are never read.
 int32_t TX_freq_check(const uint32_t Frequency)
-{	// return '0' if TX frequency is allowed
-	// otherwise return '-1'
-
-	if (Frequency < frequencyBandTable[0].lower || Frequency > frequencyBandTable[BAND_N_ELEM - 1].upper)
-		return 1;  // not allowed outside this range
-
-	if (Frequency >= BX4819_band1.upper && Frequency < BX4819_band2.lower)
-		return -1;  // BX chip does not work in this range
-
-	switch (gSetting_F_LOCK)
-	{
-		case F_LOCK_DEF:
-			if (Frequency >= frequencyBandTable[BAND3_137MHz].lower && Frequency < frequencyBandTable[BAND3_137MHz].upper)
-				return 0;
-			if (Frequency >= frequencyBandTable[BAND4_174MHz].lower && Frequency < frequencyBandTable[BAND4_174MHz].upper)
-				if (gSetting_200TX)
-					return 0;
-			if (Frequency >= frequencyBandTable[BAND5_350MHz].lower && Frequency < frequencyBandTable[BAND5_350MHz].upper)
-				if (gSetting_350TX && gSetting_350EN)
-					return 0;
-			if (Frequency >= frequencyBandTable[BAND6_400MHz].lower && Frequency < frequencyBandTable[BAND6_400MHz].upper)
-				return 0;
-			if (Frequency >= frequencyBandTable[BAND7_470MHz].lower && Frequency <= 60000000)
-				if (gSetting_500TX)
-					return 0;
-			break;
-
-		case F_LOCK_FCC:
-			if (Frequency >= 14400000 && Frequency < 14800000)
-				return 0;
-			if (Frequency >= 42000000 && Frequency < 45000000)
-				return 0;
-			break;
-
-		case F_LOCK_CE:
-			if (Frequency >= 14400000 && Frequency < 14600000)
-				return 0;
-			if (Frequency >= 43000000 && Frequency < 44000000)
-				return 0;
-			break;
-
-		case F_LOCK_GB:
-			if (Frequency >= 14400000 && Frequency < 14800000)
-				return 0;
-			if (Frequency >= 43000000 && Frequency < 44000000)
-				return 0;
-			break;
-
-		case F_LOCK_430:
-			if (Frequency >= frequencyBandTable[BAND3_137MHz].lower && Frequency < 17400000)
-				return 0;
-			if (Frequency >= 40000000 && Frequency < 43000000)
-				return 0;
-			break;
-
-		case F_LOCK_438:
-			if (Frequency >= frequencyBandTable[BAND3_137MHz].lower && Frequency < 17400000)
-				return 0;
-			if (Frequency >= 40000000 && Frequency < 43800000)
-				return 0;
-			break;
-
-		case F_LOCK_ALL:
-			break;
-
-		case F_LOCK_NONE:
-			for (uint32_t i = 0; i < ARRAY_SIZE(frequencyBandTable); i++)
-				if (Frequency >= frequencyBandTable[i].lower && Frequency < frequencyBandTable[i].upper)
-					return 0;
-			break;
-	}
-
-	// dis-allowed TX frequency
+{
+	if (Frequency >= TX_VHF_LOWER && Frequency < TX_VHF_UPPER)
+		return 0;
+	if (Frequency >= TX_UHF_LOWER && Frequency < TX_UHF_UPPER)
+		return 0;
 	return -1;
 }
 
@@ -229,11 +165,10 @@ int32_t RX_freq_check(const uint32_t Frequency)
 }
 
 // The radio can receive this frequency (10 Hz units): inside one of the
-// bands of frequencyBandTable, and not 350 to 400 MHz unless enabled.
+// bands of frequencyBandTable, 350 to 400 MHz included (upstream gated
+// that band with a setting at 0x0F45; this firmware never reads it).
 bool FREQUENCY_IsReceivable(uint32_t Frequency)
 {
 	const FREQUENCY_Band_t b = FREQUENCY_GetBand(Frequency);
-	if (Frequency < frequencyBandTable[b].lower || Frequency > frequencyBandTable[b].upper)
-		return false;
-	return gSetting_350EN || b != BAND5_350MHz;
+	return Frequency >= frequencyBandTable[b].lower && Frequency <= frequencyBandTable[b].upper;
 }

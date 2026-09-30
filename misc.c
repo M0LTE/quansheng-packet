@@ -25,12 +25,6 @@ const uint16_t    key_repeat_delay_10ms            =   400 / 10;   // 400ms
 const uint16_t    key_repeat_10ms                  =    80 / 10;   // 80ms .. MUST be less than 'key_repeat_delay'
 const uint16_t    key_debounce_10ms                =    20 / 10;   // 20ms
 
-bool              gSetting_350TX;
-bool              gSetting_200TX;
-bool              gSetting_500TX;
-bool              gSetting_350EN;
-uint8_t           gSetting_F_LOCK;
-
 
 volatile uint32_t g_ms;
 volatile uint16_t gSerialLockMs;

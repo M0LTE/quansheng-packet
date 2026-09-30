@@ -25,18 +25,6 @@
 #include "radio.h"
 #include <driver/backlight.h>
 
-enum TxLockModes_t {
-	F_LOCK_DEF, //all default frequencies + configurable
-	F_LOCK_FCC,
-	F_LOCK_CE,
-	F_LOCK_GB,
-	F_LOCK_430,
-	F_LOCK_438,
-	F_LOCK_ALL,	// disable TX on all frequencies
-	F_LOCK_NONE, // enable TX on all frequencies
-	F_LOCK_LEN
-};
-
 enum {
 	OUTPUT_POWER_LOW = 0,
 	OUTPUT_POWER_MID,

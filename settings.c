@@ -128,16 +128,7 @@ void SETTINGS_InitEEPROM(void)
 	EEPROM_ReadBuffer(SETTINGS_V2_BLOCK, Data, 16);
 	SETTINGS_DecodeV2(Data, blockValid, &gV2);
 
-	// 0F40..0F47: TX frequency limits (no menu; set them over UART)
-	EEPROM_ReadBuffer(0x0F40, Data, 8);
-	gSetting_F_LOCK            = (Data[0] < F_LOCK_LEN) ? Data[0] : F_LOCK_DEF;
-	gSetting_350TX             = (Data[1] < 2) ? Data[1] : false;
-	gSetting_200TX             = (Data[3] < 2) ? Data[3] : false;
-	gSetting_500TX             = (Data[4] < 2) ? Data[4] : false;
-	gSetting_350EN             = (Data[5] < 2) ? Data[5] : true;
-
-	// 1D58..1D5F: the operating channel (after the 350 MHz setting, which
-	// decides what is receivable)
+	// 1D58..1D5F: the operating channel
 	memset(&gEeprom.Vfo, 0, sizeof(gEeprom.Vfo));
 	EEPROM_ReadBuffer(SETTINGS_OPERATING, Data, 8);
 	if (!blockValid || !SETTINGS_DecodeOperating(Data, &gEeprom.Vfo)) {

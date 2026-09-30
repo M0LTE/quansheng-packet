@@ -209,7 +209,7 @@ static void test_framing(void)
 	CHECK(get32(o + 26) == 0x1FFFu);
 	CHECK(o[30] == 120 && o[31] >= 16);
 	CHECK(get16(o + 32) == 20 && o[34] == 30);
-	CHECK(o[35] == 0 && o[36] == 0x08);           // F_LOCK default, 350 MHz receive enabled
+	CHECK(o[35] == TX_BAND_POLICY_FIXED && o[36] == 0);   // fixed TX policy; byte 36 reserved
 	CHECK(o[37] == 0 && o[38] == 0 && o[39] == 5); // blank EEPROM: no settings block
 	vec("get_info", "fresh boot on a blank EEPROM (factory calibration only), plain mode after a hello; lock 20 ms");
 

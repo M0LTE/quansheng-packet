@@ -85,7 +85,18 @@ uint32_t 		 FREQUENCY_RoundToStep(uint32_t freq, uint16_t step);
 STEP_Setting_t   FREQUENCY_GetStepIdxFromSortedIdx(uint8_t sortedIdx);
 uint32_t		 FREQUENCY_GetSortedIdxFromStepIdx(uint8_t step);
 
-int32_t          TX_freq_check(uint32_t Frequency);
+// Transmit is allowed only from 136 up to 174 MHz and from 400 up to 470 MHz
+// (10 Hz units, upper edges excluded): the ranges the PA and its filters
+// are designed for. Fixed at build time.
+#define TX_VHF_LOWER     13600000u
+#define TX_VHF_UPPER     17400000u
+#define TX_UHF_LOWER     40000000u
+#define TX_UHF_UPPER     47000000u
+// GET_INFO byte 35: this fixed policy. 0 to 7 were the upstream F_LOCK
+// plans (v1.0.0 and earlier), so 8 cannot be mistaken for any of them.
+#define TX_BAND_POLICY_FIXED  8u
+
+int32_t          TX_freq_check(uint32_t Frequency);      // 0 if TX is allowed
 int32_t          RX_freq_check(uint32_t Frequency);
 bool             FREQUENCY_IsReceivable(uint32_t Frequency);   // inside the band table
 

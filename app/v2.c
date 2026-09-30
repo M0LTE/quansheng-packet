@@ -104,8 +104,8 @@ static uint16_t GetInfo(uint8_t *o)
 	o[31] = EVT_SLOTS;
 	put16(o + 32, gV2.SERIAL_LOCK_MS);
 	o[34] = LATE_KEY_MAX_MS;
-	o[35] = gSetting_F_LOCK;
-	o[36] = (gSetting_200TX ? 1u : 0) | (gSetting_350TX ? 2u : 0) | (gSetting_500TX ? 4u : 0) | (gSetting_350EN ? 8u : 0);
+	o[35] = TX_BAND_POLICY_FIXED;                  // TX 136 to 174 and 400 to 470 MHz
+	o[36] = 0;                                     // reserved (was the TX band flags)
 	o[37] = gSettingsBlockValid ? SETTINGS_PKT_VERSION : 0;
 	o[38] = gV2.valid ? SETTINGS_V2_VERSION : 0;
 	o[39] = BURST_PERIOD_DEFAULT_MS;

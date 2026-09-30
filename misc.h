@@ -57,13 +57,6 @@ extern const uint16_t        key_debounce_10ms;
 // this long after the last write, and never runs during a transmission.
 #define SERIAL_RELOAD_QUIET_MS  1000u
 
-// TX frequency limits, read from EEPROM 0x0F40 (no menu for them).
-extern bool                  gSetting_350TX;
-extern bool                  gSetting_200TX;
-extern bool                  gSetting_500TX;
-extern bool                  gSetting_350EN;
-extern uint8_t               gSetting_F_LOCK;
-
 
 extern volatile uint32_t     g_ms;               // ms since boot, SysTick
 extern volatile uint16_t     gSerialLockMs;      // serial PTT lock remaining, ms
