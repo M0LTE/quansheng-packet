@@ -48,8 +48,9 @@ export function checkCompatibility(beacon, image, allowed = KNOWN_BOOTLOADERS) {
   }
   if (!allowed.includes(beacon.version)) {
     throw new K5SafetyError(
-      `This radio's bootloader is ${beacon.version}. This firmware has only been tested with ${allowed.join(', ')}, ` +
-        'so the flasher refuses it to be safe. Nothing was sent.',
+      `This radio's bootloader is ${beacon.version}. This firmware is for the original UV-K5 hardware (bootloader ` +
+        `${allowed.join(', ')}), so the flasher refuses it to be safe. It may be a newer model such as the ` +
+        'UV-K5 V3 or UV-K1, which this firmware does not support. Nothing was sent.',
     );
   }
   const v = image.version;
