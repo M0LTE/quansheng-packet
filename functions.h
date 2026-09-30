@@ -22,11 +22,8 @@
 
 enum FUNCTION_Type_t
 {
-	FUNCTION_FOREGROUND = 0,  // idle, receiver on, squelch closed
+	FUNCTION_FOREGROUND = 0,  // receiving, audio always open (no squelch)
 	FUNCTION_TRANSMIT,        // transmitting
-	FUNCTION_MONITOR,         // receiving with squelch forced open
-	FUNCTION_INCOMING,        // squelch just opened
-	FUNCTION_RECEIVE,         // receiving a signal (squelch is open)
 	FUNCTION_N_ELEM
 };
 

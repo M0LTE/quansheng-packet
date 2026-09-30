@@ -31,7 +31,6 @@ bool              gSetting_500TX;
 bool              gSetting_350EN;
 uint8_t           gSetting_F_LOCK;
 
-bool              gMonitor = false;           // true opens the squelch
 
 volatile uint32_t g_ms;
 volatile uint16_t gSerialLockMs;
@@ -60,8 +59,6 @@ bool              gFlagPrepareTX;
 
 bool              gFlagAcceptSetting;
 bool              gFlagRefreshSetting;
-
-bool              g_SquelchLost;
 
 bool              gKeyBeingHeld;
 bool              gPttIsPressed;

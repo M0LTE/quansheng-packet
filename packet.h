@@ -90,7 +90,8 @@
 // REG_31: <1> scrambler, <2> VOX, <3> compander. All kept off.
 #define PKT_REG_31_OFF_MASK      0x000Eu
 
-// REG_3D: IF setting written on every squelch open (upstream, not USB).
+// REG_3D: IF setting written on every receive set-up (upstream wrote it on
+// every squelch open; not USB).
 #define PKT_REG_3D_RX            0x2AABu
 
 #endif

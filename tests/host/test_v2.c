@@ -33,6 +33,7 @@
 #include "app/uart.h"
 #include "app/v2.h"
 #include "app/wire.h"
+#include "driver/bk4819.h"
 #include "driver/eeprom.h"
 #include "functions.h"
 #include "misc.h"
@@ -204,7 +205,7 @@ static void test_framing(void)
 	CHECK(get16(o) == 0x0200);
 	CHECK(memcmp(o + 2, "PKTFW test\0\0\0\0\0\0", 16) == 0);
 	CHECK(get32(o + 18) == (CAP_LIVE_TX | CAP_RSSI_BUSY | CAP_TONE_RAW | CAP_RAM_OVERRIDES | CAP_PERSISTENCE | CAP_EXACT_TIME_SYNC));
-	CHECK(get32(o + 22) == 0x01FFFFFEu);
+	CHECK(get32(o + 22) == 0x03FFFF7Eu);            // 0x01 to 0x19, not 0x07 (no squelch)
 	CHECK(get32(o + 26) == 0x1FFFu);
 	CHECK(o[30] == 120 && o[31] >= 16);
 	CHECK(get16(o + 32) == 20 && o[34] == 30);
@@ -353,8 +354,21 @@ static void test_subscribe_and_busy(void)
 	CHECK(b[16] == 0x10 && b[17] == 0x10 && b[18] == 0x20 && b[19] == 0x20);
 	CHECK(get16(b + 20) == (0x400 * 3 + 0x600) / 4 && get16(b + 22) == 0x600);
 	CHECK(get16(b + 26) == 0x7FFF && b[28] == CD_CAUSE_SQUELCH);
+	CHECK((regs[0x47] & 0x0F00) == (BK4819_AF_FM << 8));   // the detector never muted the audio
 	last_req_len = 0;
 	vec("event_cd_close_and_rx_burst", "events, no request: the squelch closed 16 ms after opening; RSSI samples 200, 220, 180, 210 at 5 ms; AF amplitude 0x400, 0x400, 0x400, 0x600");
+
+	// the detector level is a parameter: the factory table row it uses
+	{
+		const uint8_t lv[3] = { 0, P_BUSY_SQL_LEVEL, 5 };
+		eeprom[0x1E60 + 5] = 0x64;                  // VHF row 5, RSSI open
+		const Frame_t *g = v2(V2_SET_PARAMS, 0x34, lv, 3);
+		CHECK(status(g) == V2_OK && gEeprom.BUSY_LEVEL == 5 && (regs[0x78] >> 8) == 0x64 / 2);
+		CHECK((regs[0x47] & 0x0F00) == (BK4819_AF_FM << 8));
+		const uint8_t bad[3] = { 0, P_BUSY_SQL_LEVEL, 0 };
+		CHECK(status(v2(V2_SET_PARAMS, 0x35, bad, 3)) == V2_RANGE);
+		subscribe(3, 0, 0, 0, 0, 0);
+	}
 
 	// burst sample period and RSSI source with hang
 	f = subscribe(3, 0, 0, 0, 0, 2);
@@ -450,6 +464,10 @@ static void test_deferral_and_tx_events(void)
 	memcpy(out, out + fr[3].offset, fr[3].size + fr[4].size); out_len = fr[3].size + fr[4].size;
 	last_req_len = 0;
 	vec("event_tx_start_and_end", "events, no request: a late key (12 ms lock delay, busy at the press), 100 ms of TX, released; both sent after the release with DEFERRED");
+
+	// receive audio is open again after the transmission, no squelch needed
+	RADIO_SendEndOfTransmission();
+	CHECK((regs[0x47] & 0x0F00) == (BK4819_AF_FM << 8) && audio_path_on);
 
 	// TX_REFUSED
 	host_clear_out();
@@ -622,33 +640,43 @@ static void test_params(void)
 	vec("get_params_all", "fresh boot, blank EEPROM (RX gain from the factory byte 0x1F8E = 45); GET_PARAMS flags 0, no ids: every parameter, live");
 
 	// STORED omits the RAM-only ones; a list in request order
-	r[0] = 1; r[1] = P_SQL_RAW; r[2] = P_SQUELCH; r[3] = P_RX_GAIN;
+	r[0] = 1; r[1] = P_BUSY_SQL_RAW; r[2] = P_BUSY_SQL_LEVEL; r[3] = P_RX_GAIN;
 	f = v2(V2_GET_PARAMS, 0x41, r, 4);
 	CHECK(f && status(f) == V2_OK && f->body_len == 4 + 1 + 4);
-	CHECK(rb(f)[1] == P_SQUELCH && rb(f)[2] == 1 && rb(f)[3] == P_RX_GAIN && rb(f)[4] == 45);
-	vec("get_params_stored", "fresh boot, blank EEPROM; GET_PARAMS flags 1 (STORED) for SQL_RAW, SQUELCH, RX_GAIN: SQL_RAW is RAM-only and omitted");
-	r[0] = 0; r[1] = 0x19;
+	CHECK(rb(f)[1] == P_BUSY_SQL_LEVEL && rb(f)[2] == 1 && rb(f)[3] == P_RX_GAIN && rb(f)[4] == 45);
+	vec("get_params_stored", "fresh boot, blank EEPROM; GET_PARAMS flags 1 (STORED) for BUSY_SQL_RAW, BUSY_SQL_LEVEL, RX_GAIN: BUSY_SQL_RAW is RAM-only and omitted");
+	r[0] = 0; r[1] = 0x1A;
 	f = v2(V2_GET_PARAMS, 0x42, r, 2);
-	CHECK(status(f) == V2_BAD_PARAM && rb(f)[0] == 0x19);
-	r[1] = 7; r[2] = 7;
+	CHECK(status(f) == V2_BAD_PARAM && rb(f)[0] == 0x1A);
+	r[1] = 6; r[2] = 6;
 	CHECK(status(v2(V2_GET_PARAMS, 0x43, r, 3)) == V2_BAD_PARAM);
+	// 0x07, SQUELCH, is gone: UNSUPPORTED, in GET_PARAMS and SET_PARAMS
+	r[1] = P_MIC_GAIN; r[2] = 0x07;
+	f = v2(V2_GET_PARAMS, 0x44, r, 3);
+	CHECK(status(f) == V2_UNSUPPORTED && rb(f)[0] == 0x07);
+	vec("get_params_squelch_retired", "any state; GET_PARAMS for MIC_GAIN and 0x07 (SQUELCH, retired): UNSUPPORTED, detail 0x07");
+	{
+		const uint8_t sq[3] = { 0, 0x07, 0 };
+		f = v2(V2_SET_PARAMS, 0x45, sq, 3);
+		CHECK(status(f) == V2_UNSUPPORTED && rb(f)[0] == 0x07);
+	}
 
 	// SET_PARAMS: applied together, read back, receiver set up once
 	uint8_t s[64];
 	unsigned n = 0;
 	s[n++] = 0;
 	s[n++] = P_FREQ_HZ; put32(s + n, 433500000u); n += 4;
-	s[n++] = P_SQUELCH; s[n++] = 3;
+	s[n++] = P_BUSY_SQL_LEVEL; s[n++] = 3;
 	s[n++] = P_DEV_WIDE; put16(s + n, 0x0800); n += 2;
 	const int setups = reg_writes[0x3F];
 	f = v2(V2_SET_PARAMS, 0x44, s, n);
 	CHECK(f && status(f) == V2_OK && f->body_len == 4 + 1 + 5 + 2 + 3);
 	CHECK(rb(f)[0] == (SETR_TX_ALLOWED | SETR_RETUNED));
 	CHECK(rb(f)[1] == P_FREQ_HZ && get32(rb(f) + 2) == 433500000u);
-	CHECK(gVfo->Frequency == 43350000 && gEeprom.SQUELCH_LEVEL == 3 && gEeprom.DEVIATION_WIDE == 0x0800);
+	CHECK(gVfo->Frequency == 43350000 && gEeprom.BUSY_LEVEL == 3 && gEeprom.DEVIATION_WIDE == 0x0800);
 	CHECK(gVfo->Band == BAND6_400MHz);
 	CHECK(regs[0x38] == (43350000 & 0xFFFF) && regs[0x39] == (43350000 >> 16));
-	CHECK(reg_writes[0x3F] - setups == 2);           // one RADIO_SetupRegisters (it writes REG_3F twice)
+	CHECK(reg_writes[0x3F] - setups == 1);           // one RADIO_SetupRegisters (it writes REG_3F once)
 	CHECK(eeprom[SETTINGS_OPERATING] == 0xFF);        // RAM only: nothing written
 	vec("set_params", "fresh boot; SET_PARAMS flags 0: FREQ_HZ 433.5 MHz, SQUELCH 3, DEV_WIDE 0x0800 (RAM)");
 
@@ -663,15 +691,15 @@ static void test_params(void)
 	// atomic: one bad record and nothing changes
 	n = 0;
 	s[n++] = 0;
-	s[n++] = P_SQUELCH; s[n++] = 5;
+	s[n++] = P_BUSY_SQL_LEVEL; s[n++] = 5;
 	s[n++] = P_MIC_GAIN; s[n++] = 32;
 	f = v2(V2_SET_PARAMS, 0x46, s, n);
 	CHECK(status(f) == V2_RANGE && rb(f)[0] == P_MIC_GAIN);
-	CHECK(gEeprom.SQUELCH_LEVEL == 3 && gEeprom.MIC_GAIN == 20);
+	CHECK(gEeprom.BUSY_LEVEL == 3 && gEeprom.MIC_GAIN == 20);
 	vec("set_params_range", "after set_params: SQUELCH 5 with MIC_GAIN 32 (out of range): RANGE, detail 0x06, nothing applied");
 
 	// duplicate, unknown, truncated
-	n = 0; s[n++] = 0; s[n++] = P_SQUELCH; s[n++] = 2; s[n++] = P_SQUELCH; s[n++] = 2;
+	n = 0; s[n++] = 0; s[n++] = P_BUSY_SQL_LEVEL; s[n++] = 2; s[n++] = P_BUSY_SQL_LEVEL; s[n++] = 2;
 	CHECK(status(v2(V2_SET_PARAMS, 0x47, s, n)) == V2_BAD_PARAM);
 	n = 0; s[n++] = 0; s[n++] = 0x30; s[n++] = 2;
 	CHECK(status(v2(V2_SET_PARAMS, 0x48, s, n)) == V2_BAD_PARAM);
@@ -709,7 +737,7 @@ static void test_params(void)
 	CHECK(status(f) == V2_OK && rb(f)[1] == P_POWER && rb(f)[2] == 2 && gVfo->OUTPUT_POWER == 0);
 
 	// RAM-only parameters
-	n = 0; s[n++] = 0; s[n++] = P_SQL_RAW;
+	n = 0; s[n++] = 0; s[n++] = P_BUSY_SQL_RAW;
 	const uint8_t sql[6] = { 30, 20, 40, 50, 60, 70 };
 	memcpy(s + n, sql, 6); n += 6;
 	s[n++] = P_AGC_FIX; s[n++] = 5;
@@ -719,20 +747,20 @@ static void test_params(void)
 	CHECK((regs[0x7E] & 0xF000) == (0x8000 | (5u << 12)));
 	s[0] = SETP_PERSIST;
 	f = v2(V2_SET_PARAMS, 0x54, s, n);
-	CHECK(status(f) == V2_NOT_PERSISTABLE && rb(f)[0] == P_SQL_RAW);
+	CHECK(status(f) == V2_NOT_PERSISTABLE && rb(f)[0] == P_BUSY_SQL_RAW);
 	// SQL_RAW survives a retune, and setting SQUELCH drops it
 	n = 0; s[n++] = 0; s[n++] = P_FREQ_HZ; put32(s + n, 145000000u); n += 4;
 	v2(V2_SET_PARAMS, 0x55, s, n);
 	CHECK(gVfo->SquelchOpenRSSIThresh == 30);
-	n = 0; s[n++] = 0; s[n++] = P_SQUELCH; s[n++] = 3;
+	n = 0; s[n++] = 0; s[n++] = P_BUSY_SQL_LEVEL; s[n++] = 3;
 	v2(V2_SET_PARAMS, 0x56, s, n);
 	CHECK(!gSqlRawActive);
 
 	// at critical battery nothing may set the receiver up
 	gReducedService = true;
-	n = 0; s[n++] = 0; s[n++] = P_MIC_GAIN; s[n++] = 11; s[n++] = P_SQUELCH; s[n++] = 4;
+	n = 0; s[n++] = 0; s[n++] = P_MIC_GAIN; s[n++] = 11; s[n++] = P_BUSY_SQL_LEVEL; s[n++] = 4;
 	f = v2(V2_SET_PARAMS, 0x58, s, n);
-	CHECK(status(f) == V2_STATE && rb(f)[0] == P_SQUELCH && gEeprom.MIC_GAIN == 20);
+	CHECK(status(f) == V2_STATE && rb(f)[0] == P_BUSY_SQL_LEVEL && gEeprom.MIC_GAIN == 20);
 	n = 0; s[n++] = 0; s[n++] = P_MIC_GAIN; s[n++] = 11;
 	CHECK(status(v2(V2_SET_PARAMS, 0x59, s, n)) == V2_OK && gEeprom.MIC_GAIN == 11);
 	uint8_t op = 1;
@@ -1032,7 +1060,7 @@ static void test_tone(void)
 	host_advance(501);
 	const Frame_t *e;
 	CHECK(events(EV_TONE_END, &e) == 1 && e->body[7] == TONE_END_ELAPSED);
-	CHECK(regs[0x70] == 0 && regs[0x47] == 0x6040);
+	CHECK(regs[0x70] == 0 && regs[0x47] == 0x6140);  // back to receive audio, always open
 
 	// the word for other frequencies: round(f x 10.32444)
 	const uint16_t fq[] = { 100, 1200, 2200, 4999, 5000 };

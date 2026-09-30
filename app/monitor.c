@@ -38,7 +38,7 @@ void AUDIO_AudioPathOnHost(void);
 // ------------------------------------------------------------ busy --
 
 static bool     gBusy;
-static bool     gSq;             // squelch source
+static bool     gSq;             // the chip's squelch result (a detector only)
 static bool     gRssiBusy;       // RSSI source
 static bool     gBelow;          // RSSI below close, since gBelowStart
 static uint32_t gBelowStart;
@@ -175,6 +175,7 @@ static void Edge(bool busy, uint8_t cause, uint32_t now, bool read)
 
 	gBusy       = busy;
 	gBusyEdgeMs = now;
+	BK4819_ToggleGpioOut(BK4819_GPIO6_PIN2_GREEN, busy);   // the green LED: carrier detected
 
 	if (busy) {
 		memset(&gBurst, 0, sizeof(gBurst));
@@ -464,8 +465,7 @@ void MON_Slice500ms(void)
 static void ToneApply(void)
 {
 	// tone 1 into the AF output instead of the receiver audio (REG_47
-	// AF source 2), whatever the squelch; the speaker amplifier (the K1
-	// audio out) is otherwise first switched on at the first squelch open
+	// AF source 2), with the speaker amplifier (the K1 audio out) on
 	AUDIO_AudioPathOn();
 	BK4819_WriteRegister(BK4819_REG_71, gTone.word);
 	BK4819_WriteRegister(BK4819_REG_70, 0x8000u | ((uint16_t)gTone.gain << 8));
@@ -493,17 +493,25 @@ void TONE_Stop(uint8_t reason)
 		return;
 	gTone.on = false;
 	BK4819_WriteRegister(BK4819_REG_70, 0);
-	if (gCurrentFunction == FUNCTION_RECEIVE || gCurrentFunction == FUNCTION_MONITOR)
-		BK4819_SetAF(BK4819_AF_FM);
-	else if (gCurrentFunction != FUNCTION_TRANSMIT)
-		BK4819_SetAF(BK4819_AF_MUTE);
+	if (gCurrentFunction != FUNCTION_TRANSMIT)
+		BK4819_SetAF(BK4819_AF_FM);     // receive audio, always open
 	EVT_Store(EV_TONE_END, g_ms, &reason, 1);
 }
 
+// After every receive set-up: the speaker amplifier (the K1 audio out) on,
+// receive audio being always open, and a running level tone kept.
 void MON_AfterRxSetup(void)
 {
+	if (gReducedService)
+		return;             // the receiver and the amplifier stay off
+	AUDIO_AudioPathOn();
 	if (gTone.on)
 		ToneApply();
+}
+
+bool MON_DetectorOpen(void)
+{
+	return gSq;
 }
 
 // ------------------------------------------------ override trials --

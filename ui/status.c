@@ -21,6 +21,7 @@
 #include "driver/st7565.h"
 #include "external/printf/printf.h"
 #include "functions.h"
+#include "app/monitor.h"
 #include "helper/battery.h"
 #include "misc.h"
 #include "settings.h"
@@ -42,14 +43,11 @@ void UI_DisplayStatus()
 	if (gCurrentFunction == FUNCTION_TRANSMIT) {
 		memcpy(line + x, BITMAP_TX, sizeof(BITMAP_TX));
 	}
-	else if (FUNCTION_IsRx()) {
+	else if (MON_Busy()) {        // a carrier detected (the audio is always open)
 		memcpy(line + x, BITMAP_RX, sizeof(BITMAP_RX));
 	}
 	x += 10;
 
-	if (gMonitor) {
-		UI_PrintStringSmallBufferNormal("MON", line + x);
-	}
 	x += 24;
 
 	// KEY-LOCK indicator

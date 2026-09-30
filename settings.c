@@ -85,7 +85,7 @@ void SETTINGS_Decode(const uint8_t Data[16], const uint8_t T[8], EEPROM_Config_t
 	e->PA_BIAS_DELAY_MS   = ByteOr(T[3], PA_DELAY_MAX_MS, PA_BIAS_DELAY_DEFAULT);
 	const uint16_t devWide   = Data[4] | (Data[5] << 8);
 	const uint16_t devNarrow = Data[6] | (Data[7] << 8);
-	e->SQUELCH_LEVEL    = ByteOr(Data[1], 9, 1);
+	e->BUSY_LEVEL       = ByteOr(Data[1], 9, 1) ? ByteOr(Data[1], 9, 1) : 1;
 	e->TX_TIMEOUT       = ByteOr(Data[2], ARRAY_SIZE(gTxTimeoutSeconds) - 1, TX_TIMEOUT_DEFAULT_INDEX);
 	e->MIC_GAIN         = ByteOr(Data[3], PKT_MIC_GAIN_MAX, PKT_MIC_GAIN_DEFAULT);
 	e->DEVIATION_WIDE   = (devWide   <= PKT_DEVIATION_MAX) ? devWide   : PKT_DEVIATION_WIDE_DEFAULT;
@@ -280,7 +280,7 @@ void SETTINGS_SaveSettings(void)
 
 	memset(State, 0xFF, sizeof(State));
 	State[0]  = SETTINGS_PKT_VERSION;
-	State[1]  = gEeprom.SQUELCH_LEVEL;
+	State[1]  = gEeprom.BUSY_LEVEL;
 	State[2]  = gEeprom.TX_TIMEOUT;
 	State[3]  = gEeprom.MIC_GAIN;
 	State[4]  = gEeprom.DEVIATION_WIDE & 0xFF;

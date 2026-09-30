@@ -106,7 +106,10 @@ void FUNCTION_Init(void) {}
 void FUNCTION_Select(FUNCTION_Type_t f) { gCurrentFunction = f; }
 uint16_t gBatteryCalibration[6];
 uint8_t  gBatteryDisplayLevel = 5;
-void MON_AfterRxSetup(void) {}
+static bool amp_on;
+void MON_AfterRxSetup(void) { amp_on = true; }
+void BK4819_SetAF(BK4819_AF_Type_t AF) { regs[0x47] = (6u << 12) | (AF << 8) | (1u << 6); }
+void BK4819_SetRegValue(RegisterSpec s, uint16_t v) { regs[s.num] = (regs[s.num] & ~(s.mask << s.offset)) | (v << s.offset); }
 void APP_TxRefusedAtKeyUp(uint8_t reason) { (void)reason; }
 
 // ----------------------------------------------------------------- tests --
@@ -147,7 +150,7 @@ static void test_settings_defaults_and_roundtrip(void)
 	SETTINGS_InitEEPROM();
 	SETTINGS_LoadCalibration();
 
-	CHECK(gEeprom.SQUELCH_LEVEL == 1);
+	CHECK(gEeprom.BUSY_LEVEL == 1);
 	CHECK(gTxTimeoutSeconds[gEeprom.TX_TIMEOUT] == 30);
 	CHECK(gEeprom.MIC_GAIN == PKT_MIC_GAIN_DEFAULT);
 	CHECK(gEeprom.DEVIATION_WIDE == 0x856);
@@ -157,7 +160,7 @@ static void test_settings_defaults_and_roundtrip(void)
 	CHECK(gEeprom.RX_DAC_GAIN == PKT_RX_DAC_GAIN_DEFAULT);
 	CHECK(gEeprom.Vfo.Frequency == RADIO_DEFAULT_FREQUENCY);
 
-	gEeprom.SQUELCH_LEVEL    = 0;
+	gEeprom.BUSY_LEVEL       = 7;
 	gEeprom.TX_TIMEOUT       = 1;
 	gEeprom.MIC_GAIN         = 31;
 	gEeprom.DEVIATION_WIDE   = 0x0A7F;
@@ -167,10 +170,10 @@ static void test_settings_defaults_and_roundtrip(void)
 	SETTINGS_SaveSettings();
 	CHECK(eeprom[SETTINGS_PKT_BLOCK] == SETTINGS_PKT_VERSION);
 
-	memset(&gEeprom.SQUELCH_LEVEL, 0x55, 8);
+	memset(&gEeprom.BUSY_LEVEL, 0x55, 8);
 	SETTINGS_InitEEPROM();
 	SETTINGS_LoadCalibration();
-	CHECK(gEeprom.SQUELCH_LEVEL == 0);
+	CHECK(gEeprom.BUSY_LEVEL == 7);
 	CHECK(gTxTimeoutSeconds[gEeprom.TX_TIMEOUT] == 10);
 	CHECK(gEeprom.MIC_GAIN == 31);
 	CHECK(gEeprom.DEVIATION_WIDE == 0x0A7F);
@@ -181,9 +184,15 @@ static void test_settings_defaults_and_roundtrip(void)
 	// without the layout version byte the block is ignored
 	eeprom[SETTINGS_PKT_BLOCK] = 0x41;
 	SETTINGS_InitEEPROM();
-	CHECK(gEeprom.SQUELCH_LEVEL == 1);
+	CHECK(gEeprom.BUSY_LEVEL == 1);
 	CHECK(gEeprom.MIC_GAIN == PKT_MIC_GAIN_DEFAULT);
 	eeprom[SETTINGS_PKT_BLOCK] = SETTINGS_PKT_VERSION;
+
+	// an old squelch 0 (open) is not a detector level: the default
+	eeprom[SETTINGS_PKT_BLOCK + 1] = 0;
+	SETTINGS_InitEEPROM();
+	CHECK(gEeprom.BUSY_LEVEL == 1);
+	eeprom[SETTINGS_PKT_BLOCK + 1] = 7;
 
 	// out of range bytes fall back to the defaults
 	eeprom[SETTINGS_PKT_BLOCK + 3] = 32;
@@ -387,7 +396,9 @@ static void test_tx_rx_registers(void)
 	CHECK(regs[0x7D] == (PKT_REG_7D_BASE | 7));
 	CHECK(regs[0x48] == (PKT_REG_48_BASE | (40u << 4) | 9u));
 	CHECK((regs[0x31] & PKT_REG_31_OFF_MASK) == 0);
-	CHECK(regs[0x3F] == (BK4819_REG_3F_SQUELCH_FOUND | BK4819_REG_3F_SQUELCH_LOST));
+	CHECK(regs[0x3F] == 0);                      // no squelch interrupts: a detector only
+	CHECK(regs[0x47] == ((6u << 12) | (BK4819_AF_FM << 8) | (1u << 6)));   // audio always open
+	CHECK(amp_on);
 
 	gVfo->CHANNEL_BANDWIDTH = BANDWIDTH_WIDE;
 	RADIO_SetTxParameters();

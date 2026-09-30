@@ -64,7 +64,6 @@ extern bool                  gSetting_500TX;
 extern bool                  gSetting_350EN;
 extern uint8_t               gSetting_F_LOCK;
 
-extern bool                  gMonitor;
 
 extern volatile uint32_t     g_ms;               // ms since boot, SysTick
 extern volatile uint16_t     gSerialLockMs;      // serial PTT lock remaining, ms
@@ -96,8 +95,6 @@ extern bool                  gFlagPrepareTX;
 extern bool                  gFlagAcceptSetting;   // accept menu setting
 extern bool                  gFlagRefreshSetting;  // refresh menu display
 
-// true means we are receiving signal
-extern bool                  g_SquelchLost;
 
 extern bool                  gKeyBeingHeld;
 extern bool                  gPttIsPressed;

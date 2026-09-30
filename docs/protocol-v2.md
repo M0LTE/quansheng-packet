@@ -231,12 +231,12 @@ Request: empty. Reply (34 bytes):
 |---|---|---|---|
 | 0 | u32 | uptime | ms (the event clock) |
 | 4 | u32 | frequency | Hz |
-| 8 | u8 | state | 0 idle, 1 receiving (squelch open), 2 transmitting, 3 monitor, 4 reduced service |
-| 9 | u8 | flags1 | bit 0 squelch open, bit 1 busy (8.2), bit 2 PTT pressed, bit 3 lock active, bit 4 TX allowed at this frequency, bit 5 TX latched (release needed), bit 6 level tone running, bit 7 late key pending |
+| 8 | u8 | state | 0 receiving, nothing detected; 1 receiving, busy (8.2); 2 transmitting; 3 not used (was monitor; the firmware has no squelch); 4 reduced service |
+| 9 | u8 | flags1 | bit 0 the chip's squelch detector open (a detector only, 8.2), bit 1 busy (8.2), bit 2 PTT pressed, bit 3 lock active, bit 4 TX allowed at this frequency, bit 5 TX latched (release needed), bit 6 level tone running, bit 7 late key pending |
 | 10 | u8 | flags2 | bit 0 live params differ from stored, bit 1 RAM overrides active, bit 2 EEPROM overrides active, bit 3 LIVE_TX on, bit 4 persist in progress, bit 5 reserved (was memory-channel mode; the firmware has no memory channels), 0 |
 | 11 | u8 | power | 0 low, 1 mid, 2 high |
 | 12 | u8 | bandwidth | 0 wide, 1 narrow |
-| 13 | u8 | squelch level | 0 to 9 |
+| 13 | u8 | busy detector level | 1 to 9 (BUSY_SQL_LEVEL; there is no squelch) |
 | 14 | u16 | deviation in use | REG_40<11:0> for the current bandwidth |
 | 16 | u16 | RSSI | raw REG_67<8:0>, 0.5 dB steps, dBm = raw / 2 - 160 |
 | 18 | u8 | noise | REG_65<6:0> |
@@ -296,9 +296,9 @@ Request: `u8 flags` (bit 0 PERSIST, bit 1 REQUIRE_TX_OK, bit 2 DRY_RUN), then `(
 Semantics:
 - All records are validated first. Any failure rejects the whole command (BAD_PARAM, RANGE, TX_BAND, NOT_PERSISTABLE) and changes nothing.
 - DRY_RUN stops after validation and replies as if applied, without applying.
-- Otherwise all values are applied together, then the receiver is set up once (`RADIO_ConfigureSquelchAndOutputPower` if frequency, power or squelch changed, then `RADIO_SetupRegisters`). A retune closes an open squelch (`CD` cause RETUNE). Values that only matter at key-up (deviation, mic gain, PA delays) take effect at the next key-up.
+- Otherwise all values are applied together, then the receiver is set up once (`RADIO_ConfigureSquelchAndOutputPower` if frequency, power or the busy detector level changed, then `RADIO_SetupRegisters`). A receiver set-up forces busy closed (`CD` cause RETUNE); the audio stays open. Values that only matter at key-up (deviation, mic gain, PA delays) take effect at the next key-up.
 - A transmission never sees a change: the frame's lock has already ended any transmission (5.3).
-- In reduced service (critical battery) a change that needs the receiver set up (frequency, power, bandwidth, squelch, SQL_RAW, AGC_FIX, AFC, RX gains) is refused with `STATE` (detail = the lowest such id); other changes apply.
+- In reduced service (critical battery) a change that needs the receiver set up (frequency, power, bandwidth, BUSY_SQL_LEVEL, BUSY_SQL_RAW, AGC_FIX, AFC, RX gains) is refused with `STATE` (detail = the lowest such id); other changes apply.
 - FREQ_HZ keeps the live power and bandwidth; if the step does not hold the frequency, the largest step that does is chosen, so the keypad steps from it.
 - BUSY_RSSI_CLOSE must not exceed BUSY_RSSI_OPEN after the command (`RANGE`, detail = the one that was sent, CLOSE if both).
 - PERSIST writes the changed values to EEPROM after the reply is sent, one 8-byte block per main-loop pass, never during a transmission (a press defers the rest). Each block takes about 8 ms and can delay a key-up by up to 10 ms, so persist only when idle.
@@ -324,7 +324,7 @@ Request (7 bytes):
 
 Reply (3 bytes): `u8 gain code used`, `u16 REG_71 word used` (`round(f x 10.32444)` for the K5's 26 MHz crystal).
 
-While the tone runs the audio output carries only the tone (received audio muted), whatever the squelch: the firmware itself selects the tone as the AF source (REG_47 = 0x6240), and writes REG_70, REG_71 and REG_47 again after every receive set-up and squelch open, which would otherwise mute it. Busy and squelch events continue. It ends (`TONE_END`) when the duration elapses, on a stop request, on a new tone, on a PTT press (before key-up) and on a retune; the AF output then returns to FM audio if the squelch is open, else muted. Mode 0 needs the calibration byte (7, v2 block 0x1D6F) and returns UNSUPPORTED without it; the firmware then uses `code = round(cal x deviation / 3000)`, clamped to 127, which assumes a linear law and is provisional (M8 found it compressive, Q4). A stop request (duration 0) replies code 0 and word 0. Refused with STATE in reduced service. Errors: `RANGE` with the field offset as detail (0 frequency, 2 mode, 3 level, 5 duration).
+While the tone runs the audio output carries only the tone instead of the receive audio: the firmware selects the tone as the AF source (REG_47 = 0x6240) with the speaker amplifier (the K1 audio out) on, and writes REG_70, REG_71 and REG_47 again after every receive set-up. Busy events continue. It ends (`TONE_END`) when the duration elapses, on a stop request, on a new tone, on a PTT press (before key-up) and on a retune; the AF output then returns to the receive audio, which is always open. Mode 0 needs the calibration byte (7, v2 block 0x1D6F) and returns UNSUPPORTED without it; the firmware then uses `code = round(cal x deviation / 3000)`, clamped to 127, which assumes a linear law and is provisional (M8 found it compressive, Q4). A stop request (duration 0) replies code 0 and word 0. Refused with STATE in reduced service. Errors: `RANGE` with the field offset as detail (0 frequency, 2 mode, 3 level, 5 duration).
 
 ### 6.9 REG_READ (0x5008)
 
@@ -372,7 +372,7 @@ Ids for `GET_PARAMS` and `SET_PARAMS`. "Stored" is the EEPROM home when persiste
 | 0x04 | DEV_WIDE | u16 | 0 to 0x0A7F | 0x0856 | 0x1D04 |
 | 0x05 | DEV_NARROW | u16 | 0 to 0x0A7F | 0x0756 | 0x1D06 |
 | 0x06 | MIC_GAIN | u8 | 0 to 31 | 31 | 0x1D03 |
-| 0x07 | SQUELCH | u8 | 0 to 9 | 1 | 0x1D01 |
+| 0x07 | (retired: SQUELCH) | | | | the firmware has no squelch; GET_PARAMS and SET_PARAMS reply `UNSUPPORTED`, detail 0x07 |
 | 0x08 | RX_GAIN | u8 | 0 to 63 | factory calibration | 0x1D08 |
 | 0x09 | RX_DAC_GAIN | u8 | 0 to 15 | 15 | 0x1D09 |
 | 0x0A | TX_TIMEOUT_S | u8 | 5, 10, 15, 20, 30, 60, 120 | 30 | 0x1D02 (as index) |
@@ -381,20 +381,22 @@ Ids for `GET_PARAMS` and `SET_PARAMS`. "Stored" is the EEPROM home when persiste
 | 0x0D | PA_ENABLE_DELAY_MS | u8 | 1 to 20 | 1 | 0x1D52 |
 | 0x0E | PA_BIAS_DELAY_MS | u8 | 0 to 20 | 2 | 0x1D53 |
 | 0x0F | SERIAL_LOCK_MS | u16 | 0 to 1500, multiple of 10 | 20 | 0x1D61 (/10) |
-| 0x10 | BUSY_SOURCE | u8 | bit 0 squelch, bit 1 RSSI; 1 to 3 | 1 | 0x1D62 |
+| 0x10 | BUSY_SOURCE | u8 | bit 0 the chip's squelch detector, bit 1 RSSI; 1 to 3 | 1 | 0x1D62 |
 | 0x11 | BUSY_RSSI_OPEN | u16 | raw RSSI 0 to 511 | 110 (-105 dBm) | 0x1D64 |
 | 0x12 | BUSY_RSSI_CLOSE | u16 | raw RSSI, at most OPEN | 104 (-108 dBm) | 0x1D66 |
 | 0x13 | BUSY_HANG_MS | u8 | 0 to 250 | 20 | 0x1D63 |
-| 0x14 | SQL_RAW | 6 bytes | RSSI open, RSSI close (0 to 255), noise open, noise close (0 to 127), glitch open, glitch close (0 to 255) | from the level table | RAM only |
+| 0x14 | BUSY_SQL_RAW (was SQL_RAW) | 6 bytes | the squelch detector's thresholds: RSSI open, RSSI close (0 to 255), noise open, noise close (0 to 127), glitch open, glitch close (0 to 255) | from the level table | RAM only |
 | 0x15 | AGC_FIX | u8 | 0xFF auto, 0 to 7 fixed index (REG_7E<14:12> code) | 0xFF | RAM only |
 | 0x16 | AFC | u8 | 0 off, 1 on | 1 | RAM only |
 | 0x17 | BACKLIGHT | u8 | 0 off to 7 on | 3 | 0x1D0A |
 | 0x18 | KEY_LOCK | u8 | 0, 1 | 0 | 0x1D0C |
+| 0x19 | BUSY_SQL_LEVEL | u8 | 1 to 9: the row of the factory squelch tables the chip's squelch detector uses | 1 | 0x1D01 (was the squelch level; 0 there means 1) |
 
 Notes:
 - FREQ_HZ: the radio must be able to receive it (inside the band table, and not 350 to 400 MHz unless the band is enabled at 0x0F45). The firmware has one operating channel, no memory channels or band slots: frequency, power, bandwidth and step live in an 8-byte block at 0x1D58 in the settings family (`0x1D58` u32 frequency in 10 Hz units, `0x1D5C` power, `0x1D5D` bandwidth, `0x1D5E` step index, `0x1D5F` reserved), used only with a valid settings block. REQUIRE_TX_OK rejects a frequency the TX band plan forbids; otherwise the reply's result bit 0 says whether TX would be allowed. PERSIST of any of the three writes the block with all of them and the step, as the keypad does, and like every other stored parameter needs a valid settings block (else `EEPROM`).
 - When the block is not in use (a radio coming from another firmware or from the channel-memory builds), the frequency the old upstream layout had in use (channel indices at 0x0E80 and the record they point at) is taken once if receivable, else 144.800 MHz; with a valid settings block it is then written to 0x1D58 and the old layout is never read again.
-- SQL_RAW overrides the thresholds from the squelch level table and survives retunes; setting SQUELCH or rebooting drops it. Reading it returns the thresholds in use.
+- There is no squelch: receive audio is always open (the AF output carries the FM demodulator output whenever the radio is not transmitting, and the speaker amplifier is on). The chip's squelch result is only a carrier detector for the busy events (8.2); BUSY_SQL_LEVEL and BUSY_SQL_RAW set its thresholds and never mute anything.
+- BUSY_SQL_RAW overrides the thresholds from the level table and survives retunes; setting BUSY_SQL_LEVEL or rebooting drops it. Reading it returns the thresholds in use.
 - AGC_FIX and AFC are diagnostics.
 
 ### 7.1 v2 EEPROM block (0x1D60 to 0x1D6F)
@@ -444,7 +446,7 @@ The calibration area 0x1E00 to 0x1FFF is never written by anything in this proto
 ### 8.2 Busy (carrier detect)
 
 `busy` is the OR of the enabled sources (BUSY_SOURCE):
-- squelch: the BK4819 squelch result, REG_0C<1>, polled every 1 ms in receive, whether or not anything is subscribed (the chip's squelch interrupt is kept too). With squelch level 0 it is always open, so use the RSSI source.
+- squelch detector: the BK4819 squelch result, REG_0C<1>, polled every 1 ms in receive, whether or not anything is subscribed, with the thresholds of BUSY_SQL_LEVEL or BUSY_SQL_RAW. It is a detector only: the firmware has no squelch, the chip's squelch interrupts are off, and receive audio is always open. The green LED shows busy.
 - RSSI: REG_67 sampled every 2 ms in receive; opens at the first sample at or above BUSY_RSSI_OPEN, closes after BUSY_HANG_MS continuously below BUSY_RSSI_CLOSE.
 
 Busy is forced closed when a transmission starts and when the receiver is set up again (retune); it is re-evaluated when receive resumes. A burst is one busy interval.
@@ -456,8 +458,8 @@ Busy is forced closed when a transmission starts and when the receiver is set up
 | Off | Type | Field |
 |---|---|---|
 | 0 | u8 | busy: 1 open, 0 closed |
-| 1 | u8 | sources now: bit 0 squelch open, bit 1 RSSI busy |
-| 2 | u8 | cause: bit 0 squelch edge, bit 1 RSSI edge, bit 2 retune, bit 3 transmission started |
+| 1 | u8 | sources now: bit 0 squelch detector open, bit 1 RSSI busy |
+| 2 | u8 | cause: bit 0 squelch detector edge, bit 1 RSSI edge, bit 2 retune, bit 3 transmission started |
 | 3 | u16 | RSSI raw |
 | 5 | u8 | noise |
 | 6 | u8 | glitch |
@@ -639,6 +641,7 @@ Everything in sections 2 to 9 is implemented, with the points below settled by t
 | BOOT reset cause | always 0 |
 | GET_INFO caps bits 4 to 7 (validated measurements) | clear |
 | 0x5020 serial keying | not implemented, reserved; replies UNKNOWN_CMD |
+| Squelch (Tom, 30 September) | removed: receive audio always open; parameter 0x07 retired (UNSUPPORTED); the chip's squelch result kept as the busy detector, level 0x19 and thresholds 0x14 |
 
 Points settled by the implementation, beyond the amendments above:
 - PARAMS_CHANGED with source 0 (keypad or menu) comes from comparing every parameter with its last reported value every 500 ms, so it follows anything the operator changes, up to 0.5 s late.

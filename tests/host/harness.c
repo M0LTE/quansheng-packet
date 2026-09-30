@@ -144,9 +144,9 @@ uint16_t CRC_Calculate(const void *pBuffer, uint16_t Size)
 // --------------------------------------------------- the rest of the app --
 
 FUNCTION_Type_t gCurrentFunction;
-void FUNCTION_Init(void) { g_SquelchLost = false; }
+void FUNCTION_Init(void) {}
 void FUNCTION_Select(FUNCTION_Type_t f) { gCurrentFunction = f; }
-bool FUNCTION_IsRx(void) { return gCurrentFunction == FUNCTION_MONITOR || gCurrentFunction == FUNCTION_INCOMING || gCurrentFunction == FUNCTION_RECEIVE; }
+bool FUNCTION_IsRx(void) { return gCurrentFunction != FUNCTION_TRANSMIT; }
 
 uint16_t gBatteryCalibration[6];
 uint8_t  gBatteryDisplayLevel = 5;

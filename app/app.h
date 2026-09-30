@@ -29,7 +29,6 @@ uint8_t  APP_PttArbState(void);
 bool     APP_PersistAllowed(void);
 void     APP_Service(void);
 void     APP_Init(void);
-void     APP_StartListening(FUNCTION_Type_t function);
 uint32_t APP_SetFrequencyByStep(VFO_Info_t *pInfo, int8_t direction);
 void     APP_Update(void);
 void     APP_CheckPtt(void);

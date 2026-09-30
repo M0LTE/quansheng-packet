@@ -27,16 +27,15 @@
 
 FUNCTION_Type_t gCurrentFunction;
 
+// Receiving whenever not transmitting: there is no squelch, the audio is
+// always open.
 bool FUNCTION_IsRx()
 {
-	return gCurrentFunction == FUNCTION_MONITOR ||
-		   gCurrentFunction == FUNCTION_INCOMING ||
-		   gCurrentFunction == FUNCTION_RECEIVE;
+	return gCurrentFunction != FUNCTION_TRANSMIT;
 }
 
 void FUNCTION_Init(void)
 {
-	g_SquelchLost = false;
 	gUpdateStatus = true;
 }
 
@@ -76,12 +75,6 @@ void FUNCTION_Select(FUNCTION_Type_t Function)
 			FUNCTION_Transmit();
 			break;
 
-		case FUNCTION_MONITOR:
-			gMonitor = true;
-			break;
-
-		case FUNCTION_INCOMING:
-		case FUNCTION_RECEIVE:
 		default:
 			break;
 	}

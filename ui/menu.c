@@ -30,7 +30,6 @@
 
 const char gMenuNames[MENU_N_ITEMS][7] =
 {
-	[MENU_SQL]    = "Sql",
 	[MENU_STEP]   = "Step",
 	[MENU_TXP]    = "TxPwr",
 	[MENU_W_N]    = "W/N",
@@ -87,11 +86,6 @@ void UI_DisplayMenu(void)
 
 	switch (gMenuCursor)
 	{
-		case MENU_SQL:
-			sprintf(String, "%d", (int)gSubMenuSelection);
-			strcpy(Hint, gSubMenuSelection ? "calibrated" : "open");
-			break;
-
 		case MENU_STEP: {
 			const uint16_t step = gStepFrequencyTable[FREQUENCY_GetStepIdxFromSortedIdx(gSubMenuSelection)];
 			sprintf(String, "%d.%02u", step / 100, step % 100);
