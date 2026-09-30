@@ -1,18 +1,24 @@
-# UV-K5 packet firmware (branch `packet-fw`)
+# UV-K5 packet firmware: developer notes
 
-A cut-down build of [mobilinkd/uv-k5-firmware-custom](https://github.com/mobilinkd/uv-k5-firmware-custom) (base `e1e2fea`) for a UV-K5 used as a packet radio behind an AIOC. It does one thing: receive and transmit FM through the flat ("DIG") audio path, on one frequency, with as few settings as possible. Apache-2.0, as upstream.
+A cut-down build of [mobilinkd/uv-k5-firmware-custom](https://github.com/mobilinkd/uv-k5-firmware-custom) (base `e1e2fea`) for a UV-K5 used as a packet radio behind an AIOC. It does one thing: receive and transmit FM through the flat ("DIG") audio path, on one frequency, with as few settings as possible. Apache-2.0, as upstream. The user guide is the [README](../README.md); this page is how it works and why.
 
-Status: first pass, built and host-tested only. **Not yet run on a radio.**
+Status: protocol v2 firmware running on the bench radio since 30 September 2026, with the measurements quoted here.
 
 ## Build and test
 
 ```sh
-/home/tf/src/uvk5-packet-bench/tools/k5/build.sh --src . --out out/NAME   # pinned gcc 10.3.1 in Docker
-tests/host/run.sh                                                          # host-side logic tests, system gcc
-/home/tf/src/uvk5-work/venv/bin/python3 /home/tf/src/uvk5-packet-bench/tools/k5/k5.py image-info out/NAME/firmware.packed.bin
+./compile-with-docker.sh                         # release build, pinned gcc 10.3.1 in Docker, into compiled-firmware/
+./compile-with-docker.sh --out out/bench bench   # bench build: legacy 0x0602 raw register writes built in
+./compile-with-docker.sh VERSION_STRING=v1.2.3   # set the version (at most 8 characters)
+tests/host/run.sh                                # host-side logic tests with the system gcc; also checks the golden vectors
+dotnet run --project host/dotnet/tests/M0LTE.Uvk5.Tests -c Release   # the C# client's tests
 ```
 
-There are no feature flags left in the Makefile, only `ENABLE_CLANG`, `ENABLE_SWD` and `ENABLE_LTO`. The packed image carries `*PKTFW <git hash>` as its version.
+`compile-with-docker.sh` builds a copy of the tree in the container from `Dockerfile` (Ubuntu 22.04 pinned by digest, arm-none-eabi-gcc 10.3.1 and newlib pinned by version), so two builds of the same source and version give identical bytes. Plain `make` works too with gcc 10.3.1 and Python's `crcmod` installed; newer gcc makes larger images.
+
+The Makefile has no feature flags left, only `ENABLE_CLANG`, `ENABLE_SWD`, `ENABLE_LTO` and the bench option `ENABLE_UART_RAW_REG_WRITE` (off unless you build `bench`). The build options are recorded in `.build-options`, so switching between release and bench rebuilds everything. The packed image carries `*PKTFW <version>`: the tag on HEAD, else the short commit hash, unless `VERSION_STRING` is given.
+
+**Releases** come from GitHub Actions (`.github/workflows/release.yml`): pushing a tag `vX.Y.Z` (at most 8 characters, since it becomes the firmware version; a suffix such as `v1.1.0b1` makes a pre-release) runs the host and C# tests, builds the firmware with the tag as its version, builds `k5ctl` with NativeAOT on native runners for linux-x64, linux-arm64, osx-arm64 and win-x64, and publishes the packed image, the raw image, the k5ctl archives and `SHA256SUMS`. Every push and pull request runs `.github/workflows/build.yml` (tests, release and bench builds).
 
 ## Size
 
@@ -35,12 +41,13 @@ Flash for the firmware is 61440 bytes (60 KiB). All sizes are gcc 10.3.1 (Docker
 | Serial control protocol v2 (`docs/protocol-v2.md`) | 36188 | 25252 |
 | Memory channels and band slots removed: one operating channel | 35136 | 26304 |
 | Review fixes (late-key bound, event pacing, tone audio path) | 35316 | 26124 |
+| Squelch removed, release prep (mic gain and battery type fixed, stored override table gone, 0x0602 bench only) | 34252 | 27188 |
 
 ## What was removed
 
 FM broadcast radio, spectrum, all scanning (frequency, channel, scan lists, CTCSS/DCS scan), dual watch and cross band, battery save (the receiver no longer sleeps between polls, which would miss the start of a packet), DTMF (calling, ANI, PTT ID, live decoder, side tones), VOX, flashlight, voice prompts, alarm and 1750 Hz tone, roger beep and every other beep (they would go to the TNC), CTCSS/DCS and tail tones, scrambler, compander, AM, USB and the FM voice mode, NOAA, aircopy, power-on password, AES challenge and lock, boot modes and the hidden menu, channel names, TX offset and reverse, the 60-item menu, and the SRAM overlay.
 
-CTCSS/DCS went because packet needs no tone squelch, and dropping it removes the tone scanning, tail detection and interrupt handling with it. The squelch itself went on 30 September (Tom): the TNC decodes from open audio, and a squelch only cut the start of frames.
+CTCSS/DCS went because packet needs no tone squelch, and dropping it removes the tone scanning, tail detection and interrupt handling with it. The squelch itself went on 30 September: the TNC decodes from open audio, and a squelch only cut the start of frames.
 
 ## What remains
 
@@ -152,7 +159,7 @@ Timing settings, 8 bytes at `0x1D50` (one UART write; not in the menu; used only
 
 ## UART commands
 
-38400 8N1, upstream framing (see the bench repo's `docs/k5-firmware.md`). Plain mode after a hello whose raw id is `14 05`.
+38400 8N1, upstream framing (`docs/protocol-v2.md` section 2). Plain mode after a hello whose raw id is `14 05`.
 
 | Command | Does | Change from upstream |
 |---|---|---|

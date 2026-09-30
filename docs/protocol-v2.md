@@ -1,6 +1,6 @@
 # Serial control protocol v2 (packet firmware)
 
-Status: implemented in the firmware (branch `fw-v2`), host-tested, not yet run on a radio; section 13 lists what is implemented and where the firmware settled a point this text left open. Written 29 September 2026 against `packet-fw` 2951c48; amended 30 September 2026 with the implementation.
+Status: implemented in the firmware, host-tested and verified on the bench radio; section 13 lists what is implemented and where the firmware settled a point this text left open. Written 29 September 2026 against the v1 firmware (2951c48); amended 30 September 2026 with the implementation and the release changes (retired parameters and ops are marked where they were).
 
 This is the serial protocol a TNC or soundmodem (pdn-soundmodem, say) uses to control and watch the UV-K5 packet firmware through an AIOC: AIOC sound card for audio, AIOC CM108 HID for PTT, AIOC CDC serial for this protocol. It adds a command set in its own ID range (0x50xx) to the existing framing. Every existing command and the framing stay as they are on the wire.
 
@@ -603,7 +603,7 @@ Open questions:
 - **Q8** Squelch decision latency (REG_4E open delay 0) and the best busy sources and thresholds for packet.
 - **Q9** Is 20 ms the right default lock, and 30 ms the right late-key limit, once M3 and M6 are in?
 
-Measurements for tonight on the bench radio (2951c48, transmit and register pokes, no flashing):
+Measurements planned on the bench radio with the v1 firmware (2951c48, transmit and register pokes, no flashing):
 
 | # | Measurement | Settles |
 |---|---|---|
@@ -622,7 +622,7 @@ Later, with the reference transmitter: squelch and RSSI busy latency against lev
 
 Results reported on 29 September (2951c48): M2, a reply sent while HID PTT was held was lost 4 of 4 times with the AIOC default 0x60 = 0x00010100 and arrived intact 4 of 4 with 0x00000100, so LIVE_TX works once the host clears RXIGNPTT (Q6). M3, one 0x0527 sent 1.2 s into a 4 s key-up ended RF for the rest of it, and AIOC 0xD0 bit 16 read 0 afterwards (1a confirmed). M4, 50 port opens and closes, 50 baud changes and 100 DTR/RTS toggles gave no RF (Q7, partly). M5, 1000 zero bytes keyed the radio for 0.455 s at 9600 baud and 0.120 s at 19200, never at 38400: the host rule is necessary. M6, legacy reply latency 9.9 to 22.1 ms, bimodal at 10 and 20 ms (the v1 10 ms slice); a full 0x00 to 0x7F sweep via 0x0601 took 2.05 s. M8, with the squelch open, REG_71 = 0x2854, REG_70 = 0x8000 or (g << 8), REG_47 = 0x6240 gave a clean 1 kHz tone replacing the receiver audio: g = 16 -13.0 dBFS, 64 -4.8 dBFS, 127 +0.6 dBFS (clipping), so the law is compressive (x2 about +5.4 dB, x4 about +8.2 dB); with the squelch closed nothing reached the AIOC while REG_47 read 0x6040 (AF muted), which is why LEVEL_TONE selects the AF source itself. M9, idle: REG_0C 0x0280 (bit 1 clear, squelch closed), REG_7E 0x37C0, REG_64 0x0097, REG_6F 0x1B5B constant; REG_65 noise-like; REG_63 wanders widely; REG_67 tracks RSSI; REG_0D 0x8000, REG_0E 0. M10, a 5 s TX timeout with a 7 s key gave 4.995 s of RF and no re-key while held. A robustness finding: a frame cut by a key-up 2 ms after it was written left v1 deaf to hellos for a while; v2 drops truncated frames (2).
 
-## 13. Implementation status (firmware, branch `fw-v2`)
+## 13. Implementation status (firmware)
 
 Everything in sections 2 to 9 is implemented, with the points below settled by the implementation (the text above has been amended to match). Unimplemented request ids reply `UNKNOWN_CMD`; an absent capability replies `UNSUPPORTED`.
 

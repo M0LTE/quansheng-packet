@@ -1,222 +1,121 @@
-> **Branch `packet-fw`:** a cut-down packet-radio build of this firmware. Most of what the rest of this README describes has been removed. See [docs/packet-fw.md](docs/packet-fw.md).
+# UV-K5 packet firmware
 
-# Open re-implementation of the Quansheng UV-K5/K6/5R v2.1.27 firmware
+Firmware that turns a Quansheng UV-K5 into a clean, fast packet radio. You pair it with an [AIOC](https://github.com/skuep/AIOC) cable and a soundmodem or TNC on your computer (Direwolf, pdn-soundmodem, QtSoundModem and so on).
 
-This repository is a merge of [OneOfEleven custom firmware](https://github.com/OneOfEleven/uv-k5-firmware-custom) with [fagci spectrum analizer](https://github.com/fagci/uv-k5-firmware-fagci-mod/tree/refactor) plus my few changes.<br>
-All is a cloned and customized version of DualTachyon's open firmware found [here](https://github.com/DualTachyon/uv-k5-firmware) ... a cool achievement !
+It does one job: send and receive FM data through a flat audio path, on one frequency. Everything a voice radio needs and a packet station does not has been taken out: squelch, tones (CTCSS/DCS, DTMF, roger beep), pre-emphasis and audio filters, scanning, dual watch, memory channels, FM broadcast radio, the spectrum display, VOX and battery save. Each of those either colours the audio, cuts the start of a packet, or adds a sound that would go out to the TNC.
 
-> [!TIP]
-> There is a work done by others on forks of this repository. I encourage you to take a look at those too. [SEE HERE](https://github.com/egzumer/uv-k5-firmware-custom/discussions/485)
+It is for licensed radio amateurs who want a cheap, dependable packet radio. It is not a voice firmware.
 
-> [!WARNING]  
-> Use this firmware at your own risk (entirely). There is absolutely no guarantee that it will work in any way shape or form on your radio(s), it may even brick your radio(s), in which case, you'd need to buy another radio.
-Anyway, have fun.
+## What you get
 
-## Table of Contents
+Measured on the bench, with an AIOC running the [packet AIOC firmware](https://github.com/M0LTE/aioc-packet):
 
-* [Main Features](#main-features)
-* [Manual](#manual)
-* [Radio Performance](#radio-performance)
-* [User Customization](#user-customization)
-* [Compiler](#compiler)
-* [Building](#building)
-* [Credits](#credits)
-* [Other sources of information](#other-sources-of-information)
-* [License](#license)
-* [Example changes/updates](#example-changesupdates)
+- **A flat audio path.** Transmit audio is flat within -0.6 to +0.4 dB from 20 Hz to 6 kHz over the air, with no pre-emphasis, filters, AGC or compression in the way. Receive audio is always open.
+- **Clean deviation.** About 2.8 kHz at full-scale audio with the default settings, in proportion all the way up to full scale.
+- **Fast turnaround.** RF is up about 16 ms after PTT (the stock firmware takes about 50 to 60 ms). After unkeying, the carrier is off in about 5 ms and the receiver is ready about 14 ms later, with audio back at the AIOC after about 25 ms (stock: 70 to 80 ms).
+- **Packets that decode.** AFSK 1200, QPSK 3600 and FSK 9600 all decoded 100% on the bench with 30 to 50 ms of TXDELAY.
+- **Software control** over the AIOC's serial port: carrier detect, signal reports and settings for your TNC, plus a command-line tool (`k5ctl`).
 
-## Main features:
-* many of OneOfEleven mods:
-   * AM fix, huge improvement in reception quality
-   * long press buttons functions replicating F+ action
-   * fast scanning
-   * channel name editing in the menu
-   * channel name + frequency display option
-   * shortcut for scan-list assignment (long press `5 NOAA`)
-   * scan-list toggle (long press `* Scan` while scanning)
-   * configurable button function selectable from menu
-   * battery percentage/voltage on status bar, selectable from menu
-   * longer backlight times
-   * mic bar
-   * RSSI s-meter
-   * more frequency steps
-   * squelch more sensitive
-* fagci spectrum analyzer (**F+5** to turn on)
-* some other mods introduced by me:
-   * SSB demodulation (adopted from fagci)
-   * backlight dimming
-   * battery voltage calibration from menu
-   * better battery percentage calculation, selectable for 1600mAh or 2200mAh
-   * more configurable button functions
-   * long press MENU as another configurable button
-   * better DCS/CTCSS scanning in the menu (`* SCAN` while in RX DCS/CTCSS menu item)
-   * Piotr022 style s-meter
-   * restore initial freq/channel when scanning stopped with EXIT, remember last found transmission with MENU button
-   * reordered and renamed menu entries
-   * LCD interference crash fix
-   * many others...
+## Supported radios
 
- ## Manual
+The Quansheng UV-K5 and near relatives whose bootloader reports **version 2.00.06** (`k5ctl` shows this before it flashes anything, and by default refuses other versions). It has been tested on one UV-K5 with bootloader 2.00.06 and an AIOC (hardware revision 1.0).
 
-Up to date manual is available in the [Wiki section](https://github.com/egzumer/uv-k5-firmware-custom/wiki)
+Newer models built on a different processor, such as the UV-K5 V3 and UV-K1, are not supported.
 
-## Radio performance
+## Flashing
 
-Please note that the Quansheng UV-Kx radios are not professional quality transceivers, their
-performance is strictly limited. The RX front end has no track-tuned band pass filtering
-at all, and so are wide band/wide open to any and all signals over a large frequency range.
+You need the firmware file `quansheng-packet-<version>.bin` from the [latest release](https://github.com/M0LTE/quansheng-packet/releases/latest). It is already packed for the radio's bootloader.
 
-Using the radio in high intensity RF environments will most likely make reception anything but
-easy (AM mode will suffer far more than FM ever will), the receiver simply doesn't have a
-great dynamic range, which results in distorted AM audio with stronger RX'ed signals.
-There is nothing more anyone can do in firmware/software to improve that, once the RX gain
-adjustment I do (AM fix) reaches the hardwares limit, your AM RX audio will be all but
-non-existent (just like Quansheng's firmware).
-On the other hand, FM RX audio will/should be fine.
+1. **Put the radio in flash mode.** Switch it off, then hold PTT while switching it on. The torch LED lights and the screen stays blank.
+2. **Connect** the AIOC (or any UV-K5 programming cable) to the radio and the computer.
+3. **Flash**, with either tool:
+   - **k5ctl**, from the same release (Linux, Windows, macOS). First a dry run, which checks the radio and the file and sends nothing:
+     ```sh
+     k5ctl -p /dev/ttyACM0 flash quansheng-packet-v1.0.0.bin
+     k5ctl -p /dev/ttyACM0 flash quansheng-packet-v1.0.0.bin --really-flash
+     ```
+     On Windows the port is `COM3` or similar; `k5ctl ports` lists them. On macOS, a downloaded binary may need `xattr -d com.apple.quarantine k5ctl` before it will run.
+   - **A web flasher** in Chrome or Edge, such as [egzumer's UVTools flasher](https://egzumer.github.io/uvtools/), which takes packed images like this one (not yet tried with this firmware).
+4. Switch the radio off and on. The menu's last item, **Ver**, shows the version.
 
-But, they are nice toys for the price, fun to play with.
+**Going back** to the stock firmware or another one works the same way: flash its packed image in flash mode. Nothing is lost. This firmware never writes the factory calibration and never changes your memory channels. Its own settings live in the part of the EEPROM that the stock firmware uses for DTMF contacts, so re-enter those if you used them. For extra peace of mind, take a backup before you start: `k5ctl -p PORT backup k5-backup.bin`.
 
-## User customization
+On first start the radio takes over the frequency the old firmware was using.
 
-You can customize the firmware by enabling/disabling various compile options, this allows
-us to remove certain firmware features in order to make room in the flash for others.
-You'll find the options at the top of "Makefile" ('0' = disable, '1' = enable) ..
+## Using the radio
 
+**Keys on the main screen**
 
-|Build option | Description |
-| --- | ---- |
-|🧰 **STOCK QUANSHENG FEATURES**||
-| ENABLE_UART | without this you can't configure radio via PC ! |
-| ENABLE_AIRCOPY | easier to just enter frequency with butts |
-| ENABLE_FMRADIO | WBFM VHF broadcast band receiver |
-| ENABLE_NOAA | everything NOAA (only of any use in the USA) |
-| ENABLE_VOICE | want to hear voices ? |
-| ENABLE_VOX | |
-| ENABLE_ALARM | TX alarms |
-| ENABLE_TX1750 | side key 1750Hz TX tone (older style repeater access)|
-| ENABLE_PWRON_PASSWORD | power-on password stuff |
-| ENABLE_DTMF_CALLING | DTMF calling fuctionality, sending calls, receiving calls, group calls, contacts list etc. |
-| ENABLE_FLASHLIGHT | enable top flashlight LED (on, blink, SOS) |
-|🧰 **CUSTOM MODS**||
-| ENABLE_BIG_FREQ | big font frequencies (like original QS firmware) |
-| ENABLE_SMALL_BOLD | bold channel name/no. (when name + freq channel display mode) |
-| ENABLE_CUSTOM_MENU_LAYOUT | changes how the menu looks like |
-| ENABLE_KEEP_MEM_NAME | maintain channel name when (re)saving memory channel|
-| ENABLE_WIDE_RX | full 18MHz to 1300MHz RX (though front-end/PA not designed for full range)|
-| ENABLE_TX_WHEN_AM | allow TX (always FM) when RX is set to AM|
-| ENABLE_F_CAL_MENU | enable the radios hidden frequency calibration menu |
-| ENABLE_CTCSS_TAIL_PHASE_SHIFT | standard CTCSS tail phase shift rather than QS's own 55Hz tone method|
-| ENABLE_BOOT_BEEPS | gives user audio feedback on volume knob position at boot-up |
-| ENABLE_SHOW_CHARGE_LEVEL | show the charge level when the radio is on charge |
-| ENABLE_REVERSE_BAT_SYMBOL | mirror the battery symbol on the status bar (+ pole on the right) |
-| ENABLE_NO_CODE_SCAN_TIMEOUT | disable 32-sec CTCSS/DCS scan timeout (press exit butt instead of time-out to end scan) |
-| ENABLE_AM_FIX | dynamically adjust the front end gains when in AM mode to help prevent AM demodulator saturation, ignore the on-screen RSSI level (for now) |
-| ENABLE_AM_FIX_SHOW_DATA | show debug data for the AM fix |
-| ENABLE_SQUELCH_MORE_SENSITIVE | make squelch levels a little bit more sensitive - I plan to let user adjust the values themselves |
-| ENABLE_FASTER_CHANNEL_SCAN | increases the channel scan speed, but the squelch is also made more twitchy |
-| ENABLE_RSSI_BAR | enable a dBm/Sn RSSI bar graph level in place of the little antenna symbols |
-| ENABLE_AUDIO_BAR | experimental, display an audio bar level when TX'ing |
-| ENABLE_COPY_CHAN_TO_VFO | copy current channel settings into frequency mode. Long press `1 BAND` when in channel mode |
-| ENABLE_SPECTRUM | fagci spectrum analyzer, activated with `F` + `5 NOAA`|
-| ENABLE_REDUCE_LOW_MID_TX_POWER | makes medium and low power settings even lower |
-| ENABLE_BYP_RAW_DEMODULATORS | additional BYP (bypass?) and RAW demodulation options, proved not to be very useful, but it is there if you want to experiment |
-| ENABLE_BLMIN_TMP_OFF | additional function for configurable buttons that toggles `BLMin` on and off wihout saving it to the EEPROM |
-| ENABLE_SCAN_RANGES | scan range mode for frequency scanning, see wiki for instructions (radio operation -> frequency scanning) |
-| ENABLE_DIGITAL_MODULATION | additional `DIG` (flat response) demodulation option for digital modes (requires HW mod for true flat response) |
-|🧰 **DEBUGGING** ||
-| ENABLE_AM_FIX_SHOW_DATA| displays settings used by  AM-fix when AM transmission is received |
-| ENABLE_AGC_SHOW_DATA | displays AGC settings |
-| ENABLE_UART_RW_BK_REGS | adds 2 extra commands that allow to read and write BK4819 registers |
-|🧰 **COMPILER/LINKER OPTIONS**||
-| ENABLE_CLANG | **experimental, builds with clang instead of gcc (LTO will be disabled if you enable this) |
-| ENABLE_SWD | only needed if using CPU's SWD port (debugging/programming) |
-| ENABLE_OVERLAY | cpu FLASH stuff, not needed |
-| ENABLE_LTO | reduces size of compiled firmware but might break EEPROM reads (OVERLAY will be disabled if you enable this) |
+| Key | Does |
+|---|---|
+| 0 to 9 | enter a frequency in kHz, six digits: `144800` is 144.800 MHz |
+| EXIT | delete the last digit |
+| UP, DOWN | step the frequency |
+| F, then 6 | change TX power |
+| F, held | lock or unlock the keypad |
+| MENU | settings |
+| PTT | transmit (normally the AIOC keys the radio for you) |
 
-## Compiler
+The screen shows the frequency, the signal strength, and the settings in use, for example `~5W WIDE TOT30`, `DEV 0x856` and `RXG58 DAC15`. `RX` appears while a signal is present.
 
-arm-none-eabi GCC version 10.3.1 is recommended, which is the current version on Ubuntu 22.04.03 LTS.
-Other versions may generate a flash file that is too big.
-You can get an appropriate version from: https://developer.arm.com/downloads/-/gnu-rm
+**Menu.** MENU opens it, UP and DOWN move, MENU edits an item and MENU again saves it, EXIT cancels. Changes take effect straight away and are remembered.
 
-clang may be used but isn't fully supported. Resulting binaries may also be bigger.
-You can get it from: https://releases.llvm.org/download.html
+| Item | What it sets |
+|---|---|
+| Step | frequency step for UP and DOWN |
+| TxPwr | transmit power: `~0.5W`, `~2W` or `~5W`. These are nominal: the real power depends on each radio's factory calibration |
+| W/N | wide (25 kHz) or narrow (12.5 kHz) channel |
+| DevW | transmit deviation for wide channels (see below) |
+| DevN | transmit deviation for narrow channels |
+| RxG | receive audio gain, 0.5 dB steps |
+| RxDAC | receive audio output gain, about 2 dB steps |
+| TxTOut | transmit timeout: 5 to 120 seconds (default 30) |
+| BackLt | backlight time |
+| BatVol | battery voltage and charge (read only) |
+| Ver | firmware version (read only) |
 
-## Building
+## Setting up for packet with an AIOC
 
-### Github Codespace build method
+1. **PTT through the AIOC's CM108 (HID) interface.** In Direwolf that is `PTT CM108`; pdn-soundmodem and most soundmodems support it. Keep the AIOC's serial port for control software only.
+2. **Transmit level: drive the audio hot and set deviation in the radio.** Set your soundmodem's transmit level near full scale, just short of clipping, and then set the deviation with DevW and DevN. Never the other way round: the radio adds a little hiss of its own that grows with the deviation setting, so a quiet TNC with a high deviation setting makes a noisier signal.
+   - The defaults (DevW 2134, shown as `0x856`, and DevN 1878, `0x756`) give about 2.8 kHz and 1.4 kHz of deviation at full scale **with the [packet AIOC firmware](https://github.com/M0LTE/aioc-packet)**, whose transmit EQ is tuned for the K5.
+   - **With a stock AIOC** use DevW 1890 (`0x762`) and DevN 1634 (`0x662`).
+   - The scale is logarithmic: 256 higher doubles the deviation, 16 higher is about 0.4 dB more.
+3. **TXDELAY.** Start at 50 ms. On the bench 30 ms was enough for AFSK 1200 and QPSK 3600, and FSK 9600 was happiest at about 50 ms. The station you are talking to may need more.
+4. **Receive level.** Audio is always open (there is no squelch), and the **volume knob** sets the level into the AIOC. Turn it so the strongest packets come in well below clipping on your soundmodem's level meter. The level tone helps here: `k5ctl -p PORT tone 1000 64 10000` replaces the receive audio with a steady 1 kHz tone for 10 seconds, so you can see where the audio clips and back off from there. Then check with real packets.
+5. **Do not transmit with the charger connected.** On the bench it put severe noise on the transmitted signal and every packet failed.
 
-This is the least demanding option as you don't have to install enything on your computer. All you need is Github account.
+Two rules for anything that talks to the radio's serial port (both matter because the AIOC shares one wire between PTT and the radio's serial input):
 
-1. Go to https://github.com/egzumer/uv-k5-firmware-custom
-1. Click green `Code` button
-1. Change tab from `Local` to `Codespace`
-1. Click green `Create codespace on main` button
+- **38400 baud only.** At slower rates, serial data can look like a PTT press and key the transmitter.
+- **Do not send serial data while transmitting.** Any byte ends the transmission.
 
-<img src="images/codespace1.png" width=700 />
+## Software control
 
-5. Open `Makefile`
-1. Edit build options, save `Makefile` changes
-1. Run `./compile-with-docker.sh` in terminal window
-1. Open folder `compiled-firmware`
-1. Right click `firmware.packed.bin`
-1. Click `Download`, now you should have a firmware on your computer that you can proceed to flash on your radio. You can use [online flasher](https://egzumer.github.io/uvtools)
+The radio speaks a serial control protocol over the AIOC's serial port: carrier detect with timestamps, a signal report after every received packet, transmit timing, and live settings, all pushed to the host so a TNC need not poll. It is specified in [docs/protocol-v2.md](docs/protocol-v2.md).
 
-<img src="images/codespace2.png" width=700 />
+- **k5ctl** (in each release) flashes, backs up, and reads and changes settings from the command line. `k5ctl --help` lists everything; `k5ctl -p PORT status` and `k5ctl -p PORT set frequency=144.800MHz power=high` are good places to start.
+- **M0LTE.Uvk5**, a .NET library for TNC and soundmodem authors, with a simulated radio for tests: [host/dotnet](host/dotnet/README.md).
 
-### Docker build method
+## Safety
 
-If you have docker installed you can use [compile-with-docker.bat](./compile-with-docker.bat) (Windows) or [compile-with-docker.sh](./compile-with-docker.sh) (Linux/Mac), the output files are created in `compiled-firmware` folder. This method gives significantly smaller binaries, I've seen differences up to 1kb, so it can fit more functionalities this way. The challenge can be (or not) installing docker itself.
+- **The factory calibration is never written.** The firmware refuses any write to that part of the EEPROM, whatever asks for it.
+- **Transmit timeout.** Every transmission ends after the TxTOut time (30 seconds unless you change it), and the next one needs PTT released first.
+- **Nothing can key the radio over the serial port.** The protocol has no transmit command, commands that could turn on the transmitter or its amplifier are refused, and at 38400 baud no serial data can be mistaken for a PTT press.
+- **Transmitting is refused** when the battery is flat or the supply voltage is too high.
+- By default the radio can transmit on 137 to 174 MHz and 400 to 470 MHz. Transmit only where your licence allows.
 
-### Windows environment build method
+## More
 
-1. Open windows command line and run:
-    ```
-    winget install -e -h git.git Python.Python.3.8 GnuWin32.Make
-    winget install -e -h Arm.GnuArmEmbeddedToolchain -v "10 2021.10"
-    ```
-2. Close command line, open a new one and run:
-    ```
-    pip install --user --upgrade pip
-    pip install crcmod
-    mkdir c:\projects & cd /D c:/projects
-    git clone https://github.com/egzumer/uv-k5-firmware-custom.git
-    ```
-3. From now on you can build the firmware by going to `c:\projects\uv-k5-firmware-custom` and running `win_make.bat` or by running a command line:
-    ```
-    cd /D c:\projects\uv-k5-firmware-custom
-    win_make.bat
-    ```
-4. To reset the repository and pull new changes run (!!! it will delete all your changes !!!):
-    ```
-    cd /D c:\projects\uv-k5-firmware-custom
-    git reset --hard & git clean -fd & git pull
-    ```
-
-I've left some notes in the win_make.bat file to maybe help with stuff.
+- [docs/packet-fw.md](docs/packet-fw.md): how the firmware works, its settings in EEPROM, building from source, and the measurements behind the defaults.
+- [docs/protocol-v2.md](docs/protocol-v2.md): the serial control protocol.
+- [M0LTE/aioc-packet](https://github.com/M0LTE/aioc-packet): the AIOC firmware with the transmit EQ these defaults assume.
 
 ## Credits
 
-Many thanks to various people on Telegram for putting up with me during this effort and helping:
+This firmware is a cut-down build of [mobilinkd's uv-k5-firmware-custom](https://github.com/mobilinkd/uv-k5-firmware-custom), whose DIG mode gave it the flat audio path. That in turn builds on [egzumer's firmware](https://github.com/egzumer/uv-k5-firmware-custom), [OneOfEleven's custom firmware](https://github.com/OneOfEleven/uv-k5-firmware-custom), [fagci's work](https://github.com/fagci/uv-k5-firmware-fagci-mod) and [DualTachyon's open re-implementation](https://github.com/DualTachyon/uv-k5-firmware) of the Quansheng firmware. Many thanks to all of them.
 
-* [OneOfEleven](https://github.com/OneOfEleven)
-* [DualTachyon](https://github.com/DualTachyon)
-* [Mikhail](https://github.com/fagci)
-* [Andrej](https://github.com/Tunas1337)
-* [Manuel](https://github.com/manujedi)
-* @wagner
-* @Lohtse Shar
-* [@Matoz](https://github.com/spm81)
-* @Davide
-* @Ismo OH2FTG
-* [OneOfEleven](https://github.com/OneOfEleven)
-* @d1ced95
-* and others I forget
-
-## Other sources of information
-
-[ludwich66 - Quansheng UV-K5 Wiki](https://github.com/ludwich66/Quansheng_UV-K5_Wiki/wiki)<br>
-[amnemonic - tools and sources of information](https://github.com/amnemonic/Quansheng_UV-K5_Firmware)
+Use this firmware at your own risk. There is no guarantee that it will work on your radio.
 
 ## License
 
@@ -234,17 +133,3 @@ You may obtain a copy of the License at
     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
     See the License for the specific language governing permissions and
     limitations under the License.
-
-## Example changes/updates
-
-<p float="left">
-  <img src="/images/image1.png" width=300 />
-  <img src="/images/image2.png" width=300 />
-  <img src="/images/image3.png" width=300 />
-</p>
-
-Video showing the AM fix working ..
-
-<video src="/images/AM_fix.mp4"></video>
-
-<video src="https://github.com/OneOfEleven/uv-k5-firmware-custom/assets/51590168/2a3a9cdc-97da-4966-bf0d-1ce6ad09779c"></video>
