@@ -50,7 +50,7 @@ internal static class Program
           rx-dac-gain, tx-timeout, ptt-press, ptt-release, pa-enable-delay, pa-bias-delay,
           serial-lock, busy-source, busy-rssi-open, busy-rssi-close, busy-hang, busy-sql-raw, agc,
           afc, backlight, key-lock (or the enum names). Values: 145.025MHz, high, narrow, 0x856 or
-          2.8kHz, 20ms, 30s, on/off, -105dBm, auto. There is no squelch: receive audio is always
+          2.8kHz, 20ms, 30s, on/off, -105dBm (busy thresholds: the chip's uncorrected scale), auto. There is no squelch: receive audio is always
           open, and busy-sql-level (1 to 9) only sets the chip's squelch detector used for busy.
           There is no mic gain: it is fixed at the maximum, and the deviation sets the level.
         """;
@@ -189,7 +189,7 @@ internal static class Program
                 {
                     var r = await radio.ReadRssiAsync(ct);
                     var b = await radio.ReadBatteryAsync(ct);
-                    Console.WriteLine($"rssi        {r.Rssi}, noise {r.Noise}, glitch {r.Glitch}");
+                    Console.WriteLine($"rssi        {r.Rssi} (the frequency is unknown, so not as the radio shows it), noise {r.Noise}, glitch {r.Glitch}");
                     Console.WriteLine($"battery     {Volts(b)}");
                 }
 
@@ -201,7 +201,7 @@ internal static class Program
             {
                 var ids = rest.Select(ParseName).ToList();
                 var s = await radio.GetSettingsAsync(cmd == "get-stored", ids.Count > 0 ? ids : null, ct);
-                PrintSettings(s);
+                PrintSettings(s, await FrequencyForThresholdsAsync(radio, s, ct));
                 return 0;
             }
 
@@ -216,7 +216,8 @@ internal static class Program
             case "rssi":
             {
                 var r = await radio.ReadRssiAsync(ct);
-                Console.WriteLine($"rssi {r.Rssi}, noise {r.Noise}, glitch {r.Glitch}");
+                long? hz = radio.Firmware.Kind == FirmwareKind.PacketV2 ? (await radio.GetStatusAsync(ct)).FrequencyHz : null;
+                Console.WriteLine($"rssi {(hz is { } f ? r.Rssi.Describe(f) : $"{r.Rssi} (the frequency is unknown, so not as the radio shows it)")}, noise {r.Noise}, glitch {r.Glitch}");
                 return 0;
             }
 
@@ -354,14 +355,28 @@ internal static class Program
         Console.WriteLine($"flags2      {s.Flags2}");
         Console.WriteLine($"power       {s.Power}, bandwidth {s.Bandwidth}, busy detector level {s.BusySquelchLevel}");
         Console.WriteLine($"deviation   {s.Deviation}");
-        Console.WriteLine($"rssi        {s.Rssi}, noise {s.Noise}, glitch {s.Glitch}, AGC {s.Agc}");
+        Console.WriteLine($"rssi        {s.Rssi.Describe(s.FrequencyHz)}, noise {s.Noise}, glitch {s.Glitch}, AGC {s.Agc}");
         Console.WriteLine($"battery     {s.BatteryVolts:F2} V, level {s.BatteryLevel}");
         Console.WriteLine($"TX timeout  {s.TxTimeout.TotalSeconds:F0} s{(s.TxTimeLeft is { } left ? $", {left.TotalSeconds:F1} s left" : string.Empty)}");
         Console.WriteLine($"busy age    {(s.BusyAge == TimeSpan.MaxValue ? "over 65 s" : $"{s.BusyAge.TotalMilliseconds:F0} ms")}");
         Console.WriteLine($"uptime      {s.Uptime:g}, next event seq {s.NextEventSequence}");
     }
 
-    private static void PrintSettings(RadioSettings s)
+    /// <summary>
+    /// The frequency to show busy RSSI thresholds against: the one in <paramref name="s"/>, else the
+    /// radio's (one GET_STATUS, v2 only), and only if a threshold is to be shown.
+    /// </summary>
+    private static async Task<long?> FrequencyForThresholdsAsync(K5Radio radio, RadioSettings s, CancellationToken ct) =>
+        s.FrequencyHz ?? (s.BusyRssiOpen is null && s.BusyRssiClose is null || radio.Firmware.Kind != FirmwareKind.PacketV2
+            ? null
+            : (await radio.GetStatusAsync(ct)).FrequencyHz);
+
+    /// <summary>A busy threshold: raw (what the radio compares), with the level the radio's screen would show for it.</summary>
+    private static string? Threshold(Rssi? r, long? frequencyHz) => r is not { } v ? null
+        : frequencyHz is { } f ? string.Create(CultureInfo.InvariantCulture, $"raw {v.Raw} ({v.DbmAt(f)} dBm on the radio's screen at {f / 1e6:F3} MHz, {v.Dbm:F1} dBm uncorrected)")
+        : string.Create(CultureInfo.InvariantCulture, $"raw {v.Raw} ({v.Dbm:F1} dBm uncorrected)");
+
+    private static void PrintSettings(RadioSettings s, long? frequencyHz)
     {
         void P(string name, object? v)
         {
@@ -385,8 +400,8 @@ internal static class Program
         P("pa-bias-delay", Ms(s.PaBiasDelay));
         P("serial-lock", Ms(s.SerialLock));
         P("busy-source", s.BusySource);
-        P("busy-rssi-open", s.BusyRssiOpen);
-        P("busy-rssi-close", s.BusyRssiClose);
+        P("busy-rssi-open", Threshold(s.BusyRssiOpen, frequencyHz));
+        P("busy-rssi-close", Threshold(s.BusyRssiClose, frequencyHz));
         P("busy-hang", Ms(s.BusyHang));
         P("busy-sql-level", s.BusySquelchLevel);
         P("busy-sql-raw", s.BusySquelchThresholds is { } q ? $"rssi {q.RssiOpen}/{q.RssiClose}, noise {q.NoiseOpen}/{q.NoiseClose}, glitch {q.GlitchOpen}/{q.GlitchClose}" : null);
@@ -434,7 +449,7 @@ internal static class Program
         var flags = (a.Flag("--persist") ? SetSettingsFlags.Persist : 0) | (a.Flag("--dry-run") ? SetSettingsFlags.DryRun : 0)
             | (a.Flag("--require-tx-ok") ? SetSettingsFlags.RequireTxAllowed : 0);
         var r = await radio.SetSettingsAsync(changes, flags, ct);
-        PrintSettings(r.Applied);
+        PrintSettings(r.Applied, await FrequencyForThresholdsAsync(radio, r.Applied, ct));
         if (r.TxAllowed is { } tx)
         {
             Console.WriteLine($"TX allowed here: {(tx ? "yes" : "no")}{(r.PersistQueued ? ", persist queued" : string.Empty)}{(r.Retuned ? ", retuned" : string.Empty)}");
@@ -483,6 +498,9 @@ internal static class Program
                 RssiStreamPeriod = stream > 0 ? TimeSpan.FromMilliseconds(stream) : null,
                 LiveTx = liveTx,
             };
+            // RSSI is shown as the radio's screen shows it, which depends on the band: follow the
+            // frequency from TX_START, and fall back to the uncorrected reading after a retune.
+            long? hz = (await radio.GetStatusAsync(ct)).FrequencyHz;
             var info = await radio.SubscribeAsync(sub, ct);
             Console.WriteLine($"subscribed: next seq {info.NextSequence}, radio time {info.RadioTimeMs} ms, channel {(radio.ChannelBusy is true ? "busy" : "clear")}; Ctrl+C to stop");
             using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -500,7 +518,13 @@ internal static class Program
             {
                 await foreach (var e in radio.ReadEventsAsync(stop.Token))
                 {
-                    Console.WriteLine(Describe(e));
+                    hz = e switch
+                    {
+                        TxStartEvent x => x.FrequencyHz,
+                        ParamsChangedEvent p when p.Parameters.Contains(RadioParameterId.FrequencyHz) => null,
+                        _ => hz,
+                    };
+                    Console.WriteLine(Describe(e, hz));
                 }
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
@@ -534,22 +558,25 @@ internal static class Program
         }
     }
 
-    private static string Describe(RadioEvent e)
+    private static string Describe(RadioEvent e, long? frequencyHz)
     {
+        string L(Rssi x) => frequencyHz is { } f ? x.Describe(f) : x.ToString();
+        string D(Rssi x) => frequencyHz is { } f ? x.DbmAt(f).ToString(CultureInfo.InvariantCulture) : x.Dbm.ToString("F1", CultureInfo.InvariantCulture);
+        string unit = frequencyHz is null ? "dBm uncorrected" : "dBm";
         string t = (e.EstimatedTime ?? e.ReceivedAt).ToUniversalTime().ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture);
         string head = $"{t} #{e.Sequence,-5} {e.RadioTimeMs,10} ms{(e.IsReplay ? " REPLAY" : string.Empty)}{(e.IsDeferred ? " DEFERRED" : string.Empty)}";
         string body = e switch
         {
-            BusyEvent b => $"BUSY {(b.Busy ? "open " : "close")} {b.Rssi} noise {b.Noise} glitch {b.Glitch} cause {b.Cause}",
-            RxBurstEvent r => $"BURST {r.Duration.TotalMilliseconds:F0} ms, {r.Samples} samples, RSSI mean {r.RssiMean.Dbm:F1} max {r.RssiMax.Dbm:F1} min {r.RssiMin.Dbm:F1} dBm, noise {r.NoiseMean}/{r.NoiseMin}, glitch {r.GlitchMean}/{r.GlitchMax}"
+            BusyEvent b => $"BUSY {(b.Busy ? "open " : "close")} {L(b.Rssi)} noise {b.Noise} glitch {b.Glitch} cause {b.Cause}",
+            RxBurstEvent r => $"BURST {r.Duration.TotalMilliseconds:F0} ms, {r.Samples} samples, RSSI mean {D(r.RssiMean)} max {D(r.RssiMax)} min {D(r.RssiMin)} {unit}, noise {r.NoiseMean}/{r.NoiseMin}, glitch {r.GlitchMean}/{r.GlitchMax}"
                 + (r.FrequencyErrorHz is { } fe ? $", freq error {fe} Hz" : string.Empty),
             TxStartEvent s => $"TX START {s.FrequencyHz / 1e6:F5} MHz {s.Power} {s.Bandwidth} dev 0x{s.Deviation.Register:X3}, press to RF {s.KeyUpLatency.TotalMilliseconds:F0} ms"
                 + (s.LateKey ? $", LATE by {s.LockDelay.TotalMilliseconds:F0} ms" : string.Empty) + (s.BusyAtPress ? ", CHANNEL WAS BUSY" : string.Empty),
             TxEndEvent x => $"TX END {x.Reason}, on air {x.OnAir.TotalMilliseconds:F0} ms, release to carrier off {x.KeyDownLatency.TotalMilliseconds:F0} ms, to RX ready {x.TurnaroundToReceive.TotalMilliseconds:F0} ms",
             TxRefusedEvent x => $"TX REFUSED {x.Reason}" + (x.Reason == TxRefusedReason.Lock ? $" ({x.LockRemaining.TotalMilliseconds:F0} ms of lock left)"
                 : x.Reason == TxRefusedReason.Late ? $" ({x.LateBy.TotalMilliseconds:F0} ms after the press)" : string.Empty),
-            HeartbeatEvent h => $"HEARTBEAT {h.State} {h.Rssi} battery {h.BatteryMillivolts} mV, busy {(h.BusyTime is { } bt ? $"{bt.TotalMilliseconds:F0} ms" : "unknown")}, lock {h.LockRemaining.TotalMilliseconds:F0} ms",
-            RssiStreamEvent r => $"RSSI {string.Join(" ", r.Samples.Select(x => x.Rssi.Dbm.ToString("F0", CultureInfo.InvariantCulture)))} dBm every {r.Period.TotalMilliseconds:F0} ms",
+            HeartbeatEvent h => $"HEARTBEAT {h.State} {L(h.Rssi)} battery {h.BatteryMillivolts} mV, busy {(h.BusyTime is { } bt ? $"{bt.TotalMilliseconds:F0} ms" : "unknown")}, lock {h.LockRemaining.TotalMilliseconds:F0} ms",
+            RssiStreamEvent r => $"RSSI {string.Join(" ", r.Samples.Select(x => D(x.Rssi)))} {unit} every {r.Period.TotalMilliseconds:F0} ms",
             BatteryEvent b => $"BATTERY {b.Class} level {b.Level}, {b.Millivolts} mV",
             ParamsChangedEvent p => $"PARAMS CHANGED by {p.Source}: {string.Join(", ", p.Parameters)}",
             EventsLostEvent l => $"EVENTS LOST {l.Count} from #{l.FirstLost}",

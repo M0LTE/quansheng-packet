@@ -201,12 +201,44 @@ test('frequency parsing refuses what the radio would refuse', () => {
   assert.equal(v2.formatMHz(144_812_500), '144.8125');
 });
 
-test('units', () => {
+test("signal level as the radio's screen shows it", () => {
   assert.equal(v2.rssiDbm(0x77), -100.5);
-  assert.equal(v2.sPoint(-93), 'S9');
-  assert.equal(v2.sPoint(-73), 'S9+20');
-  assert.equal(v2.sPoint(-121), 'S4');
+  // Tom's bench radio on 144.800 MHz into a terminated load: the page said -107, the screen -127.
+  assert.equal(v2.signalDbm(106, 144_800_000), -127);
+  assert.equal(v2.signalDbm(107, 144_800_000), -127); // the screen halves the raw value rounding down
+  // band edges (frequencies.c): each band starts at its lower edge; below 108 MHz is band 1
+  const edges = [
+    [0, -15], [49_999_990, -15], [50_000_000, -15], [107_999_990, -15],
+    [108_000_000, -25], [136_000_000, -25], [136_999_990, -25],
+    [137_000_000, -20], [173_999_990, -20],
+    [174_000_000, -4], [349_999_990, -4],
+    [350_000_000, -7], [399_999_990, -7],
+    [400_000_000, -6], [469_999_990, -6],
+    [470_000_000, -1], [600_000_000, -1], [1_300_000_000, -1],
+  ];
+  for (const [hz, db] of edges) assert.equal(v2.rssiCorrectionDb(hz), db, `${hz} Hz`);
+  assert.equal(v2.signalDbm(200, 433_500_000), 200 / 2 - 160 - 6);
+});
+
+test("S-meter as the radio's screen shows it", () => {
+  // S0 at -130 dBm, S9 at -76 dBm, 6 dB per S-unit, then dB over S9 from S9+10
   assert.equal(v2.sPoint(-160), 'S0');
+  assert.equal(v2.sPoint(-127), 'S0');
+  assert.equal(v2.sPoint(-125), 'S0');
+  assert.equal(v2.sPoint(-124), 'S1');
+  assert.equal(v2.sPoint(-107), 'S3');
+  assert.equal(v2.sPoint(-83), 'S7');
+  assert.equal(v2.sPoint(-82), 'S8');
+  assert.equal(v2.sPoint(-77), 'S8');
+  assert.equal(v2.sPoint(-76), 'S9');
+  assert.equal(v2.sPoint(-67), 'S9');
+  assert.equal(v2.sPoint(-66), 'S9+10');
+  assert.equal(v2.sPoint(-43), 'S9+33');
+  assert.equal(v2.sPoint(0), 'S9+76');
+  assert.equal(v2.sPoint(40), 'S9+99');
+});
+
+test('units', () => {
   assert.ok(Math.abs(v2.deviationKhz(0x856) - 2.8) < 1e-9);
   assert.ok(Math.abs(v2.deviationKhz(0x756) - 1.4) < 1e-9);
 });

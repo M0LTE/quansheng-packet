@@ -2,19 +2,91 @@ using System.Globalization;
 
 namespace M0LTE.Uvk5;
 
-/// <summary>A BK4819 RSSI reading: REG_67&lt;8:0&gt;, 0.5 dB steps, dBm = raw / 2 - 160.</summary>
+/// <summary>
+/// A BK4819 RSSI reading: REG_67&lt;8:0&gt;, 0.5 dB steps, dBm = raw / 2 - 160 as the chip reports it.
+/// The radio's screen adds a per-band correction on top (<see cref="RssiScale"/>); use
+/// <see cref="DbmAt"/> to show the level the way the radio does. Thresholds (BUSY_RSSI_OPEN and
+/// CLOSE) are compared with the raw value, so they stay in raw units.
+/// </summary>
 /// <param name="Raw">The raw 9-bit value, 0 to 511.</param>
 public readonly record struct Rssi(ushort Raw)
 {
-    /// <summary>The level in dBm (uncalibrated chip reading).</summary>
+    /// <summary>The chip's own reading in dBm, uncorrected (0.5 dB steps).</summary>
     public double Dbm => Raw / 2.0 - 160.0;
 
-    /// <summary>The raw value nearest to <paramref name="dbm"/>.</summary>
+    /// <summary>
+    /// The level the radio's screen shows at <paramref name="frequencyHz"/>, in whole dBm: raw / 2
+    /// rounded down, minus 160, plus the band's correction (<see cref="RssiScale.CorrectionDb"/>).
+    /// </summary>
+    public int DbmAt(long frequencyHz) => Raw / 2 - 160 + RssiScale.CorrectionDb(frequencyHz);
+
+    /// <summary>The radio's S-meter reading at <paramref name="frequencyHz"/>, for example "S3" or "S9+12".</summary>
+    public string SMeterAt(long frequencyHz) => RssiScale.SMeter(DbmAt(frequencyHz));
+
+    /// <summary>The raw value nearest to <paramref name="dbm"/> on the chip's uncorrected scale.</summary>
     public static Rssi FromDbm(double dbm) =>
         new((ushort)Math.Clamp(Math.Round((dbm + 160.0) * 2.0), 0, 511));
 
-    /// <inheritdoc/>
-    public override string ToString() => string.Create(CultureInfo.InvariantCulture, $"{Dbm:F1} dBm (raw {Raw})");
+    /// <summary>The level as the radio shows it at <paramref name="frequencyHz"/>, with the raw value: "-127 dBm S0 (raw 67)".</summary>
+    public string Describe(long frequencyHz) =>
+        string.Create(CultureInfo.InvariantCulture, $"{DbmAt(frequencyHz)} dBm {SMeterAt(frequencyHz)} (raw {Raw})");
+
+    /// <summary>The chip's uncorrected reading; see <see cref="Describe"/> for the level as the radio shows it.</summary>
+    public override string ToString() => string.Create(CultureInfo.InvariantCulture, $"{Dbm:F1} dBm uncorrected (raw {Raw})");
+}
+
+/// <summary>
+/// The radio's signal scale (ui/main.c): the chip's dBm plus a per-band correction, and an S-meter
+/// with S0 at -130 dBm and S9 at -76 dBm. The corrections are upstream's empirical table, not yet
+/// checked against a calibrated signal.
+/// </summary>
+public static class RssiScale
+{
+    /// <summary>S0 on the radio's S-meter, dBm.</summary>
+    public const int S0Dbm = -130;
+
+    /// <summary>S9 on the radio's S-meter, dBm.</summary>
+    public const int S9Dbm = -76;
+
+    // frequencies.c: a frequency belongs to the highest band whose lower edge it reaches; below
+    // 108 MHz is band 1. ui/main.c dBmCorrTable, bands 1 to 7.
+    private static readonly (long FromHz, int CorrectionDb)[] Bands =
+    [
+        (50_000_000, -15),
+        (108_000_000, -25),
+        (137_000_000, -20),
+        (174_000_000, -4),
+        (350_000_000, -7),
+        (400_000_000, -6),
+        (470_000_000, -1),
+    ];
+
+    /// <summary>The screen's correction in dB for a receive frequency: -15 (below 108 MHz), -25 (108 to 137), -20 (137 to 174), -4 (174 to 350), -7 (350 to 400), -6 (400 to 470), -1 (470 up).</summary>
+    public static int CorrectionDb(long frequencyHz)
+    {
+        for (int i = Bands.Length - 1; i > 0; i--)
+        {
+            if (frequencyHz >= Bands[i].FromHz)
+            {
+                return Bands[i].CorrectionDb;
+            }
+        }
+
+        return Bands[0].CorrectionDb;
+    }
+
+    /// <summary>The radio's S-meter for a corrected level: S0 to S9 at 6 dB per unit, then "S9+N" (dB over S9, up to 99) from 10 dB over.</summary>
+    public static string SMeter(int dbm)
+    {
+        int over = Math.Clamp(dbm - S9Dbm, 0, 99);
+        if (over >= 10)
+        {
+            return string.Create(CultureInfo.InvariantCulture, $"S9+{over}");
+        }
+
+        int s = Math.Clamp((int)Math.Floor((dbm - S0Dbm) / ((S9Dbm - S0Dbm) / 9.0)), 0, 9);
+        return string.Create(CultureInfo.InvariantCulture, $"S{s}");
+    }
 }
 
 /// <summary>

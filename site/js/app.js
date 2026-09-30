@@ -481,7 +481,7 @@ $('eq-check').addEventListener('click', async () => {
 
 // ------------------------------------------------------------------ step 3: set up the radio
 
-const r = { client: null, lastHeartbeat: 0, subscribed: false, timer: null, info: null };
+const r = { client: null, lastHeartbeat: 0, subscribed: false, timer: null, info: null, freqHz: null };
 const QUIET_MS = 2500;
 
 serialUsers.radio = (e) => {
@@ -494,6 +494,7 @@ function stopRadio(message) {
   r.client.link.close();
   r.client = null;
   r.subscribed = false;
+  r.freqHz = null;
   clearInterval(r.timer);
   $('radio-panel').hidden = true;
   $('radio-connect').disabled = !support.serial;
@@ -520,12 +521,16 @@ function fillParams(p) {
 }
 
 async function readParams() {
-  fillParams(await r.client.getParams([v2.PARAM.FREQ_HZ, v2.PARAM.POWER, v2.PARAM.BANDWIDTH, v2.PARAM.DEV_WIDE, v2.PARAM.DEV_NARROW]));
+  const p = await r.client.getParams([v2.PARAM.FREQ_HZ, v2.PARAM.POWER, v2.PARAM.BANDWIDTH, v2.PARAM.DEV_WIDE, v2.PARAM.DEV_NARROW]);
+  if (p.has(v2.PARAM.FREQ_HZ)) r.freqHz = p.get(v2.PARAM.FREQ_HZ);
+  fillParams(p);
 }
 
+/** As the radio's screen shows it: corrected for the band of the frequency it is on. */
 function showSignal(rssiRaw) {
-  const dbm = v2.rssiDbm(rssiRaw);
-  $('r-rssi').textContent = `${dbm.toFixed(0)} dBm (${v2.sPoint(dbm)})`;
+  if (r.freqHz == null) return;
+  const dbm = v2.signalDbm(rssiRaw, r.freqHz);
+  $('r-rssi').textContent = `${dbm} dBm (${v2.sPoint(dbm)})`;
 }
 
 function showBattery(mv) {
@@ -598,6 +603,7 @@ $('radio-connect').addEventListener('click', async () => {
     }
     r.info = await client.getInfo();
     const st = await client.getStatus();
+    r.freqHz = st.frequencyHz;
     await readParams();
     $('r-fw').textContent = `${r.info.version}, protocol ${h.protocolText}`;
     showSignal(st.rssiRaw);
@@ -650,6 +656,7 @@ $('radio-form').addEventListener('submit', async (ev) => {
   try {
     const res = await r.client.saveChannel({ frequencyHz: f.hz, power, bandwidth });
     const back = res.values;
+    if (back.has(v2.PARAM.FREQ_HZ)) r.freqHz = back.get(v2.PARAM.FREQ_HZ);
     show(
       $('radio-status'),
       `Saved: ${v2.formatMHz(back.get(v2.PARAM.FREQ_HZ))} MHz, ${v2.POWER_NAMES[back.get(v2.PARAM.POWER)]}, ${v2.BANDWIDTH_NAMES[back.get(v2.PARAM.BANDWIDTH)]}.` +

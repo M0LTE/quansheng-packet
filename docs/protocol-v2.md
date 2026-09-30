@@ -238,7 +238,7 @@ Request: empty. Reply (34 bytes):
 | 12 | u8 | bandwidth | 0 wide, 1 narrow |
 | 13 | u8 | busy detector level | 1 to 9 (BUSY_SQL_LEVEL; there is no squelch) |
 | 14 | u16 | deviation in use | REG_40<11:0> for the current bandwidth |
-| 16 | u16 | RSSI | raw REG_67<8:0>, 0.5 dB steps, dBm = raw / 2 - 160 |
+| 16 | u16 | RSSI | raw REG_67<8:0>, 0.5 dB steps, dBm = raw / 2 - 160 uncorrected; the radio's screen adds a per-band correction (below) |
 | 18 | u8 | noise | REG_65<6:0> |
 | 19 | u8 | glitch | REG_63<7:0> |
 | 20 | u8 | AGC | REG_7E<15> in bit 7, REG_7E<14:12> in bits 2:0 |
@@ -250,6 +250,20 @@ Request: empty. Reply (34 bytes):
 | 30 | u16 | next event seq | |
 | 32 | u8 | channel | 0xFF (the firmware has one operating channel and no memory channels or band slots) |
 | 33 | u8 | TX timeout | s |
+
+**RSSI in dBm.** Every RSSI field in this protocol (here, `CD`, `RX_BURST`, `RSSI_STREAM`, `HEARTBEAT`, BUSY_RSSI_OPEN and BUSY_RSSI_CLOSE) is the raw chip value, and the busy detector compares raw values. The chip's own scale is dBm = raw / 2 - 160. The radio's screen (`ui/main.c`) shows raw / 2 rounded down, minus 160, plus a correction for the band of the receive frequency (`frequencies.c`: a frequency belongs to the highest band whose lower edge it reaches; below 108 MHz is band 1):
+
+| Band | From | Correction |
+|---|---|---|
+| 1 | below 108 MHz | -15 dB |
+| 2 | 108 MHz | -25 dB |
+| 3 | 137 MHz | -20 dB |
+| 4 | 174 MHz | -4 dB |
+| 5 | 350 MHz | -7 dB |
+| 6 | 400 MHz | -6 dB |
+| 7 | 470 MHz | -1 dB |
+
+Its S-meter puts S0 at -130 dBm and S9 at -76 dBm, 6 dB per S-unit, and from 10 dB over S9 shows the dB over S9. Hosts should show the corrected level so it matches the radio (the setup page and `Rssi.DbmAt` in the .NET client do). The table is upstream's empirical one and has not yet been checked against a calibrated signal; it is at least believable at 144.8 MHz, where a radio with no signal (its antenna port through 70 dB of attenuation into a terminated load) read -107 dBm uncorrected and its screen showed -127 dBm.
 
 ### 6.3 SUBSCRIBE (0x5002)
 
@@ -382,8 +396,8 @@ Ids for `GET_PARAMS` and `SET_PARAMS`. "Stored" is the EEPROM home when persiste
 | 0x0E | PA_BIAS_DELAY_MS | u8 | 0 to 20 | 2 | 0x1D53 |
 | 0x0F | SERIAL_LOCK_MS | u16 | 0 to 1500, multiple of 10 | 20 | 0x1D61 (/10) |
 | 0x10 | BUSY_SOURCE | u8 | bit 0 the chip's squelch detector, bit 1 RSSI; 1 to 3 | 1 | 0x1D62 |
-| 0x11 | BUSY_RSSI_OPEN | u16 | raw RSSI 0 to 511 | 110 (-105 dBm) | 0x1D64 |
-| 0x12 | BUSY_RSSI_CLOSE | u16 | raw RSSI, at most OPEN | 104 (-108 dBm) | 0x1D66 |
+| 0x11 | BUSY_RSSI_OPEN | u16 | raw RSSI 0 to 511 | 110 (-105 dBm uncorrected, -125 on the screen at 144.8 MHz; 6.2) | 0x1D64 |
+| 0x12 | BUSY_RSSI_CLOSE | u16 | raw RSSI, at most OPEN | 104 (-108 dBm uncorrected, -128 on the screen at 144.8 MHz) | 0x1D66 |
 | 0x13 | BUSY_HANG_MS | u8 | 0 to 250 | 20 | 0x1D63 |
 | 0x14 | BUSY_SQL_RAW (was SQL_RAW) | 6 bytes | the squelch detector's thresholds: RSSI open, RSSI close (0 to 255), noise open, noise close (0 to 127), glitch open, glitch close (0 to 255) | from the level table | RAM only |
 | 0x15 | AGC_FIX | u8 | 0xFF auto, 0 to 7 fixed index (REG_7E<14:12> code) | 0xFF | RAM only |

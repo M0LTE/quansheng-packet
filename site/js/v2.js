@@ -353,17 +353,47 @@ export function formatMHz(hz) {
   return s.replace(/0{1,2}$/, '');
 }
 
+/** The chip's own reading, uncorrected: dBm = raw / 2 - 160 (0.5 dB steps). */
 export function rssiDbm(raw) {
   return raw / 2 - 160;
 }
 
-/** S-points on VHF/UHF: S9 = -93 dBm, 6 dB per S-point. */
+/**
+ * The radio's screen corrects the chip's reading per band (ui/main.c dBmCorrTable), with the
+ * bands of frequencies.c: a frequency belongs to the highest band whose lower edge it reaches,
+ * and anything below 108 MHz to the first. Upstream's empirical table, not yet checked against
+ * a calibrated signal generator.
+ */
+export const RSSI_BANDS = [
+  { fromHz: 50_000_000, correctionDb: -15 },
+  { fromHz: 108_000_000, correctionDb: -25 },
+  { fromHz: 137_000_000, correctionDb: -20 },
+  { fromHz: 174_000_000, correctionDb: -4 },
+  { fromHz: 350_000_000, correctionDb: -7 },
+  { fromHz: 400_000_000, correctionDb: -6 },
+  { fromHz: 470_000_000, correctionDb: -1 },
+];
+
+/** The screen's correction in dB for a receive frequency in Hz. */
+export function rssiCorrectionDb(hz) {
+  for (let i = RSSI_BANDS.length - 1; i > 0; i--) if (hz >= RSSI_BANDS[i].fromHz) return RSSI_BANDS[i].correctionDb;
+  return RSSI_BANDS[0].correctionDb;
+}
+
+/** The whole-dB level the radio's screen shows for a raw reading at a frequency: raw / 2 rounded down, - 160, plus the band's correction. */
+export function signalDbm(raw, hz) {
+  return Math.floor(raw / 2) - 160 + rssiCorrectionDb(hz);
+}
+
+/** The radio's S-meter (ui/main.c): S0 at -130 dBm, S9 at -76 dBm, 6 dB per S-unit; from S9+10 it shows dB over S9. */
+export const S0_DBM = -130;
+export const S9_DBM = -76;
+
 export function sPoint(dbm) {
-  if (dbm >= -93) {
-    const over = Math.round((dbm + 93) / 10) * 10;
-    return over > 0 ? `S9+${over}` : 'S9';
-  }
-  return `S${Math.max(0, Math.min(9, Math.round(9 + (dbm + 93) / 6)))}`;
+  const d = Math.floor(dbm);
+  const over = Math.min(Math.max(d - S9_DBM, 0), 99);
+  if (over >= 10) return `S9+${over}`;
+  return `S${Math.min(Math.max(Math.floor((d - S0_DBM) / ((S9_DBM - S0_DBM) / 9)), 0), 9)}`;
 }
 
 /**

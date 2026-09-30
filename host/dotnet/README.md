@@ -31,7 +31,7 @@ await using var radio = await K5Radio.OpenSerialAsync("/dev/ttyACM0");
 Console.WriteLine(radio.Firmware);            // "PKTFW 1a2b3c4 (protocol v2.0)"
 
 var status = await radio.GetStatusAsync();
-Console.WriteLine($"{status.FrequencyHz / 1e6:F4} MHz, {status.Rssi}, battery {status.BatteryVolts:F2} V");
+Console.WriteLine($"{status.FrequencyHz / 1e6:F4} MHz, {status.Rssi.Describe(status.FrequencyHz)}, battery {status.BatteryVolts:F2} V");
 
 await radio.SetSettingsAsync(new RadioSettings
 {
@@ -40,6 +40,8 @@ await radio.SetSettingsAsync(new RadioSettings
     DeviationWide = Deviation.FromKilohertz(3.0),   // register 0x86F with the bench AIOC law
 });
 ```
+
+`Rssi` keeps the chip's raw reading (`Raw`, and `Dbm` = raw / 2 - 160). The radio's screen adds a per-band correction, so `Rssi.DbmAt(frequencyHz)`, `SMeterAt` and `Describe` give the level the way the radio shows it (see `docs/protocol-v2.md`, 6.2). Busy thresholds stay raw.
 
 The port is always opened at 38400 8N1 with DTR and RTS low. Any other rate is refused on purpose: slower rates let runs of zero bytes hold the line low long enough to key the radio.
 

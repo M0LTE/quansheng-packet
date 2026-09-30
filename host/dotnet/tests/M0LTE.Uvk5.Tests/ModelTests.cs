@@ -49,6 +49,54 @@ public class ModelTests
     }
 
     [Fact]
+    public void Rssi_as_the_radio_shows_it()
+    {
+        // Tom's bench radio on 144.800 MHz into a terminated load: -107 dBm uncorrected, -127 on the screen.
+        Assert.Equal(-107, new Rssi(106).Dbm);
+        Assert.Equal(-127, new Rssi(106).DbmAt(144_800_000));
+        Assert.Equal(-127, new Rssi(107).DbmAt(144_800_000)); // the screen halves the raw value rounding down
+        Assert.Equal("S0", new Rssi(106).SMeterAt(144_800_000));
+        Assert.Equal("-127 dBm S0 (raw 106)", new Rssi(106).Describe(144_800_000));
+        Assert.Equal(106, new Rssi(106).Raw);
+    }
+
+    [Theory]
+    [InlineData(0, -15)]
+    [InlineData(50_000_000, -15)]
+    [InlineData(107_999_990, -15)]
+    [InlineData(108_000_000, -25)]
+    [InlineData(136_999_990, -25)]
+    [InlineData(137_000_000, -20)]
+    [InlineData(173_999_990, -20)]
+    [InlineData(174_000_000, -4)]
+    [InlineData(349_999_990, -4)]
+    [InlineData(350_000_000, -7)]
+    [InlineData(399_999_990, -7)]
+    [InlineData(400_000_000, -6)]
+    [InlineData(469_999_990, -6)]
+    [InlineData(470_000_000, -1)]
+    [InlineData(600_000_000, -1)]
+    public void Rssi_band_correction_edges(long hz, int db)
+    {
+        Assert.Equal(db, RssiScale.CorrectionDb(hz));
+        Assert.Equal(-60 + db, new Rssi(200).DbmAt(hz));
+    }
+
+    [Theory]
+    [InlineData(-160, "S0")]
+    [InlineData(-125, "S0")]
+    [InlineData(-124, "S1")]
+    [InlineData(-82, "S8")]
+    [InlineData(-77, "S8")]
+    [InlineData(-76, "S9")]
+    [InlineData(-67, "S9")]
+    [InlineData(-66, "S9+10")]
+    [InlineData(-43, "S9+33")]
+    [InlineData(40, "S9+99")]
+    public void S_meter_matches_the_radio(int dbm, string expected) =>
+        Assert.Equal(expected, RssiScale.SMeter(dbm));
+
+    [Fact]
     public void Settings_merge_and_ids()
     {
         var a = new RadioSettings { BusySquelchLevel = 1, Power = TxPower.Low };
