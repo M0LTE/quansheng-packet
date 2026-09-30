@@ -48,7 +48,7 @@ public enum StatusFlags : byte
     LateKeyPending = 1 << 7,
 }
 
-/// <summary>Status flags, second byte (GET_STATUS flags2).</summary>
+/// <summary>Status flags, second byte (GET_STATUS flags2). Bit 2 is reserved and always 0 (it was EEPROM overrides active; the stored override table is gone).</summary>
 [Flags]
 public enum StatusFlags2 : byte
 {
@@ -60,9 +60,6 @@ public enum StatusFlags2 : byte
 
     /// <summary>RAM register overrides active.</summary>
     RamOverridesActive = 1 << 1,
-
-    /// <summary>EEPROM register overrides active.</summary>
-    EepromOverridesActive = 1 << 2,
 
     /// <summary>LIVE_TX subscription option on.</summary>
     LiveTx = 1 << 3,
@@ -238,14 +235,14 @@ public enum OverridePhase : byte
 /// <param name="OrValue">OR value.</param>
 public readonly record struct RegisterOverride(OverridePhase Phase, byte Register, ushort AndMask, ushort OrValue);
 
-/// <summary>The override tables (REG_OVERRIDE reply).</summary>
+/// <summary>
+/// The RAM override table (REG_OVERRIDE reply). There is no stored table: the firmware keeps
+/// overrides in RAM only, bounded by time or key-ups, and a reboot clears them.
+/// </summary>
 public sealed record OverrideTables
 {
     /// <summary>RAM (trial) entries.</summary>
     public required IReadOnlyList<RegisterOverride> Ram { get; init; }
-
-    /// <summary>EEPROM entries (0x1D10 to 0x1D4F).</summary>
-    public required IReadOnlyList<RegisterOverride> Eeprom { get; init; }
 
     /// <summary>Time until the RAM table expires, null for no time bound.</summary>
     public TimeSpan? ExpiresIn { get; init; }

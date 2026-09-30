@@ -32,9 +32,9 @@
       "request_mode": "plain",
       "request": "ABCD050000500100012A52DCBA",
       "response_mode": "plain",
-      "response": "ABCD300080502C00010014000002504B5446572074657374000000000000070700007EFFFF03FF1F0000781414001E0008000005118CDCBA",
+      "response": "ABCD300080502C00010014000002504B5446572074657374000000000000070700003EFFFF03FF1F0000781414001E00080000058E77DCBA",
       "frames": [
-        { "id": "0x5080", "crc": "real", "body": "010014000002504B5446572074657374000000000000070700007EFFFF03FF1F0000781414001E0008000005" }
+        { "id": "0x5080", "crc": "real", "body": "010014000002504B5446572074657374000000000000070700003EFFFF03FF1F0000781414001E0008000005" }
       ]
     },
     {
@@ -43,9 +43,9 @@
       "request_mode": "obfuscated",
       "request": "ABCD0500163C15E62CD86FDCBA",
       "response_mode": "obfuscated",
-      "response": "ABCD3000963C38E62C9119402137850B4745BEA0620967922E910D402135D2471303977FE96FEBF92E9175543535CB401B03E9853328DCBA",
+      "response": "ABCD3000963C38E62C9119402137850B4745BEA0620967922E910D402135D2471303D77FE96FEBF92E9175543535CB401B03E985ACD3DCBA",
       "frames": [
-        { "id": "0x5080", "crc": "real", "body": "020014000002504B5446572074657374000000000000070700007EFFFF03FF1F0000781414001E0008000005" }
+        { "id": "0x5080", "crc": "real", "body": "020014000002504B5446572074657374000000000000070700003EFFFF03FF1F0000781414001E0008000005" }
       ]
     },
     {
@@ -181,9 +181,9 @@
       "request_mode": "plain",
       "request": "ABCD060004500200400037F3DCBA",
       "response_mode": "plain",
-      "response": "ABCD4600845042004000140000010079A10802000300045608055607061F082D090F0A1E0B050C050D010E020F14001001116E0012680013141420407F40804015FF16011703180019010140DCBA",
+      "response": "ABCD4400845040004000140000010079A10802000300045608055607082D090F0A1E0B050C050D010E020F14001001116E0012680013141420407F40804015FF1601170318001901467FDCBA",
       "frames": [
-        { "id": "0x5084", "crc": "real", "body": "4000140000010079A10802000300045608055607061F082D090F0A1E0B050C050D010E020F14001001116E0012680013141420407F40804015FF1601170318001901" }
+        { "id": "0x5084", "crc": "real", "body": "4000140000010079A10802000300045608055607082D090F0A1E0B050C050D010E020F14001001116E0012680013141420407F40804015FF1601170318001901" }
       ]
     },
     {
@@ -198,14 +198,14 @@
       ]
     },
     {
-      "name": "get_params_squelch_retired",
-      "state": "any state; GET_PARAMS for MIC_GAIN and 0x07 (SQUELCH, retired): UNSUPPORTED, detail 0x07",
+      "name": "get_params_retired",
+      "state": "any state; GET_PARAMS for 0x06 (MIC_GAIN, retired) and 0x07 (SQUELCH, retired): UNSUPPORTED, detail 0x06",
       "request_mode": "plain",
       "request": "ABCD08000450040044000607779DDCBA",
       "response_mode": "plain",
-      "response": "ABCD09008450050044081400077763DCBA",
+      "response": "ABCD09008450050044081400065673DCBA",
       "frames": [
-        { "id": "0x5084", "crc": "real", "body": "4408140007" }
+        { "id": "0x5084", "crc": "real", "body": "4408140006" }
       ]
     },
     {
@@ -221,24 +221,24 @@
     },
     {
       "name": "set_params_range",
-      "state": "after set_params: SQUELCH 5 with MIC_GAIN 32 (out of range): RANGE, detail 0x06, nothing applied",
+      "state": "after set_params and TX_TIMEOUT_S 60: BUSY_SQL_LEVEL 5 with TX_TIMEOUT_S 25 (not one of the timeouts): RANGE, detail 0x0A, nothing applied",
       "request_mode": "plain",
-      "request": "ABCD0A00055006004600190506208924DCBA",
+      "request": "ABCD0A0005500600460019050A199EC6DCBA",
       "response_mode": "plain",
-      "response": "ABCD0900855005004604140006C493DCBA",
+      "response": "ABCD090085500500460414000A4852DCBA",
       "frames": [
-        { "id": "0x5085", "crc": "real", "body": "4604140006" }
+        { "id": "0x5085", "crc": "real", "body": "460414000A" }
       ]
     },
     {
       "name": "save_params_revert",
-      "state": "settings block valid with MIC_GAIN 12 stored; RAM MIC_GAIN 30 and AFC 0; SAVE_PARAMS op 1 (REVERT)",
+      "state": "settings block valid with TX_TIMEOUT_S 60 stored; RAM TX_TIMEOUT_S 30 and AFC 0; SAVE_PARAMS op 1 (REVERT)",
       "request_mode": "plain",
       "request": "ABCD060006500200670127F7DCBA",
       "response_mode": "plain",
-      "response": "ABCD0C0086500800670028004000400086EBDCBA",
+      "response": "ABCD0C00865008006700280000044000DA59DCBA",
       "frames": [
-        { "id": "0x5086", "crc": "real", "body": "6700280040004000" }
+        { "id": "0x5086", "crc": "real", "body": "6700280000044000" }
       ]
     },
     {
@@ -294,6 +294,17 @@
       "response": "ABCD13008A500F0090001400010200FF022BF8FF000000AA29DCBA",
       "frames": [
         { "id": "0x508A", "crc": "real", "body": "90001400010200FF022BF8FF000000" }
+      ]
+    },
+    {
+      "name": "reg_override_commit_retired",
+      "state": "one RAM entry active; REG_OVERRIDE op 3 (COMMIT, retired with the stored table): UNSUPPORTED, detail 0",
+      "request_mode": "plain",
+      "request": "ABCD0A000A5006009503000000005A7BDCBA",
+      "response_mode": "plain",
+      "response": "ABCD09008A500500950814000054FDDCBA",
+      "frames": [
+        { "id": "0x508A", "crc": "real", "body": "9508140000" }
       ]
     },
     {

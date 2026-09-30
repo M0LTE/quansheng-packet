@@ -33,7 +33,7 @@ internal static class Program
           reg-dump                   all BK4819 registers except 0x5F
           eeprom-read ADDR LEN
           backup FILE                full EEPROM backup (read twice, sha256 beside it)
-          overrides                  list register override tables (v2)
+          overrides                  list the RAM register override table (v2)
           tone FREQ_HZ GAIN MS       raw level tone (v2); 'tone stop' stops it
 
         bootloader and images (radio powered on with PTT held for flash):
@@ -46,12 +46,13 @@ internal static class Program
         other:
           ports                      list serial ports
 
-        names for get/set: frequency, power, bandwidth, dev-wide, dev-narrow, mic-gain, busy-sql-level,
-          rx-gain, rx-dac-gain, tx-timeout, ptt-press, ptt-release, pa-enable-delay, pa-bias-delay,
+        names for get/set: frequency, power, bandwidth, dev-wide, dev-narrow, busy-sql-level, rx-gain,
+          rx-dac-gain, tx-timeout, ptt-press, ptt-release, pa-enable-delay, pa-bias-delay,
           serial-lock, busy-source, busy-rssi-open, busy-rssi-close, busy-hang, busy-sql-raw, agc,
           afc, backlight, key-lock (or the enum names). Values: 145.025MHz, high, narrow, 0x856 or
           2.8kHz, 20ms, 30s, on/off, -105dBm, auto. There is no squelch: receive audio is always
           open, and busy-sql-level (1 to 9) only sets the chip's squelch detector used for busy.
+          There is no mic gain: it is fixed at the maximum, and the deviation sets the level.
         """;
 
     private static async Task<int> Main(string[] args)
@@ -295,12 +296,6 @@ internal static class Program
                     Console.WriteLine($"  {o.Phase,-6} REG_{o.Register:X2} &0x{o.AndMask:X4} |0x{o.OrValue:X4}");
                 }
 
-                Console.WriteLine($"EEPROM ({t.Eeprom.Count})");
-                foreach (var o in t.Eeprom)
-                {
-                    Console.WriteLine($"  {o.Phase,-6} REG_{o.Register:X2} &0x{o.AndMask:X4} |0x{o.OrValue:X4}");
-                }
-
                 return 0;
             }
 
@@ -379,7 +374,6 @@ internal static class Program
         P("bandwidth", s.Bandwidth);
         P("dev-wide", s.DeviationWide);
         P("dev-narrow", s.DeviationNarrow);
-        P("mic-gain", s.MicGain);
         P("rx-gain", s.RxGain);
         P("rx-dac-gain", s.RxDacGain);
         P("tx-timeout", Ms(s.TxTimeout, "s"));
@@ -638,6 +632,7 @@ internal static class Program
             "busysqlraw" or "busysquelchraw" or "sqlraw" => RadioParameterId.BusySquelchRaw,
             "busysqllevel" or "busysquelchlevel" or "busylevel" => RadioParameterId.BusySquelchLevel,
             "squelch" or "sql" => throw new UsageException("there is no squelch: receive audio is always open. busy-sql-level (1 to 9) sets the busy detector"),
+            "micgain" or "mic" => throw new UsageException("there is no mic gain setting: the firmware fixes it at the maximum. dev-wide and dev-narrow set the transmit level"),
             "agc" or "agcfix" => RadioParameterId.AgcFix,
             _ => Enum.TryParse<RadioParameterId>(n, ignoreCase: true, out var id) && Enum.IsDefined(id) ? id : throw new UsageException($"unknown setting '{name}'"),
         };
@@ -670,7 +665,6 @@ internal static class Program
             RadioParameterId.Bandwidth => new RadioSettings { Bandwidth = Enum.Parse<Bandwidth>(s, ignoreCase: true) },
             RadioParameterId.DeviationWide => new RadioSettings { DeviationWide = Dev() },
             RadioParameterId.DeviationNarrow => new RadioSettings { DeviationNarrow = Dev() },
-            RadioParameterId.MicGain => new RadioSettings { MicGain = ParseInt(s) },
             RadioParameterId.BusySquelchLevel => new RadioSettings { BusySquelchLevel = ParseInt(s) },
             RadioParameterId.RxGain => new RadioSettings { RxGain = ParseInt(s) },
             RadioParameterId.RxDacGain => new RadioSettings { RxDacGain = ParseInt(s) },

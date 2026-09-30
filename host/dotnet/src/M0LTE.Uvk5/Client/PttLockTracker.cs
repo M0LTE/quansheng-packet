@@ -9,7 +9,7 @@ namespace M0LTE.Uvk5.Client;
 /// <list type="bullet">
 /// <item>v2, after a 0x50xx reply: <c>t_reply + lock_ms</c> (the reply says how long is left).</item>
 /// <item>v2, after a legacy reply: <c>t_reply + SERIAL_LOCK_MS + 2 ms</c>.</item>
-/// <item>v2, no reply (0x0602) or a lost reply: <c>t_write_done + 0.27 ms x frame_bytes + 12 ms + SERIAL_LOCK_MS</c>.</item>
+/// <item>v2, no reply (legacy 0x0602, which only a bench build acts on) or a lost reply: <c>t_write_done + 0.27 ms x frame_bytes + 12 ms + SERIAL_LOCK_MS</c>.</item>
 /// <item>v1: the lock is 1.0 to 1.5 s after the last frame and a press inside it is not refused but
 /// keyed late, eating the start of the frame; so the allowance (default 2 s) runs from the moment
 /// the last frame has left the wire.</item>

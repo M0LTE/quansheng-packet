@@ -92,6 +92,13 @@ public enum RadioCapabilities : uint
 
     /// <summary>TIME_SYNC timestamps are exact.</summary>
     ExactTimeSync = 1 << 10,
+
+    /// <summary>
+    /// A bench build: the legacy raw register write 0x0602 is built in, and writes any BK4819
+    /// register unchecked. Never set in a release build, which ignores 0x0602. This library never
+    /// sends 0x0602 to a v2 radio either way; it uses REG_WRITE, which is in every build.
+    /// </summary>
+    RawRegisterWrite = 1 << 11,
 }
 
 /// <summary>What this library can do with the connected radio, derived from its firmware kind and capabilities.</summary>
@@ -110,7 +117,7 @@ public enum K5Features
     /// <summary>Battery reading.</summary>
     Battery = 1 << 2,
 
-    /// <summary>BK4819 register read and write (packet firmware always has them; stock builds may not).</summary>
+    /// <summary>BK4819 register read and write (packet firmware always has them, on v2 through REG_READ and REG_WRITE; stock builds may not).</summary>
     Registers = 1 << 3,
 
     /// <summary>Reading and changing settings: v2 parameters, or on packet firmware v1 the EEPROM settings block (applied about 1.5 s after the session goes quiet).</summary>

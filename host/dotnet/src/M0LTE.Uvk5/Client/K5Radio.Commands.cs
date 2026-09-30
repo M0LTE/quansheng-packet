@@ -465,7 +465,10 @@ public sealed partial class K5Radio
         return new LevelToneResult(r.U8(), r.U16());
     }
 
-    /// <summary>OVERRIDE LIST (v2): the RAM and EEPROM register override tables.</summary>
+    /// <summary>
+    /// OVERRIDE LIST (v2): the RAM register override table. There is no stored table any more (ops
+    /// 3 COMMIT and 4 CLEAR_EEPROM are retired and the radio answers them UNSUPPORTED).
+    /// </summary>
     public Task<OverrideTables> GetOverridesAsync(CancellationToken cancellationToken = default) =>
         OverrideAsync(0, [], null, null, true, cancellationToken);
 
@@ -509,14 +512,6 @@ public sealed partial class K5Radio
     public Task<OverrideTables> ClearOverridesAsync(CancellationToken cancellationToken = default) =>
         OverrideAsync(2, [], null, null, true, cancellationToken);
 
-    /// <summary>OVERRIDE COMMIT (v2): the RAM table replaces the EEPROM table (0x1D10 to 0x1D4F) and the RAM table is cleared.</summary>
-    public Task<OverrideTables> CommitOverridesAsync(CancellationToken cancellationToken = default) =>
-        OverrideAsync(3, [], null, null, true, cancellationToken);
-
-    /// <summary>OVERRIDE CLEAR_EEPROM (v2): empties the EEPROM table.</summary>
-    public Task<OverrideTables> ClearEepromOverridesAsync(CancellationToken cancellationToken = default) =>
-        OverrideAsync(4, [], null, null, true, cancellationToken);
-
     private async Task<OverrideTables> OverrideAsync(int op, IReadOnlyList<RegisterOverride> entries, TimeSpan? expiry, int? keyUps, bool retryable, CancellationToken ct)
     {
         var w = new WireWriter().U8(op).U16(expiry is { } e ? (int)e.TotalSeconds : 0).U8(keyUps ?? 0).U8(entries.Count);
@@ -534,13 +529,11 @@ public sealed partial class K5Radio
             ushort sLeft = r.U16();
             byte kLeft = r.U8();
             var ram = ReadEntries(ref r, nRam);
-            int nEe = r.U8();
-            var ee = ReadEntries(ref r, nEe);
+            ReadEntries(ref r, r.U8());     // n_eeprom: always 0 now that the stored table is retired, kept in the layout
             outcome = "ok";
             return new OverrideTables
             {
                 Ram = ram,
-                Eeprom = ee,
                 ExpiresIn = sLeft == 0xFFFF ? null : TimeSpan.FromSeconds(sLeft),
                 KeyUpsLeft = kLeft == 0xFF ? null : kLeft,
             };

@@ -167,7 +167,9 @@ public class VectorTests
         Assert.Equal(TimeSpan.FromMilliseconds(20), fw.SerialLock);
         Assert.Equal(20, fw.EventRingCapacity);
         Assert.Equal(0, fw.SettingsBlockLayout);
-        Assert.Equal(24, fw.SupportedParameters.Count);
+        Assert.Equal(23, fw.SupportedParameters.Count);
+        Assert.DoesNotContain((RadioParameterId)0x06, fw.SupportedParameters);
+        Assert.DoesNotContain((RadioParameterId)0x07, fw.SupportedParameters);
         Assert.Equal(RadioCapabilities.LiveTx | RadioCapabilities.RssiBusyDetector | RadioCapabilities.LevelToneRaw
             | RadioCapabilities.RamRegisterOverrides | RadioCapabilities.Persistence | RadioCapabilities.ExactTimeSync, fw.Capabilities);
 
@@ -188,7 +190,7 @@ public class VectorTests
         Assert.Equal(1000u, sub.RadioTimeMs);
 
         var all = await radio.GetSettingsAsync(cancellationToken: Ct);
-        Assert.Equal(24, all.SetIds.Count);
+        Assert.Equal(23, all.SetIds.Count);
         Assert.Equal(1, all.BusySquelchLevel);
         Assert.Equal(45, all.RxGain);
         Assert.Equal(0x856, all.DeviationWide!.Value.Register);
@@ -201,17 +203,17 @@ public class VectorTests
         Assert.Equal(45, stored.RxGain);
 
         var retired = await Assert.ThrowsAsync<K5CommandRejectedException>(() =>
-            radio.GetSettingsAsync(false, [RadioParameterId.MicGain, (RadioParameterId)0x07], Ct));
+            radio.GetSettingsAsync(false, [(RadioParameterId)0x06, (RadioParameterId)0x07], Ct));
         Assert.Equal(K5Status.Unsupported, retired.Status);
-        Assert.Equal(0x07, retired.Detail);
-        Assert.Contains("no squelch", retired.Message);
+        Assert.Equal(0x06, retired.Detail);
+        Assert.Contains("mic gain is fixed at the maximum", retired.Message);
 
         var set = await radio.SetSettingsAsync(new RadioSettings { FrequencyHz = 433_500_000, BusySquelchLevel = 3, DeviationWide = new Deviation(0x800) }, cancellationToken: Ct);
         Assert.True(set.TxAllowed);
         Assert.True(set.Retuned);
         Assert.Equal(433_500_000, set.Applied.FrequencyHz);
 
-        Assert.Equal([RadioParameterId.MicGain, RadioParameterId.Afc], await radio.RevertSettingsAsync(Ct));
+        Assert.Equal([RadioParameterId.TxTimeoutSeconds, RadioParameterId.Afc], await radio.RevertSettingsAsync(Ct));
 
         await radio.SyncClockAsync(1, Ct);
         Assert.True(radio.Clock.IsEstimated);
@@ -277,7 +279,8 @@ public class VectorTests
     [InlineData("level_tone_raw")]
     [InlineData("level_tone_uncalibrated")]
     [InlineData("set_params_range")]
-    [InlineData("get_params_squelch_retired")]
+    [InlineData("get_params_retired")]
+    [InlineData("reg_override_commit_retired")]
     public async Task Simulator_answers_like_the_firmware(string name)
     {
         using var sim = new Simulation.SimulatedRadio(new Simulation.SimulatedRadioOptions { Version = "PKTFW test", TimeProvider = new Microsoft.Extensions.Time.Testing.FakeTimeProvider() });
@@ -369,7 +372,7 @@ public class VectorTests
                 MessageIds.GetInfo => Get("get_info"),
                 MessageIds.GetStatus => Get("get_status"),
                 MessageIds.Subscribe => Get("subscribe"),
-                MessageIds.GetParams => body[1] == 1 ? Get("get_params_stored") : body.Length == 2 ? Get("get_params_all") : Get("get_params_squelch_retired"),
+                MessageIds.GetParams => body[1] == 1 ? Get("get_params_stored") : body.Length == 2 ? Get("get_params_all") : Get("get_params_retired"),
                 MessageIds.SetParams => Get("set_params"),
                 MessageIds.SaveParams => Get("save_params_revert"),
                 MessageIds.TimeSync => Get("time_sync"),

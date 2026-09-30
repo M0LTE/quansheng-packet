@@ -40,6 +40,14 @@ public sealed record SimulatedRadioOptions
     /// <summary>Stock firmware only: whether it has the BK4819 register commands (0x0601/0x0602).</summary>
     public bool StockHasRegisterCommands { get; init; }
 
+    /// <summary>
+    /// Packet firmware v2 only: behave as a bench build, with the legacy raw register write 0x0602
+    /// built in (GET_INFO caps bit 11). By default the simulator is a release build, which ignores
+    /// 0x0602 like any unknown legacy command: no reply, no write, but the frame still starts the
+    /// PTT lock. Packet firmware v1 always has 0x0602.
+    /// </summary>
+    public bool RawRegisterWrite { get; init; }
+
     /// <summary>Delay after a PTT release before deferred events are sent (spec: 2 ms). Zero sends them at once.</summary>
     public TimeSpan DeferralResumeDelay { get; init; } = TimeSpan.FromMilliseconds(2);
 
@@ -77,12 +85,14 @@ public sealed record SimulatedTransmission(uint PressedAtMs, uint RfAtMs, uint? 
 /// <remarks>
 /// <para>Modelled: framing and both serial modes (chosen per hello from the raw id bytes), the
 /// legacy commands with their quirks (session id on EEPROM commands, 0xFFFF CRC on legacy replies,
-/// 0x0602 silent, packet firmware refusing unaligned or calibration EEPROM writes with no reply),
+/// 0x0602 silent, and ignored altogether by a v2 release build unless
+/// <see cref="SimulatedRadioOptions.RawRegisterWrite"/>, packet firmware refusing unaligned or
+/// calibration EEPROM writes with no reply),
 /// the PTT lock per firmware (v2: SERIAL_LOCK_MS with late key or refusal; v1: 1.0 to 1.5 s with a
 /// silent late key; stock: 6 s after a hello or EEPROM command), the AIOC (a host write releases
 /// PTT; radio output dropped while PTT is held), every v2 command, the stored-event ring with
 /// deferral while keyed, EVENTS_LOST and replay, heartbeats, RSSI stream, busy edges and burst
-/// reports, TX start/end/refused/timeout, level tone, trial register overrides with expiry, the v1
+/// reports, TX start/end/refused/timeout, level tone, RAM-only trial register overrides with expiry, the v1
 /// settings reload after EEPROM writes, and the power-on banner.</para>
 /// <para>Not modelled: audio, the chip's real register semantics, frequency records in EEPROM
 /// (frequency persists in RAM only), byte timing on the wire (frames arrive whole and at once).</para>
@@ -725,7 +735,7 @@ public sealed partial class SimulatedRadio : IDisposable
             case MessageIds.RegRead when HasRegisterCommands() && b.Length >= 1:
                 SendLegacyReply(MessageIds.RegRead, new WireWriter().U8(b[0]).U16(ReadReg(b[0], true)).ToArray());
                 break;
-            case MessageIds.RegWrite when HasRegisterCommands() && b.Length >= 3:
+            case MessageIds.RegWrite when HasRawRegisterWrite() && b.Length >= 3:
                 _regs[b[0] & 0x7F] = BinaryPrimitives.ReadUInt16LittleEndian(b[1..]);
                 break;
             default:
@@ -740,6 +750,9 @@ public sealed partial class SimulatedRadio : IDisposable
     }
 
     private bool HasRegisterCommands() => _options.Firmware != FirmwareKind.Stock || _options.StockHasRegisterCommands;
+
+    /// <summary>0x0602: v1 always, stock if it has the register commands, v2 only in a bench build.</summary>
+    private bool HasRawRegisterWrite() => _options.Firmware == FirmwareKind.PacketV2 ? _options.RawRegisterWrite : HasRegisterCommands();
 
     private void StockLock()
     {
@@ -913,7 +926,8 @@ public sealed partial class SimulatedRadio : IDisposable
             e[i] = (byte)rnd.Next(256);
         }
 
-        byte[] settings = [0x01, 0x01, 0x04, 0x1F, 0x56, 0x08, 0x56, 0x07, 0xFF, 0x0F, 0x03, 0x00, 0x00, 0xFF, 0xFF, 0xFF];
+        // Bytes 3 (was the mic gain) and 11 (was the battery type) are reserved: the firmware writes 0xFF.
+        byte[] settings = [0x01, 0x01, 0x04, 0xFF, 0x56, 0x08, 0x56, 0x07, 0xFF, 0x0F, 0x03, 0xFF, 0x00, 0xFF, 0xFF, 0xFF];
         settings.CopyTo(e, 0x1D00);
         byte[] timing = [0x05, 0x05, 0x01, 0x02, 0xFF, 0xFF, 0xFF, 0xFF];
         timing.CopyTo(e, 0x1D50);

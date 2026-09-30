@@ -20,9 +20,6 @@ public enum RadioParameterId : byte
     /// <summary>Narrow deviation register (u16).</summary>
     DeviationNarrow = 0x05,
 
-    /// <summary>Mic gain, REG_7D&lt;4:0&gt; (u8).</summary>
-    MicGain = 0x06,
-
     /// <summary>RX AF gain 2, REG_48&lt;9:4&gt; (u8).</summary>
     RxGain = 0x08,
 
@@ -88,9 +85,12 @@ public enum RadioParameterId : byte
 /// open. Parameter 0x07 (SQUELCH) is retired, and the radio answers UNSUPPORTED if asked for it.
 /// The chip's squelch result survives only as a carrier detector for busy, set by
 /// <see cref="BusySquelchLevel"/> and <see cref="BusySquelchThresholds"/>.
+/// <para>There is no mic gain setting either: the firmware fixes it at the maximum (31), because the
+/// whole range moved the deviation by only about 0.5 dB. Parameter 0x06 (MIC_GAIN) is retired the
+/// same way; the deviation settings set the transmit level.</para>
+/// <para>Values are validated against the protocol's ranges when a change is sent, before
+/// anything goes to the radio.</para>
 /// </remarks>
-/// <remarks>Values are validated against the protocol's ranges when a change is sent, before
-/// anything goes to the radio.</remarks>
 public sealed record RadioSettings
 {
     /// <summary>Frequency, Hz: 50 to 600 MHz, a multiple of 10 Hz. Moves the radio out of memory-channel mode to the band slot for that frequency.</summary>
@@ -107,9 +107,6 @@ public sealed record RadioSettings
 
     /// <summary>Deviation used on narrow channels (default 0x756).</summary>
     public Deviation? DeviationNarrow { get; init; }
-
-    /// <summary>Mic gain, 0 to 31 (barely moves deviation on the DIG path; default 31).</summary>
-    public int? MicGain { get; init; }
 
     /// <summary>RX AF gain 2, REG_48&lt;9:4&gt;, 0 to 63 in 0.5 dB steps.</summary>
     public int? RxGain { get; init; }

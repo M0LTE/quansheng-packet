@@ -89,7 +89,7 @@ public class CommandTests
         Assert.Equal(2.8, all.DeviationWide!.Value.Kilohertz, 3);
         Assert.Equal(TimeSpan.FromMilliseconds(20), all.SerialLock);
         Assert.Equal(AgcSetting.Auto, all.Agc);
-        Assert.Equal(24, all.SetIds.Count);
+        Assert.Equal(23, all.SetIds.Count);     // 0x01 to 0x19 except the retired 0x06 and 0x07
 
         var some = await rig.Radio.GetSettingsAsync(false, [RadioParameterId.BusySquelchLevel, RadioParameterId.Power], Ct);
         Assert.Equal([RadioParameterId.Power, RadioParameterId.BusySquelchLevel], some.SetIds);
@@ -153,10 +153,11 @@ public class CommandTests
     public async Task There_is_no_squelch()
     {
         await using var rig = await Rig.StartAsync();
-        Assert.Equal(0x03FFFF7Eu, rig.Radio.Firmware.SupportedParameters.Aggregate(0u, (m, id) => m | (1u << (int)id)));
+        Assert.Equal(0x03FFFF3Eu, rig.Radio.Firmware.SupportedParameters.Aggregate(0u, (m, id) => m | (1u << (int)id)));
         var e = await Assert.ThrowsAsync<K5CommandRejectedException>(() => rig.Radio.GetSettingsAsync(false, [(RadioParameterId)0x07], Ct));
         Assert.Equal(K5Status.Unsupported, e.Status);
         Assert.Equal(0x07, e.Detail);
+        Assert.Contains("no squelch", e.Message);
 
         // The busy detector level never mutes anything; busy follows the chip's detector.
         await rig.Radio.SetSettingsAsync(new RadioSettings { BusySquelchLevel = 9 }, cancellationToken: Ct);
@@ -169,6 +170,18 @@ public class CommandTests
         Assert.Equal(0xFF, s.Channel);
         rig.Sim.StopCarrier();
         Assert.Equal(RadioState.Idle, (await rig.Radio.GetStatusAsync(Ct)).State);
+    }
+
+    [Fact]
+    public async Task There_is_no_mic_gain()
+    {
+        await using var rig = await Rig.StartAsync();
+        Assert.False(rig.Radio.Firmware.Supports((RadioParameterId)0x06));
+        Assert.DoesNotContain((RadioParameterId)0x06, (await rig.Radio.GetSettingsAsync(cancellationToken: Ct)).SetIds);
+        var e = await Assert.ThrowsAsync<K5CommandRejectedException>(() => rig.Radio.GetSettingsAsync(true, [RadioParameterId.RxGain, (RadioParameterId)0x06], Ct));
+        Assert.Equal(K5Status.Unsupported, e.Status);
+        Assert.Equal(0x06, e.Detail);
+        Assert.Contains("fixed at the maximum", e.Message);
     }
 
     [Fact]
@@ -261,6 +274,33 @@ public class CommandTests
         Assert.Equal([0x1234, 0xE94A], back);
         Assert.Equal(0xE94A, await rig.Radio.ReadRegisterAsync(0x7D, Ct));
         Assert.Equal(3, rig.Sim.ReceivedIds.Count(i => i == 0x5008));   // two for the dump, one single read
+        Assert.DoesNotContain((ushort)0x0602, rig.Sim.ReceivedIds);      // v2 writes go through REG_WRITE only
+    }
+
+    [Fact]
+    public async Task V2_release_build_ignores_legacy_register_write_but_starts_the_lock()
+    {
+        var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
+        using var sim = new SimulatedRadio(new SimulatedRadioOptions { TimeProvider = time });
+        time.Advance(TimeSpan.FromSeconds(1));
+        Assert.Equal(TimeSpan.Zero, sim.LockRemaining);
+        await sim.HostStream.WriteAsync(Protocol.K5FrameCodec.EncodePayload(Protocol.K5FrameCodec.BuildPayload(0x0602, [0x2B, 0x34, 0x12]), true), Ct);
+        Assert.Equal(0x102B, sim.Registers[0x2B]);                       // not written
+        Assert.Equal(TimeSpan.FromMilliseconds(20), sim.LockRemaining);  // but the frame counts
+        Assert.Contains((ushort)0x0602, sim.ReceivedIds);
+        Assert.Empty(sim.Violations);
+    }
+
+    [Fact]
+    public async Task V2_bench_build_has_legacy_register_write()
+    {
+        await using var rig = await Rig.StartAsync(simOptions: new SimulatedRadioOptions { RawRegisterWrite = true });
+        Assert.True(rig.Radio.Firmware.Capabilities.HasFlag(RadioCapabilities.RawRegisterWrite));
+        await rig.Sim.HostStream.WriteAsync(Protocol.K5FrameCodec.EncodePayload(Protocol.K5FrameCodec.BuildPayload(0x0602, [0x2B, 0x34, 0x12]), true), Ct);
+        Assert.Equal(0x1234, rig.Sim.Registers[0x2B]);
+
+        await using var release = await Rig.StartAsync();
+        Assert.False(release.Radio.Firmware.Capabilities.HasFlag(RadioCapabilities.RawRegisterWrite));
     }
 
     [Fact]
@@ -275,7 +315,7 @@ public class CommandTests
     }
 
     [Fact]
-    public async Task Overrides_add_list_commit_clear()
+    public async Task Overrides_add_list_clear_in_ram_only()
     {
         await using var rig = await Rig.StartAsync();
         var t = await rig.Radio.AddOverridesAsync([new RegisterOverride(OverridePhase.Rx, 0x2B, 0xFFF8, 0)], TimeSpan.FromSeconds(60), null, Ct);
@@ -283,15 +323,14 @@ public class CommandTests
         Assert.Equal(TimeSpan.FromSeconds(60), t.ExpiresIn);
         Assert.Null(t.KeyUpsLeft);
         Assert.Equal(0x1028, rig.Sim.Registers[0x2B]);   // RX-phase applied at once: 0x102B & 0xFFF8
+        Assert.True((await rig.Radio.GetStatusAsync(Ct)).Flags2.HasFlag(StatusFlags2.RamOverridesActive));
 
         var listed = await rig.Radio.GetOverridesAsync(Ct);
         Assert.Single(listed.Ram);
-        var committed = await rig.Radio.CommitOverridesAsync(Ct);
-        Assert.Empty(committed.Ram);
-        Assert.Single(committed.Eeprom);
-        Assert.Equal(0x02, rig.Sim.Eeprom[0x1D10]);
-        var cleared = await rig.Radio.ClearEepromOverridesAsync(Ct);
-        Assert.Empty(cleared.Eeprom);
+        var cleared = await rig.Radio.ClearOverridesAsync(Ct);
+        Assert.Empty(cleared.Ram);
+        Assert.Null(cleared.ExpiresIn);
+        Assert.All(rig.Sim.Eeprom[0x1D10..0x1D50], b => Assert.Equal(0xFF, b));   // nothing stored
     }
 
     [Fact]
@@ -359,7 +398,6 @@ public class CommandTests
         var r = await rig.Radio.SetSettingsAsync(new RadioSettings { BusySquelchLevel = 3, DeviationWide = new Deviation(0x762), PaBiasDelay = TimeSpan.FromMilliseconds(4) }, cancellationToken: Ct);
         Assert.Equal(TimeSpan.FromSeconds(1.5), r.AppliesAfterQuiet);
         Assert.Equal(3, r.Applied.BusySquelchLevel);
-        Assert.Null(r.Applied.MicGain);
         Assert.Equal(3, rig.Sim.Eeprom[0x1D01]);
         Assert.Equal(0x62, rig.Sim.Eeprom[0x1D04]);
         Assert.Equal(4, rig.Sim.Eeprom[0x1D53]);

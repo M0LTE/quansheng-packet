@@ -166,7 +166,6 @@ public sealed partial class SimulatedRadio
             RadioParameterId.Bandwidth => (ulong)U8(0x1D5D, 0, 1, 0, ChannelBlockInUse()),
             RadioParameterId.DeviationWide => (ulong)U16(0x1D04, Deviation.MaxRegister, 0x856, v1),
             RadioParameterId.DeviationNarrow => (ulong)U16(0x1D06, Deviation.MaxRegister, 0x756, v1),
-            RadioParameterId.MicGain => (ulong)U8(0x1D03, 0, 31, 31, v1),
             RadioParameterId.BusySquelchLevel => (ulong)Math.Max(1, U8(0x1D01, 0, 9, 1, v1)),    // a stored 0 (an old open squelch) reads as 1
             RadioParameterId.RxGain => (ulong)U8(0x1D08, 0, 63, 50, v1),
             RadioParameterId.RxDacGain => (ulong)U8(0x1D09, 0, 15, 15, v1),
@@ -587,6 +586,10 @@ public sealed partial class SimulatedRadio
 
         var caps = RadioCapabilities.LiveTx | RadioCapabilities.RssiBusyDetector | RadioCapabilities.LevelToneRaw
             | RadioCapabilities.RamRegisterOverrides | RadioCapabilities.Persistence | RadioCapabilities.ExactTimeSync;
+        if (_options.RawRegisterWrite)
+        {
+            caps |= RadioCapabilities.RawRegisterWrite;
+        }
         if (_eeprom[0x1D6F] != 0xFF && V2BlockValid())
         {
             caps |= RadioCapabilities.LevelToneCalibrated;
@@ -726,9 +729,9 @@ public sealed partial class SimulatedRadio
         var seen = new HashSet<RadioParameterId>();
         foreach (var p in ids)
         {
-            if ((byte)p == ParameterCodec.RetiredSquelch)
+            if (ParameterCodec.IsRetired((byte)p))
             {
-                Error(id, tag, K5Status.Unsupported, (byte)p);      // the firmware has no squelch
+                Error(id, tag, K5Status.Unsupported, (byte)p);      // no mic gain setting, no squelch
                 return;
             }
 
@@ -771,9 +774,9 @@ public sealed partial class SimulatedRadio
         {
             var p = (RadioParameterId)a[pos];
             int size = ParameterCodec.SizeOf(p);
-            if ((byte)p == ParameterCodec.RetiredSquelch)
+            if (ParameterCodec.IsRetired((byte)p))
             {
-                Error(id, tag, K5Status.Unsupported, (byte)p);
+                Error(id, tag, K5Status.Unsupported, (byte)p);      // no mic gain setting, no squelch
                 return;
             }
 
@@ -884,7 +887,6 @@ public sealed partial class SimulatedRadio
         RadioParameterId.Power => v <= 2,
         RadioParameterId.Bandwidth => v <= 1,
         RadioParameterId.DeviationWide or RadioParameterId.DeviationNarrow => v <= Deviation.MaxRegister,
-        RadioParameterId.MicGain => v <= 31,
         RadioParameterId.BusySquelchLevel => v is >= 1 and <= 9,
         RadioParameterId.RxGain => v <= 63,
         RadioParameterId.RxDacGain => v <= 15,
@@ -930,7 +932,6 @@ public sealed partial class SimulatedRadio
                 break;
             case RadioParameterId.DeviationWide: W16(0x1D04, v); break;
             case RadioParameterId.DeviationNarrow: W16(0x1D06, v); break;
-            case RadioParameterId.MicGain: W8(0x1D03, v); break;
             case RadioParameterId.BusySquelchLevel: W8(0x1D01, v); break;
             case RadioParameterId.RxGain: W8(0x1D08, v); break;
             case RadioParameterId.RxDacGain: W8(0x1D09, v); break;
@@ -1123,33 +1124,9 @@ public sealed partial class SimulatedRadio
         Reply(id, tag, K5Status.Ok, w.ToArray());
     }
 
-    private List<RegisterOverride> EepromOverrides()
-    {
-        var list = new List<RegisterOverride>();
-        if (!SettingsBlockValid())
-        {
-            return list;
-        }
-
-        for (int i = 0; i < 8; i++)
-        {
-            int at = 0x1D10 + 8 * i;
-            byte phase = _eeprom[at];
-            byte reg = _eeprom[at + 1];
-            if (phase is 0 or 0xFF || reg == 0xFF)
-            {
-                break;
-            }
-
-            list.Add(new RegisterOverride((OverridePhase)phase, reg, BinaryPrimitives.ReadUInt16LittleEndian(_eeprom.AsSpan(at + 2)), BinaryPrimitives.ReadUInt16LittleEndian(_eeprom.AsSpan(at + 4))));
-        }
-
-        return list;
-    }
-
     private void Override(ushort id, byte tag, byte[] a)
     {
-        if (a.Length < 5 || a.Length != 5 + 6 * a[4])
+        if (a.Length < 5)
         {
             Error(id, tag, K5Status.BadLength);
             return;
@@ -1159,6 +1136,24 @@ public sealed partial class SimulatedRadio
         int expiryS = BinaryPrimitives.ReadUInt16LittleEndian(a.AsSpan(1));
         int keyUps = a[3];
         int n = a[4];
+        if (op > 4)
+        {
+            Error(id, tag, K5Status.Range, 0);
+            return;
+        }
+
+        if (a.Length != 5 + 6 * n)
+        {
+            Error(id, tag, K5Status.BadLength);
+            return;
+        }
+
+        if (op != 1 && n != 0)
+        {
+            Error(id, tag, K5Status.Range, 4);
+            return;
+        }
+
         switch (op)
         {
             case 0:
@@ -1216,32 +1211,9 @@ public sealed partial class SimulatedRadio
                 _overrideKeyUps = 0;
                 break;
             case 3 or 4:
-                if (!SettingsBlockValid())
-                {
-                    Error(id, tag, K5Status.Eeprom);
-                    return;
-                }
-
-                Array.Fill(_eeprom, (byte)0xFF, 0x1D10, 0x40);
-                if (op == 3)
-                {
-                    for (int i = 0; i < _ramOverrides.Count; i++)
-                    {
-                        var e = _ramOverrides[i];
-                        int at = 0x1D10 + 8 * i;
-                        _eeprom[at] = (byte)e.Phase;
-                        _eeprom[at + 1] = e.Register;
-                        BinaryPrimitives.WriteUInt16LittleEndian(_eeprom.AsSpan(at + 2), e.AndMask);
-                        BinaryPrimitives.WriteUInt16LittleEndian(_eeprom.AsSpan(at + 4), e.OrValue);
-                    }
-
-                    _ramOverrides.Clear();
-                    Cancel(ref _overrideTimer);
-                    _overrideKeyUps = 0;
-                }
-
-                Counter(13);
-                break;
+                // COMMIT and CLEAR_EEPROM: retired with the stored table.
+                Error(id, tag, K5Status.Unsupported, 0);
+                return;
             default:
                 Error(id, tag, K5Status.Range, 0);
                 return;
@@ -1254,13 +1226,7 @@ public sealed partial class SimulatedRadio
             w.U8((int)e.Phase).U8(e.Register).U16(e.AndMask).U16(e.OrValue);
         }
 
-        var ee = EepromOverrides();
-        w.U8(ee.Count);
-        foreach (var e in ee)
-        {
-            w.U8((int)e.Phase).U8(e.Register).U16(e.AndMask).U16(e.OrValue);
-        }
-
+        w.U8(0);        // n_eeprom: there is no stored table, kept so the layout is unchanged
         Reply(id, tag, K5Status.Ok, w.ToArray());
     }
 
