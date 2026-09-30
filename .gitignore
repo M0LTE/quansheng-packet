@@ -9,3 +9,4 @@ compile_commands.json
 .vscode
 /out
 k5_eeprom.raw
+.claude/
