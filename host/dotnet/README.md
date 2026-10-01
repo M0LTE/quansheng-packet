@@ -137,7 +137,7 @@ The kind is detected from the hello reply (the `PKT2` marker, else a version sta
 - EEPROM 0x1E00 to 0x1FFF (factory calibration) is never written. Writes must be 8-byte aligned.
 - EEPROM writes need a verified backup of this radio: `await radio.BackupEepromAsync()` (reads twice, compares), or `AuthorizeEepromWritesAsync(await EepromBackup.LoadAsync(path))`, which checks the backup's calibration area against a fresh read so another radio's backup is refused. Backups use k5.py's format (`.sha256` and `.json` beside the image).
 - Register writes refuse 0x00, 0x30, 0x33, 0x36 to 0x39, 0x3B, 0x3C and above 0x7F, on every firmware. On v2 they go through `REG_WRITE`, which the firmware checks too; the library never sends the unchecked legacy 0x0602 to a v2 radio. Release builds of the firmware leave 0x0602 out altogether; only a bench build has it (`RadioCapabilities.RawRegisterWrite`, GET_INFO caps bit 11).
-- Trial register overrides (`AddOverridesAsync`) live in RAM only and are bounded by time or key-ups, after which the radio reverts them itself; a reboot clears them too. There is no stored override table.
+- Trial register overrides (`AddOverridesAsync`) live in RAM only and are bounded by time or key-ups, after which the radio reverts them itself; a reboot clears them too. There is no stored override table. From the command line: `k5ctl override add rx:0x54=0x9009 --expiry 300` (or `REG&AND|OR` to change some bits), `k5ctl overrides` to list them, `k5ctl override clear`; with no bound given, k5ctl sets a 600 s expiry.
 - No serial keying, ever.
 - `K5RadioOptions.Audit` is told about every change sent to the radio.
 
