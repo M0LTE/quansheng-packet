@@ -34,6 +34,12 @@ internal static class Program
           eeprom-read ADDR LEN
           backup FILE                full EEPROM backup (read twice, sha256 beside it)
           overrides                  list the RAM register override table (v2)
+          override add PHASE:REG=VALUE ... [--expiry S] [--key-ups N]
+                                     trial register overrides in RAM (v2); PHASE rx, tx or both;
+                                     REG=VALUE sets the whole register, REG&AND|OR masks it
+                                     (rx:0x54=0x9009, both:0x7E&0xFFF8|0x0003); the radio reverts
+                                     them after --expiry seconds (default 600) or --key-ups
+          override clear             empty the RAM override table (v2)
           tone FREQ_HZ GAIN MS       raw level tone (v2); 'tone stop' stops it
 
         bootloader and images (radio powered on with PTT held for flash):
@@ -289,16 +295,36 @@ internal static class Program
             }
 
             case "overrides":
-            {
-                var t = await radio.GetOverridesAsync(ct);
-                Console.WriteLine($"RAM ({t.Ram.Count}), expires in {(t.ExpiresIn is { } e ? $"{e.TotalSeconds:F0} s" : "never")}, key-ups left {(t.KeyUpsLeft?.ToString(CultureInfo.InvariantCulture) ?? "no bound")}");
-                foreach (var o in t.Ram)
-                {
-                    Console.WriteLine($"  {o.Phase,-6} REG_{o.Register:X2} &0x{o.AndMask:X4} |0x{o.OrValue:X4}");
-                }
-
+                PrintOverrides(await radio.GetOverridesAsync(ct));
                 return 0;
-            }
+            case "override":
+                switch (Need(rest, 0, "add or clear"))
+                {
+                    case "add":
+                    {
+                        var entries = rest.Skip(1).Select(ParseOverride).ToList();
+                        if (entries.Count == 0)
+                        {
+                            throw new UsageException("override add needs at least one PHASE:REG=VALUE");
+                        }
+
+                        int? keyUps = a.Option("--key-ups") is { } k ? ParseInt(k) : null;
+                        TimeSpan? expiry = a.Option("--expiry") is { } x ? TimeSpan.FromSeconds(ParseInt(x)) : null;
+                        if (expiry is null && keyUps is null)
+                        {
+                            expiry = TimeSpan.FromSeconds(600);   // a trial never outlives its bound
+                        }
+
+                        PrintOverrides(await radio.AddOverridesAsync(entries, expiry, keyUps, ct));
+                        return 0;
+                    }
+
+                    case "clear":
+                        PrintOverrides(await radio.ClearOverridesAsync(ct));
+                        return 0;
+                    default:
+                        throw new UsageException($"unknown override command '{rest[0]}' (add or clear)");
+                }
 
             case "tone":
                 if (rest.Count == 1 && rest[0] == "stop")
@@ -313,6 +339,59 @@ internal static class Program
             default:
                 throw new UsageException($"unknown command '{cmd}'");
         }
+    }
+
+    private static void PrintOverrides(OverrideTables t)
+    {
+        Console.WriteLine($"RAM ({t.Ram.Count}), expires in {(t.ExpiresIn is { } e ? $"{e.TotalSeconds:F0} s" : "never")}, key-ups left {(t.KeyUpsLeft?.ToString(CultureInfo.InvariantCulture) ?? "no bound")}");
+        foreach (var o in t.Ram)
+        {
+            Console.WriteLine($"  {o.Phase,-6} REG_{o.Register:X2} &0x{o.AndMask:X4} |0x{o.OrValue:X4}");
+        }
+    }
+
+    /// <summary>PHASE:REG=VALUE (the whole register) or PHASE:REG&amp;AND|OR (masked), PHASE rx, tx or both.</summary>
+    internal static RegisterOverride ParseOverride(string text)
+    {
+        int colon = text.IndexOf(':');
+        if (colon < 0)
+        {
+            throw new UsageException($"override '{text}': expected PHASE:REG=VALUE or PHASE:REG&AND|OR");
+        }
+
+        var phase = text[..colon].ToLowerInvariant() switch
+        {
+            "rx" => OverridePhase.Rx,
+            "tx" => OverridePhase.Tx,
+            "both" => OverridePhase.Rx | OverridePhase.Tx,
+            _ => throw new UsageException($"override '{text}': phase must be rx, tx or both"),
+        };
+        string body = text[(colon + 1)..];
+        int reg;
+        int and, or;
+        if (body.IndexOf('=') is var eq and >= 0)
+        {
+            reg = ParseInt(body[..eq]);
+            and = 0;
+            or = ParseInt(body[(eq + 1)..]);
+        }
+        else if (body.IndexOf('&') is var amp and >= 0 && body.IndexOf('|') is var bar && bar > amp)
+        {
+            reg = ParseInt(body[..amp]);
+            and = ParseInt(body[(amp + 1)..bar]);
+            or = ParseInt(body[(bar + 1)..]);
+        }
+        else
+        {
+            throw new UsageException($"override '{text}': expected PHASE:REG=VALUE or PHASE:REG&AND|OR");
+        }
+
+        if (reg is < 0 or > 0x7F || and is < 0 or > 0xFFFF || or is < 0 or > 0xFFFF)
+        {
+            throw new UsageException($"override '{text}': register 0x00 to 0x7F, values 16 bit");
+        }
+
+        return new RegisterOverride(phase, (byte)reg, (ushort)and, (ushort)or);
     }
 
     private static void PrintInfo(K5Radio radio)
@@ -748,7 +827,7 @@ internal static class Program
     /// <summary>Minimal argument parsing: options with values, flags, and positional arguments.</summary>
     private sealed class Args
     {
-        private static readonly HashSet<string> WithValue = ["-p", "--port", "--sim", "--seconds", "--heartbeat", "--stream", "--aioc", "--backup", "--allow-bootloader", "--version-string", "--wait", "--version"];
+        private static readonly HashSet<string> WithValue = ["-p", "--port", "--sim", "--seconds", "--heartbeat", "--stream", "--aioc", "--backup", "--allow-bootloader", "--version-string", "--wait", "--version", "--expiry", "--key-ups"];
         private readonly List<(string Name, string? Value)> _opts = [];
 
         public Args(string[] args)
